@@ -269,8 +269,8 @@ const App = (() => {
 
   function renderOptimizedRoute(container) {
     const r = optimizedRoute;
-    const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
-    const mapsUrl = RouteOptimizer.generateMapsUrl(home, r.orderedStores);
+    // Google Maps URLは後からGPS現在地で差し替え
+    let mapsUrl = RouteOptimizer.generateMapsUrl({ lat: Number(config.home_lat), lng: Number(config.home_lng) }, r.orderedStores);
     const hours = Math.floor(r.estimatedMinutes / 60);
     const mins = r.estimatedMinutes % 60;
 
@@ -293,12 +293,25 @@ const App = (() => {
 
     html += `
       <div class="btn-group">
-        <a href="${mapsUrl}" target="_blank" class="btn btn-outline" style="flex:1;text-decoration:none;">Google Maps</a>
+        <a href="${mapsUrl}" target="_blank" class="btn btn-outline" style="flex:1;text-decoration:none;" id="btn-maps-link">Google Maps</a>
         <button class="btn btn-success" style="flex:1;" id="btn-start-patrol">巡回開始</button>
       </div>`;
     html += '</div>';
 
     container.insertAdjacentHTML('beforeend', html);
+
+    // GPS現在地でGoogle Maps URLを更新
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(pos => {
+        const link = document.getElementById('btn-maps-link');
+        if (link) {
+          link.href = RouteOptimizer.generateMapsUrl(
+            { lat: pos.coords.latitude, lng: pos.coords.longitude },
+            r.orderedStores
+          );
+        }
+      }, () => {}, { enableHighAccuracy: true, timeout: 5000 });
+    }
 
     document.getElementById('btn-start-patrol')?.addEventListener('click', startPatrol);
   }
