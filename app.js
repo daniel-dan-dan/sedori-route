@@ -18,8 +18,8 @@ const App = (() => {
     { id: 'izumi',    name: '泉・富谷',     test: s => Number(s.lat) >= 38.30 },
     { id: 'aoba',     name: '青葉・中心部',  test: s => Number(s.lat) >= 38.25 && Number(s.lat) < 38.30 && Number(s.lng) < 140.90 },
     { id: 'miyagino', name: '宮城野・若林',  test: s => Number(s.lat) >= 38.24 && Number(s.lng) >= 140.90 },
-    { id: 'taihaku',  name: '太白・南',      test: s => Number(s.lat) < 38.24 && Number(s.lat) >= 38.17 },
-    { id: 'natori',   name: '名取・岩沼',    test: s => Number(s.lat) < 38.17 },
+    { id: 'taihaku',  name: '太白・南',      test: s => Number(s.lat) < 38.24 && Number(s.lat) >= 38.19 },
+    { id: 'natori',   name: '名取・岩沼',    test: s => Number(s.lat) < 38.19 },
   ];
 
   function getArea(store) {
@@ -166,7 +166,6 @@ const App = (() => {
     sorted.forEach(s => {
       const sel = selectedStoreIds.has(s.store_id) ? 'selected' : '';
       const score = calcPriorityScore(s);
-      const areaName = filterMode === 'category' ? '' : '';
       html += `
         <div class="store-item ${sel}" data-sid="${s.store_id}">
           <span class="store-icon">${s.icon || '&#x1f3ea;'}</span>
@@ -348,7 +347,7 @@ const App = (() => {
       <div class="patrol-current">
         <div class="current-label">${current.status === 'planned' ? '次の店舗' : '滞在中'}</div>
         <div class="current-name">${current.icon || ''} ${esc(current.name)}</div>
-        <div class="current-meta">${esc(current.category)} | ${current.open_time}-${current.close_time}</div>
+        <div class="current-meta">${esc(current.category)} | ${formatTime(current.open_time)}-${formatTime(current.close_time)}</div>
       </div>`;
 
     if (current.status === 'planned') {
