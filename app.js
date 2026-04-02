@@ -267,8 +267,12 @@ const App = (() => {
     Router.navigate('home');
     // 最適化ルート表示部分へスクロール
     setTimeout(() => {
-      document.querySelector('.route-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 50);
+      const el = document.querySelector('.route-result');
+      if (el) {
+        const y = el.getBoundingClientRect().top + window.pageYOffset - 60;
+        window.scrollTo({ top: y, behavior: 'smooth' });
+      }
+    }, 100);
   }
 
   function renderOptimizedRoute(container) {
