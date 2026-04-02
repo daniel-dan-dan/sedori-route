@@ -15,18 +15,23 @@ const App = (() => {
   // ---------- エリア定義（座標ベース自動分類） ----------
 
   const AREAS = [
-    // 広域エリア（先に判定）
+    // 分類判定用（広域エリアを先に判定してから仙台市内を細分化）
     { id: 'yamagata',   name: '山形',          test: s => Number(s.lng) < 140.50 },
     { id: 'osaki',      name: '大崎・古川',     test: s => Number(s.lat) >= 38.50 },
     { id: 'ishinomaki', name: '石巻',           test: s => Number(s.lng) >= 141.10 },
     { id: 'okawara',    name: '大河原・白石',    test: s => Number(s.lat) < 38.10 },
-    // 仙台市内＋周辺エリア
     { id: 'rifu',       name: '利府・多賀城',    test: s => Number(s.lat) >= 38.28 && Number(s.lng) >= 140.94 },
     { id: 'izumi',      name: '泉・富谷',       test: s => Number(s.lat) >= 38.30 },
     { id: 'aoba',       name: '青葉・中心部',    test: s => Number(s.lat) >= 38.25 && Number(s.lng) < 140.90 },
     { id: 'miyagino',   name: '宮城野・若林',    test: s => Number(s.lat) >= 38.24 && Number(s.lng) >= 140.90 },
     { id: 'taihaku',    name: '太白・南',        test: s => Number(s.lat) < 38.24 && Number(s.lat) >= 38.19 },
     { id: 'natori',     name: '名取・岩沼',      test: s => Number(s.lat) < 38.19 },
+  ];
+
+  // UI表示順（仙台駅から近い順）
+  const AREA_DISPLAY_ORDER = [
+    'aoba', 'miyagino', 'taihaku', 'izumi', 'rifu', 'natori',
+    'okawara', 'ishinomaki', 'osaki', 'yamagata',
   ];
 
   function getArea(store) {
@@ -138,7 +143,9 @@ const App = (() => {
     } else {
       html += '<div class="filter-tabs">';
       html += `<div class="filter-tab ${activeFilter === 'all' ? 'active' : ''}" data-cat="all">全て(${stores.length})</div>`;
-      AREAS.forEach(a => {
+      AREA_DISPLAY_ORDER.forEach(id => {
+        const a = AREAS.find(x => x.id === id);
+        if (!a) return;
         const count = stores.filter(s => getArea(s) === a.id).length;
         if (count > 0) {
           html += `<div class="filter-tab ${activeFilter === a.id ? 'active' : ''}" data-cat="${a.id}">${a.name}(${count})</div>`;
