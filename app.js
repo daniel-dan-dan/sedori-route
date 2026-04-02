@@ -9,6 +9,7 @@ const App = (() => {
   let optimizedRoute = null;
   let patrolState = null; // { routeId, stops, currentIdx }
   let activeFilter = 'all';
+  let patrolTimerInterval = null;
 
   // ---------- 初期化 ----------
 
@@ -71,6 +72,22 @@ const App = (() => {
     Router.register('summary', renderSummary);
   }
 
+  // ---------- 優先度スコア計算 ----------
+
+  function calcPriorityScore(store) {
+    const visits = Number(store.visit_count) || 0;
+    const totalPurchase = Number(store.total_purchase) || 0;
+    const avgPerVisit = visits > 0 ? totalPurchase / visits : 0;
+    const lastVisit = store.last_visit ? new Date(store.last_visit) : null;
+    const daysSince = lastVisit ? (Date.now() - lastVisit.getTime()) / 86400000 : 999;
+
+    let score = 0;
+    score += Math.min(avgPerVisit / 100, 50); // 訪問あたり仕入れ額 (max 50)
+    if (daysSince > 14) score += Math.min((daysSince - 14) * 2, 30); // 未訪問ボーナス (max 30)
+    if (visits >= 3) score += 10; // 実績ある店舗
+    return Math.round(score);
+  }
+
   // ---------- ホーム画面（ルート計画） ----------
 
   function renderHome(container) {
@@ -86,16 +103,20 @@ const App = (() => {
     });
     html += '</div>';
 
-    // 店舗一覧
+    // 店舗一覧（優先度スコア順）
     const filtered = activeFilter === 'all' ? stores : stores.filter(s => s.category === activeFilter);
-    filtered.forEach(s => {
+    const sorted = [...filtered].sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a));
+
+    sorted.forEach(s => {
       const sel = selectedStoreIds.has(s.store_id) ? 'selected' : '';
+      const score = calcPriorityScore(s);
       html += `
         <div class="store-item ${sel}" data-sid="${s.store_id}">
           <span class="store-icon">${s.icon || '&#x1f3ea;'}</span>
           <div class="store-info">
             <div class="store-name">${esc(s.name)}</div>
             <div class="store-meta">${esc(s.category)} | ${s.open_time}-${s.close_time} | ${s.avg_stay_min}分</div>
+            ${score > 0 ? `<div class="store-score">Score: ${score}</div>` : ''}
           </div>
           <div class="store-check">${sel ? '&#x2713;' : ''}</div>
         </div>`;
@@ -195,7 +216,6 @@ const App = (() => {
 
   async function startPatrol() {
     if (!optimizedRoute) return;
-    const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
     const storeIds = optimizedRoute.orderedStores.map(s => s.store_id);
 
     // GASにルート開始を通知
@@ -213,6 +233,7 @@ const App = (() => {
 
     patrolState = {
       routeId,
+      startTime: Date.now(),
       stops: optimizedRoute.orderedStores.map(s => ({
         ...s,
         status: 'planned',
@@ -237,6 +258,9 @@ const App = (() => {
     if (!current) { endPatrol(); return; }
 
     let html = '';
+
+    // 経過時間タイマー
+    html += `<div class="patrol-timer" id="patrol-timer">00:00:00</div>`;
 
     // 進捗
     html += `<div class="text-sm text-dim text-center mb-8">${currentIdx + 1} / ${stops.length} 店舗</div>`;
@@ -276,7 +300,7 @@ const App = (() => {
         const s = stops[i];
         html += `
           <div class="route-stop">
-            <div class="stop-num" style="background:var(--border)">${i + 1}</div>
+            <div class="stop-num" style="background:var(--border);color:var(--text-dim)">${i + 1}</div>
             <span class="stop-name">${s.icon || ''} ${esc(s.name)}</span>
             <span class="badge ${s.status === 'visited' ? 'badge-success' : ''}">${s.status === 'visited' ? '訪問済' : ''}</span>
           </div>`;
@@ -284,6 +308,9 @@ const App = (() => {
     }
 
     container.innerHTML = html;
+
+    // タイマー開始
+    startPatrolTimer();
 
     // イベント
     document.getElementById('btn-arrive')?.addEventListener('click', async () => {
@@ -341,14 +368,30 @@ const App = (() => {
     document.getElementById('btn-find')?.addEventListener('click', () => showFindModal(current));
   }
 
+  function startPatrolTimer() {
+    if (patrolTimerInterval) clearInterval(patrolTimerInterval);
+    const startTime = patrolState?.startTime || Date.now();
+    function updateTimer() {
+      const el = document.getElementById('patrol-timer');
+      if (!el) { clearInterval(patrolTimerInterval); return; }
+      const elapsed = Date.now() - startTime;
+      const h = String(Math.floor(elapsed / 3600000)).padStart(2, '0');
+      const m = String(Math.floor((elapsed % 3600000) / 60000)).padStart(2, '0');
+      const s = String(Math.floor((elapsed % 60000) / 1000)).padStart(2, '0');
+      el.textContent = `${h}:${m}:${s}`;
+    }
+    updateTimer();
+    patrolTimerInterval = setInterval(updateTimer, 1000);
+  }
+
   async function endPatrol() {
+    if (patrolTimerInterval) { clearInterval(patrolTimerInterval); patrolTimerInterval = null; }
     if (patrolState) {
       await API.endRoute({ route_id: patrolState.routeId });
-      // サマリー用に保持
       const summary = { ...patrolState };
       patrolState = null;
       await Storage.clearCurrentRoute();
-      await loadData(); // 店舗データ更新
+      await loadData();
       Router.navigate('summary', { summary });
     }
   }
@@ -490,13 +533,20 @@ const App = (() => {
     const totalAmount = visited.reduce((s, st) => s + st.purchaseAmount, 0);
     const totalItems = visited.reduce((s, st) => s + st.purchaseItems, 0);
 
+    // 経過時間
+    const elapsed = summary.startTime ? Date.now() - summary.startTime : 0;
+    const elH = Math.floor(elapsed / 3600000);
+    const elM = Math.floor((elapsed % 3600000) / 60000);
+    const elapsedStr = elH > 0 ? `${elH}時間${elM}分` : `${elM}分`;
+
     let html = `
       <div class="summary-grid">
         <div class="summary-item"><div class="value">${visited.length}</div><div class="label">訪問店舗</div></div>
         <div class="summary-item"><div class="value">${skipped.length}</div><div class="label">スキップ</div></div>
         <div class="summary-item"><div class="value">${totalAmount.toLocaleString()}円</div><div class="label">仕入れ合計</div></div>
         <div class="summary-item"><div class="value">${totalItems}</div><div class="label">仕入れ点数</div></div>
-      </div>`;
+      </div>
+      <div class="text-center text-dim text-sm mb-8">所要時間: ${elapsedStr}</div>`;
 
     if (visited.length > 0) {
       html += '<div class="card-title mt-12">店舗別</div>';
@@ -678,7 +728,10 @@ const App = (() => {
           <div class="form-group" style="flex:1"><label class="form-label">経度</label>
             <input type="number" step="any" class="form-input" id="set-lng" value="${config.home_lng || ''}"></div>
         </div>
-        <button class="btn btn-primary btn-sm" id="btn-save-home">保存</button>
+        <div class="btn-group" style="margin-top:0">
+          <button class="btn btn-primary btn-sm" id="btn-save-home">保存</button>
+          <button class="btn btn-outline btn-sm" id="btn-gps">現在地を取得</button>
+        </div>
       </div>
       <div class="card">
         <div class="card-title">パラメータ</div>
@@ -694,6 +747,10 @@ const App = (() => {
         <div class="card-title">接続テスト</div>
         <button class="btn btn-outline btn-sm" id="btn-test">テスト実行</button>
         <div id="test-result" class="text-sm mt-8"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">データ</div>
+        <button class="btn btn-outline btn-sm" id="btn-refresh">データ再取得</button>
       </div>`;
 
     container.innerHTML = html;
@@ -719,6 +776,20 @@ const App = (() => {
       toast('自宅座標を保存しました');
     });
 
+    document.getElementById('btn-gps')?.addEventListener('click', () => {
+      if (!navigator.geolocation) { toast('位置情報に非対応です'); return; }
+      toast('位置情報を取得中...');
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          document.getElementById('set-lat').value = pos.coords.latitude.toFixed(6);
+          document.getElementById('set-lng').value = pos.coords.longitude.toFixed(6);
+          toast('現在地を取得しました');
+        },
+        err => { toast('位置情報の取得に失敗: ' + err.message); },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    });
+
     document.getElementById('btn-save-params')?.addEventListener('click', async () => {
       await API.updateConfig({
         avg_speed_kmh: document.getElementById('set-speed').value,
@@ -739,6 +810,12 @@ const App = (() => {
       } catch (e) {
         result.innerHTML = `<span style="color:var(--accent)">エラー:</span> ${esc(e.message)}`;
       }
+    });
+
+    document.getElementById('btn-refresh')?.addEventListener('click', async () => {
+      toast('データ再取得中...');
+      await loadData();
+      toast(`${stores.length}店舗のデータを更新しました`);
     });
   }
 

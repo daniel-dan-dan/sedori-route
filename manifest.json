@@ -4,8 +4,8 @@
   "description": "店舗せどりの巡回を最適化するアプリ",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#1a1a2e",
-  "theme_color": "#16213e",
+  "background_color": "#f5f5f7",
+  "theme_color": "#ffffff",
   "orientation": "portrait",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
