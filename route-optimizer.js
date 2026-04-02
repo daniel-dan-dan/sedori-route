@@ -131,10 +131,13 @@ const RouteOptimizer = (() => {
   // Google Maps ナビURL生成
   function generateMapsUrl(home, orderedStores) {
     if (orderedStores.length === 0) return '';
-    const origin = `${home.lat},${home.lng}`;
-    const dest = origin; // 自宅に戻る
-    const waypoints = orderedStores.map(s => `${s.lat},${s.lng}`).join('|');
-    return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&waypoints=${waypoints}&travelmode=driving`;
+    // originを省略→Google Mapsが現在地を自動使用
+    const lastStore = orderedStores[orderedStores.length - 1];
+    const dest = `${lastStore.lat},${lastStore.lng}`;
+    const waypoints = orderedStores.slice(0, -1).map(s => `${s.lat},${s.lng}`).join('|');
+    let url = `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`;
+    if (waypoints) url += `&waypoints=${waypoints}`;
+    return url;
   }
 
   return { optimize, generateMapsUrl, haversine };

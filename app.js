@@ -300,19 +300,6 @@ const App = (() => {
 
     container.insertAdjacentHTML('beforeend', html);
 
-    // GPS現在地でGoogle Maps URLを更新
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(pos => {
-        const link = document.getElementById('btn-maps-link');
-        if (link) {
-          link.href = RouteOptimizer.generateMapsUrl(
-            { lat: pos.coords.latitude, lng: pos.coords.longitude },
-            r.orderedStores
-          );
-        }
-      }, () => {}, { enableHighAccuracy: true, timeout: 5000 });
-    }
-
     document.getElementById('btn-start-patrol')?.addEventListener('click', startPatrol);
   }
 
