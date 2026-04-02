@@ -15,11 +15,16 @@ const App = (() => {
   // ---------- エリア定義（座標ベース自動分類） ----------
 
   const AREAS = [
-    { id: 'izumi',    name: '泉・富谷',     test: s => Number(s.lat) >= 38.30 },
-    { id: 'aoba',     name: '青葉・中心部',  test: s => Number(s.lat) >= 38.25 && Number(s.lat) < 38.30 && Number(s.lng) < 140.90 },
-    { id: 'miyagino', name: '宮城野・若林',  test: s => Number(s.lat) >= 38.24 && Number(s.lng) >= 140.90 },
-    { id: 'taihaku',  name: '太白・南',      test: s => Number(s.lat) < 38.24 && Number(s.lat) >= 38.19 },
-    { id: 'natori',   name: '名取・岩沼',    test: s => Number(s.lat) < 38.19 },
+    // 広域エリア（先に判定）
+    { id: 'yamagata',  name: '山形',         test: s => Number(s.lng) < 140.50 },
+    { id: 'osaki',     name: '大崎・古川',    test: s => Number(s.lat) >= 38.50 },
+    { id: 'ishinomaki', name: '石巻',         test: s => Number(s.lng) >= 141.10 },
+    // 仙台市内エリア
+    { id: 'izumi',     name: '泉・富谷',      test: s => Number(s.lat) >= 38.30 },
+    { id: 'aoba',      name: '青葉・中心部',   test: s => Number(s.lat) >= 38.25 && Number(s.lng) < 140.90 },
+    { id: 'miyagino',  name: '宮城野・若林',   test: s => Number(s.lat) >= 38.24 && Number(s.lng) >= 140.90 },
+    { id: 'taihaku',   name: '太白・南',       test: s => Number(s.lat) < 38.24 && Number(s.lat) >= 38.19 },
+    { id: 'natori',    name: '名取・岩沼',     test: s => Number(s.lat) < 38.19 },
   ];
 
   function getArea(store) {
