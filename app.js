@@ -265,6 +265,10 @@ const App = (() => {
     const speed = Number(config.avg_speed_kmh) || 30;
     optimizedRoute = RouteOptimizer.optimize(home, selected, speed);
     Router.navigate('home');
+    // 最適化ルート表示部分へスクロール
+    setTimeout(() => {
+      document.querySelector('.route-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
   }
 
   function renderOptimizedRoute(container) {
