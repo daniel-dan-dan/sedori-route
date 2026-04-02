@@ -1,0 +1,14 @@
+{
+  "name": "店舗巡回ルート最適化",
+  "short_name": "巡回ルート",
+  "description": "店舗せどりの巡回を最適化するアプリ",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#1a1a2e",
+  "theme_color": "#16213e",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

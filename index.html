@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#1a1a2e">
+  <title>巡回ルート</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="header">
+    <h1 id="header-title">巡回ルート</h1>
+    <div class="header-actions" id="header-actions"></div>
+  </div>
+
+  <div id="app">
+    <div class="loading"><div class="spinner"></div><p class="mt-8">読み込み中...</p></div>
+  </div>
+
+  <nav class="bottom-nav" id="bottom-nav">
+    <button class="nav-item active" data-view="home">
+      <span class="icon">&#x1f3e0;</span>ホーム
+    </button>
+    <button class="nav-item" data-view="stores">
+      <span class="icon">&#x1f3ea;</span>店舗
+    </button>
+    <button class="nav-item" data-view="history">
+      <span class="icon">&#x1f4ca;</span>履歴
+    </button>
+    <button class="nav-item" data-view="settings">
+      <span class="icon">&#x2699;&#xfe0f;</span>設定
+    </button>
+  </nav>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="storage.js"></script>
+  <script src="api.js"></script>
+  <script src="route-optimizer.js"></script>
+  <script src="router.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
