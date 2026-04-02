@@ -115,7 +115,7 @@ const App = (() => {
           <span class="store-icon">${s.icon || '&#x1f3ea;'}</span>
           <div class="store-info">
             <div class="store-name">${esc(s.name)}</div>
-            <div class="store-meta">${esc(s.category)} | ${s.open_time}-${s.close_time} | ${s.avg_stay_min}分</div>
+            <div class="store-meta">${esc(s.category)} | ${formatTime(s.open_time)}-${formatTime(s.close_time)} | ${s.avg_stay_min}分</div>
             ${score > 0 ? `<div class="store-score">Score: ${score}</div>` : ''}
           </div>
           <div class="store-check">${sel ? '&#x2713;' : ''}</div>
@@ -820,6 +820,21 @@ const App = (() => {
   }
 
   // ---------- ユーティリティ ----------
+
+  function formatTime(val) {
+    if (!val) return '';
+    // Google Sheets の時刻値: "1899-12-30T02:00:00.000Z" → "11:00" (JST)
+    // または "10:00" のような文字列
+    if (typeof val === 'string' && val.includes('1899-')) {
+      const d = new Date(val);
+      // UTCの時:分を取得（Sheetsの時刻はUTC表記だがJST値がそのまま入っている場合がある）
+      const h = d.getUTCHours();
+      const m = d.getUTCMinutes();
+      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+    }
+    if (typeof val === 'string' && /^\d{1,2}:\d{2}/.test(val)) return val;
+    return String(val);
+  }
 
   function setTitle(t) {
     document.getElementById('header-title').textContent = t;
