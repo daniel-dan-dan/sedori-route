@@ -8,8 +8,26 @@ const App = (() => {
   let selectedStoreIds = new Set();
   let optimizedRoute = null;
   let patrolState = null; // { routeId, stops, currentIdx }
+  let filterMode = 'area'; // 'category' or 'area'
   let activeFilter = 'all';
   let patrolTimerInterval = null;
+
+  // ---------- エリア定義（座標ベース自動分類） ----------
+
+  const AREAS = [
+    { id: 'izumi',    name: '泉・富谷',     test: s => Number(s.lat) >= 38.30 },
+    { id: 'aoba',     name: '青葉・中心部',  test: s => Number(s.lat) >= 38.25 && Number(s.lat) < 38.30 && Number(s.lng) < 140.90 },
+    { id: 'miyagino', name: '宮城野・若林',  test: s => Number(s.lat) >= 38.24 && Number(s.lng) >= 140.90 },
+    { id: 'taihaku',  name: '太白・南',      test: s => Number(s.lat) < 38.24 && Number(s.lat) >= 38.17 },
+    { id: 'natori',   name: '名取・岩沼',    test: s => Number(s.lat) < 38.17 },
+  ];
+
+  function getArea(store) {
+    for (const a of AREAS) {
+      if (a.test(store)) return a.id;
+    }
+    return 'other';
+  }
 
   // ---------- 初期化 ----------
 
@@ -94,22 +112,61 @@ const App = (() => {
     setTitle('巡回ルート');
     let html = '';
 
-    // フィルター
-    const categories = ['all', '家電量販', 'HC', 'ドンキ', 'リサイクル', 'その他'];
-    html += '<div class="filter-tabs">';
-    categories.forEach(c => {
-      const label = c === 'all' ? '全て' : c;
-      html += `<div class="filter-tab ${activeFilter === c ? 'active' : ''}" data-cat="${c}">${label}</div>`;
-    });
-    html += '</div>';
+    // モード切替（エリア / カテゴリ）
+    html += `<div class="mode-toggle">
+      <button class="mode-btn ${filterMode === 'area' ? 'active' : ''}" data-mode="area">エリア別</button>
+      <button class="mode-btn ${filterMode === 'category' ? 'active' : ''}" data-mode="category">カテゴリ別</button>
+    </div>`;
 
-    // 店舗一覧（優先度スコア順）
-    const filtered = activeFilter === 'all' ? stores : stores.filter(s => s.category === activeFilter);
+    // フィルタータブ
+    if (filterMode === 'category') {
+      const categories = ['all', '家電量販', 'HC', 'ドンキ', 'リサイクル', 'その他'];
+      html += '<div class="filter-tabs">';
+      categories.forEach(c => {
+        const label = c === 'all' ? '全て' : c;
+        const count = c === 'all' ? stores.length : stores.filter(s => s.category === c).length;
+        html += `<div class="filter-tab ${activeFilter === c ? 'active' : ''}" data-cat="${c}">${label}(${count})</div>`;
+      });
+      html += '</div>';
+    } else {
+      html += '<div class="filter-tabs">';
+      html += `<div class="filter-tab ${activeFilter === 'all' ? 'active' : ''}" data-cat="all">全て(${stores.length})</div>`;
+      AREAS.forEach(a => {
+        const count = stores.filter(s => getArea(s) === a.id).length;
+        if (count > 0) {
+          html += `<div class="filter-tab ${activeFilter === a.id ? 'active' : ''}" data-cat="${a.id}">${a.name}(${count})</div>`;
+        }
+      });
+      html += '</div>';
+    }
+
+    // 店舗フィルタリング
+    let filtered;
+    if (activeFilter === 'all') {
+      filtered = stores;
+    } else if (filterMode === 'category') {
+      filtered = stores.filter(s => s.category === activeFilter);
+    } else {
+      filtered = stores.filter(s => getArea(s) === activeFilter);
+    }
+
+    // 優先度スコア順ソート
     const sorted = [...filtered].sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a));
 
+    // エリア一括選択ボタン
+    const allFilteredSelected = sorted.length > 0 && sorted.every(s => selectedStoreIds.has(s.store_id));
+    if (activeFilter !== 'all' && sorted.length > 0) {
+      html += `<div class="flex-between mt-8 mb-8">
+        <span class="text-sm" style="font-weight:600">${filterMode === 'area' ? AREAS.find(a => a.id === activeFilter)?.name : activeFilter} ${sorted.length}店舗</span>
+        <button class="btn btn-sm ${allFilteredSelected ? 'btn-outline' : 'btn-primary'}" id="btn-select-area">${allFilteredSelected ? '全解除' : '全選択'}</button>
+      </div>`;
+    }
+
+    // 店舗一覧
     sorted.forEach(s => {
       const sel = selectedStoreIds.has(s.store_id) ? 'selected' : '';
       const score = calcPriorityScore(s);
+      const areaName = filterMode === 'category' ? '' : '';
       html += `
         <div class="store-item ${sel}" data-sid="${s.store_id}">
           <span class="store-icon">${s.icon || '&#x1f3ea;'}</span>
@@ -141,7 +198,16 @@ const App = (() => {
       renderOptimizedRoute(container);
     }
 
-    // イベント
+    // イベント: モード切替
+    container.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        filterMode = btn.dataset.mode;
+        activeFilter = 'all';
+        Router.navigate('home');
+      });
+    });
+
+    // イベント: フィルタータブ
     container.querySelectorAll('.filter-tab').forEach(tab => {
       tab.addEventListener('click', () => {
         activeFilter = tab.dataset.cat;
@@ -149,6 +215,18 @@ const App = (() => {
       });
     });
 
+    // イベント: エリア一括選択
+    document.getElementById('btn-select-area')?.addEventListener('click', () => {
+      if (allFilteredSelected) {
+        sorted.forEach(s => selectedStoreIds.delete(s.store_id));
+      } else {
+        sorted.forEach(s => selectedStoreIds.add(s.store_id));
+      }
+      optimizedRoute = null;
+      Router.navigate('home');
+    });
+
+    // イベント: 個別店舗選択
     container.querySelectorAll('.store-item').forEach(el => {
       el.addEventListener('click', () => {
         const sid = el.dataset.sid;
