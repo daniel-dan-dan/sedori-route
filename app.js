@@ -418,7 +418,7 @@ const App = (() => {
       await API.updateStop({
         route_id: patrolState.routeId,
         store_id: current.store_id,
-        status: 'visited',
+        status: 'visiting',
         arrival_time: current.arrivalTime
       });
       await Storage.saveCurrentRoute(patrolState);
@@ -577,7 +577,9 @@ const App = (() => {
       const type = el.querySelector('#m-type').value;
       const content = el.querySelector('#m-content').value;
       await API.addMemo({ store_id: stop.store_id, type, content });
+      await Storage.saveCurrentRoute(patrolState);
       toast('メモを保存しました');
+      Router.navigate('patrol');
     });
   }
 
@@ -617,7 +619,9 @@ const App = (() => {
         amazon_price: Number(el.querySelector('#m-aprice').value) || 0,
         action: el.querySelector('#m-action').value
       });
+      await Storage.saveCurrentRoute(patrolState);
       toast('商品発見を記録しました');
+      Router.navigate('patrol');
     });
   }
 

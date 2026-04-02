@@ -84,6 +84,10 @@ const Storage = (() => {
     const d = await open();
     const tx = d.transaction('pendingActions', 'readwrite');
     tx.objectStore('pendingActions').add(actionObj);
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = e => reject(e.target.error);
+    });
   }
 
   async function getPendingActions() {
