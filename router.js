@@ -14,8 +14,11 @@ const Router = (() => {
     const container = document.getElementById('app');
     if (!container) return;
     if (routes[name]) {
+      const changed = currentView !== name;
       currentView = name;
-      window.location.hash = name;
+      if (window.location.hash !== '#' + name) {
+        window.location.hash = name;
+      }
       container.innerHTML = '';
       routes[name](container, params);
     }
