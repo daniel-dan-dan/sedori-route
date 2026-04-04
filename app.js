@@ -167,7 +167,6 @@ const App = (() => {
 
   function registerViews() {
     Router.register('home', renderHome);
-    Router.register('stores', renderStoreManagement);
     Router.register('history', renderHistory);
     Router.register('history-detail', renderHistoryDetail);
     Router.register('settings', renderSettings);
@@ -776,38 +775,6 @@ const App = (() => {
     });
   }
 
-  // ---------- 店舗管理 ----------
-
-  function renderStoreManagement(container) {
-    setTitle('店舗管理');
-    let html = `<button class="btn btn-primary btn-sm mb-8" id="btn-add-store">+ 店舗追加</button>`;
-
-    stores.forEach(s => {
-      html += `
-        <div class="store-item" data-sid="${s.store_id}" style="cursor:default">
-          <span class="store-icon">${s.icon || '&#x1f3ea;'}</span>
-          <div class="store-info">
-            <div class="store-name">${esc(s.name)}</div>
-            <div class="store-meta">
-              ${esc(s.category)} | 訪問${s.visit_count}回 | 累計${Number(s.total_purchase).toLocaleString()}円
-            </div>
-          </div>
-          <button class="btn btn-sm btn-outline edit-store" data-sid="${s.store_id}">編集</button>
-        </div>`;
-    });
-
-    container.innerHTML = html;
-
-    document.getElementById('btn-add-store')?.addEventListener('click', () => showAddStoreModal());
-    container.querySelectorAll('.edit-store').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        const store = stores.find(s => s.store_id === btn.dataset.sid);
-        if (store) showEditStoreModal(store);
-      });
-    });
-  }
-
   function showAddStoreModal() {
     const body = storeFormHtml({});
     showModal('店舗追加', body, async (el) => {
@@ -815,7 +782,7 @@ const App = (() => {
       await API.addStore(data);
       await loadData();
       toast('店舗を追加しました');
-      Router.navigate('stores');
+      Router.navigate('settings');
     });
   }
 
@@ -827,7 +794,7 @@ const App = (() => {
       await API.updateStore(data);
       await loadData();
       toast('店舗を更新しました');
-      Router.navigate('stores');
+      Router.navigate('settings');
     });
   }
 
@@ -1040,12 +1007,37 @@ const App = (() => {
         <button class="btn btn-outline btn-sm" id="btn-refresh">データ再取得</button>
       </div>
       <div class="card">
+        <div class="card-title">店舗管理</div>
+        <button class="btn btn-primary btn-sm mb-8" id="btn-add-store">+ 店舗追加</button>
+        <div id="store-list"></div>
+      </div>
+      <div class="card">
         <div class="card-title">履歴消去</div>
         <div class="text-sm text-dim mb-8">全ての巡回履歴・仕入れ記録を削除します。この操作は取り消せません。</div>
         <button class="btn btn-sm btn-accent" id="btn-clear-history">全履歴を消去</button>
       </div>`;
 
     container.innerHTML = html;
+
+    // 店舗一覧を描画
+    const storeListEl = document.getElementById('store-list');
+    if (storeListEl) {
+      let storeHtml = '';
+      stores.forEach(s => {
+        storeHtml += `
+          <div class="store-item" data-sid="${s.store_id}" style="cursor:default">
+            <span class="store-icon">${s.icon || '&#x1f3ea;'}</span>
+            <div class="store-info">
+              <div class="store-name">${esc(s.name)}</div>
+              <div class="store-meta">
+                ${esc(s.category)} | 訪問${s.visit_count}回 | 累計${Number(s.total_purchase).toLocaleString()}円
+              </div>
+            </div>
+            <button class="btn btn-sm btn-outline edit-store" data-sid="${s.store_id}">編集</button>
+          </div>`;
+      });
+      storeListEl.innerHTML = storeHtml;
+    }
 
     document.getElementById('btn-save-url')?.addEventListener('click', async () => {
       const v = document.getElementById('set-url').value.trim();
@@ -1122,6 +1114,15 @@ const App = (() => {
           toast('消去に失敗: ' + err.message);
         }
       })();
+    });
+
+    document.getElementById('btn-add-store')?.addEventListener('click', () => showAddStoreModal());
+    container.querySelectorAll('.edit-store').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const store = stores.find(s => s.store_id === btn.dataset.sid);
+        if (store) showEditStoreModal(store);
+      });
     });
   }
 
