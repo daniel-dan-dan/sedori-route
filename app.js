@@ -362,25 +362,13 @@ const App = (() => {
 
   // ---------- 巡回モード ----------
 
-  async function startPatrol() {
+  function startPatrol() {
     if (!optimizedRoute) return;
     const storeIds = optimizedRoute.orderedStores.map(s => s.store_id);
 
-    // GASにルート開始を通知
-    await API.startRoute({
-      store_ids: storeIds,
-      total_distance_km: optimizedRoute.totalDistanceKm
-    });
-
-    // route_id を推定（最新のルートを取得）
-    let routeId = 'unknown';
-    try {
-      const history = await API.getRouteHistory({ limit: 1 });
-      if (history.length > 0) routeId = history[0].route_id;
-    } catch {}
-
+    // 即座にUI遷移（API応答を待たない）
     patrolState = {
-      routeId,
+      routeId: 'pending',
       startTime: Date.now(),
       stops: optimizedRoute.orderedStores.map(s => ({
         ...s,
@@ -392,9 +380,21 @@ const App = (() => {
       })),
       currentIdx: 0
     };
-
-    await Storage.saveCurrentRoute(patrolState);
+    Storage.saveCurrentRoute(patrolState);
     Router.navigate('patrol');
+
+    // バックグラウンドでAPI同期 & route_id取得
+    API.startRoute({
+      store_ids: storeIds,
+      total_distance_km: optimizedRoute.totalDistanceKm
+    }).then(() =>
+      API.getRouteHistory({ limit: 1 })
+    ).then(history => {
+      if (history && history.length > 0) {
+        patrolState.routeId = history[0].route_id;
+        Storage.saveCurrentRoute(patrolState);
+      }
+    }).catch(() => {});
   }
 
   function renderPatrol(container) {
@@ -535,15 +535,17 @@ const App = (() => {
     patrolTimerInterval = setInterval(updateTimer, 1000);
   }
 
-  async function endPatrol() {
+  function endPatrol() {
     if (patrolTimerInterval) { clearInterval(patrolTimerInterval); patrolTimerInterval = null; }
     if (patrolState) {
-      await API.endRoute({ route_id: patrolState.routeId });
       const summary = { ...patrolState };
+      const routeId = patrolState.routeId;
       patrolState = null;
-      await Storage.clearCurrentRoute();
-      await loadData();
+      Storage.clearCurrentRoute();
       Router.navigate('summary', { summary });
+      // バックグラウンドでAPI同期 & データ再取得
+      API.endRoute({ route_id: routeId }).catch(() => {});
+      loadData();
     }
   }
 
@@ -592,7 +594,7 @@ const App = (() => {
         <label class="form-label">メモ</label>
         <input type="text" class="form-input" id="m-note" placeholder="商品名など">
       </div>`;
-    showModal('仕入れ記録', body, async (el) => {
+    showModal('仕入れ記録', body, (el) => {
       const amount = Number(el.querySelector('#m-amount').value) || 0;
       const items = Number(el.querySelector('#m-items').value) || 1;
       const genre = el.querySelector('#m-genre').value;
@@ -600,15 +602,15 @@ const App = (() => {
 
       stop.purchaseAmount += amount;
       stop.purchaseItems += items;
-
-      await API.addPurchase({
+      Storage.saveCurrentRoute(patrolState);
+      toast(`${amount.toLocaleString()}円 記録しました`);
+      Router.navigate('patrol');
+      // バックグラウンドでAPI同期
+      API.addPurchase({
         store_id: stop.store_id,
         route_id: patrolState.routeId,
         amount, items_count: items, genre, note
-      });
-      await Storage.saveCurrentRoute(patrolState);
-      toast(`${amount.toLocaleString()}円 記録しました`);
-      Router.navigate('patrol');
+      }).catch(() => {});
     });
   }
 
@@ -625,13 +627,14 @@ const App = (() => {
         <label class="form-label">内容</label>
         <textarea class="form-textarea" id="m-content" rows="3"></textarea>
       </div>`;
-    showModal('メモ追加', body, async (el) => {
+    showModal('メモ追加', body, (el) => {
       const type = el.querySelector('#m-type').value;
       const content = el.querySelector('#m-content').value;
-      await API.addMemo({ store_id: stop.store_id, type, content });
-      await Storage.saveCurrentRoute(patrolState);
+      Storage.saveCurrentRoute(patrolState);
       toast('メモを保存しました');
       Router.navigate('patrol');
+      // バックグラウンドでAPI同期
+      API.addMemo({ store_id: stop.store_id, type, content }).catch(() => {});
     });
   }
 
@@ -661,8 +664,8 @@ const App = (() => {
           <option value="out_of_stock">在庫なし</option>
         </select>
       </div>`;
-    showModal('商品発見', body, async (el) => {
-      await API.addFind({
+    showModal('商品発見', body, (el) => {
+      const findData = {
         store_id: stop.store_id,
         route_id: patrolState.routeId,
         asin: el.querySelector('#m-asin').value,
@@ -670,10 +673,12 @@ const App = (() => {
         store_price: Number(el.querySelector('#m-sprice').value) || 0,
         amazon_price: Number(el.querySelector('#m-aprice').value) || 0,
         action: el.querySelector('#m-action').value
-      });
-      await Storage.saveCurrentRoute(patrolState);
+      };
+      Storage.saveCurrentRoute(patrolState);
       toast('商品発見を記録しました');
       Router.navigate('patrol');
+      // バックグラウンドでAPI同期
+      API.addFind(findData).catch(() => {});
     });
   }
 
