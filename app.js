@@ -8,7 +8,7 @@ const App = (() => {
   let selectedStoreIds = new Set();
   let optimizedRoute = null;
   let patrolState = null; // { routeId, stops, currentIdx }
-  let filterMode = 'area'; // 'chain' or 'area'
+  let filterMode = 'area'; // 'area' | 'genre' | 'chain'
   let activeFilter = 'all';
   let patrolTimerInterval = null;
 
@@ -41,10 +41,23 @@ const App = (() => {
     return 'other';
   }
 
-  // ---------- チェーン名抽出 ----------
+  // ---------- ジャンル・チェーン定義 ----------
+
+  // カテゴリ表示順
+  const GENRE_ORDER = ['家電量販', 'HC', 'ドンキ', 'リサイクル', 'カー用品', 'その他'];
+  const GENRE_DISPLAY = {
+    '家電量販': '家電量販店',
+    'HC': 'ホームセンター',
+    'ドンキ': 'ドンキホーテ',
+    'リサイクル': 'リサイクルショップ',
+    'カー用品': 'カー用品店',
+    'その他': 'その他'
+  };
 
   const CHAIN_RULES = [
     // リサイクル系（長い名前を先に判定）
+    { re: /BOOKOFF SUPER BAZAAR|ブックオフスーパーバザー/i, chain: 'ブックオフSB' },
+    { re: /BOOKOFF PLUS|ブックオフ PLUS|ブックオフプラス/i, chain: 'ブックオフPLUS' },
     { re: /BOOKOFF|ブックオフ/i, chain: 'ブックオフ' },
     { re: /スーパーセカンドストリート|セカンドストリート/, chain: 'セカンドストリート' },
     { re: /トレファクスタイル|トレジャーファクトリー/, chain: 'トレファク' },
@@ -83,6 +96,10 @@ const App = (() => {
       if (r.re.test(name)) return r.chain;
     }
     return name.split(/[\s　]/)[0] || 'その他';
+  }
+
+  function getGenre(store) {
+    return store.category || 'その他';
   }
 
   // ---------- 初期化 ----------
@@ -168,13 +185,16 @@ const App = (() => {
     setTitle('巡回ルート');
     let html = '';
 
-    // モード切替（エリア / チェーン）
+    // モード切替（エリア / ジャンル / チェーン）
     html += `<div class="mode-toggle">
       <button class="mode-btn ${filterMode === 'area' ? 'active' : ''}" data-mode="area">エリア別</button>
+      <button class="mode-btn ${filterMode === 'genre' ? 'active' : ''}" data-mode="genre">ジャンル別</button>
       <button class="mode-btn ${filterMode === 'chain' ? 'active' : ''}" data-mode="chain">チェーン別</button>
     </div>`;
 
     // フィルタータブ
+    html += '<div class="filter-tabs">';
+    html += `<div class="filter-tab ${activeFilter === 'all' ? 'active' : ''}" data-cat="all">全て(${stores.length})</div>`;
     if (filterMode === 'chain') {
       // チェーン名を集計して店舗数順にソート
       const chainCounts = {};
@@ -183,15 +203,19 @@ const App = (() => {
         chainCounts[c] = (chainCounts[c] || 0) + 1;
       });
       const chainNames = Object.keys(chainCounts).sort((a, b) => chainCounts[b] - chainCounts[a]);
-      html += '<div class="filter-tabs">';
-      html += `<div class="filter-tab ${activeFilter === 'all' ? 'active' : ''}" data-cat="all">全て(${stores.length})</div>`;
       chainNames.forEach(c => {
         html += `<div class="filter-tab ${activeFilter === c ? 'active' : ''}" data-cat="${c}">${c}(${chainCounts[c]})</div>`;
       });
-      html += '</div>';
+    } else if (filterMode === 'genre') {
+      // ジャンル別タブ（GENRE_ORDER順）
+      GENRE_ORDER.forEach(g => {
+        const count = stores.filter(s => getGenre(s) === g).length;
+        if (count > 0) {
+          html += `<div class="filter-tab ${activeFilter === g ? 'active' : ''}" data-cat="${g}">${GENRE_DISPLAY[g] || g}(${count})</div>`;
+        }
+      });
     } else {
-      html += '<div class="filter-tabs">';
-      html += `<div class="filter-tab ${activeFilter === 'all' ? 'active' : ''}" data-cat="all">全て(${stores.length})</div>`;
+      // エリア別タブ
       AREA_DISPLAY_ORDER.forEach(id => {
         const a = AREAS.find(x => x.id === id);
         if (!a) return;
@@ -200,8 +224,8 @@ const App = (() => {
           html += `<div class="filter-tab ${activeFilter === a.id ? 'active' : ''}" data-cat="${a.id}">${a.name}(${count})</div>`;
         }
       });
-      html += '</div>';
     }
+    html += '</div>';
 
     // 店舗フィルタリング
     let filtered;
@@ -209,18 +233,28 @@ const App = (() => {
       filtered = stores;
     } else if (filterMode === 'chain') {
       filtered = stores.filter(s => getChain(s) === activeFilter);
+    } else if (filterMode === 'genre') {
+      filtered = stores.filter(s => getGenre(s) === activeFilter);
     } else {
       filtered = stores.filter(s => getArea(s) === activeFilter);
     }
 
-    // 優先度スコア順ソート
-    const sorted = [...filtered].sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a));
+    // ソート: エリア別はジャンル順→スコア順、それ以外はスコア順
+    let sorted;
+    if (filterMode === 'area') {
+      sorted = [...filtered].sort((a, b) => {
+        const gi = GENRE_ORDER.indexOf(getGenre(a)) - GENRE_ORDER.indexOf(getGenre(b));
+        return gi !== 0 ? gi : calcPriorityScore(b) - calcPriorityScore(a);
+      });
+    } else {
+      sorted = [...filtered].sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a));
+    }
 
     // エリア一括選択ボタン
     const allFilteredSelected = sorted.length > 0 && sorted.every(s => selectedStoreIds.has(s.store_id));
     if (activeFilter !== 'all' && sorted.length > 0) {
       html += `<div class="flex-between mt-8 mb-8">
-        <span class="text-sm" style="font-weight:600">${filterMode === 'area' ? (AREAS.find(a => a.id === activeFilter)?.name || activeFilter) : activeFilter} ${sorted.length}店舗</span>
+        <span class="text-sm" style="font-weight:600">${filterMode === 'area' ? (AREAS.find(a => a.id === activeFilter)?.name || activeFilter) : filterMode === 'genre' ? (GENRE_DISPLAY[activeFilter] || activeFilter) : activeFilter} ${sorted.length}店舗</span>
         <button class="btn btn-sm ${allFilteredSelected ? 'btn-outline' : 'btn-primary'}" id="btn-select-area">${allFilteredSelected ? '全解除' : '全選択'}</button>
       </div>`;
     }
