@@ -103,17 +103,20 @@ const Storage = (() => {
     const actions = await getPendingActions();
     if (actions.length === 0) return 0;
     let synced = 0;
+    const failed = [];
     for (const act of actions) {
       try {
         await API.post(act.action, act.body);
         synced++;
       } catch (e) {
         console.warn('Sync failed:', e);
-        break;
+        failed.push(act);
       }
     }
-    if (synced === actions.length) {
-      await clearPendingActions();
+    // 全てクリアし、失敗分だけ再登録
+    await clearPendingActions();
+    for (const act of failed) {
+      await addPendingAction(act);
     }
     return synced;
   }
