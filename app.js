@@ -158,6 +158,7 @@ const App = (() => {
     Router.register('home', renderHome);
     Router.register('stores', renderStoreManagement);
     Router.register('history', renderHistory);
+    Router.register('history-detail', renderHistoryDetail);
     Router.register('settings', renderSettings);
     Router.register('patrol', renderPatrol);
     Router.register('summary', renderSummary);
@@ -868,22 +869,25 @@ const App = (() => {
 
   // ---------- 履歴・分析 ----------
 
+  let historyCache = []; // renderHistoryDetail用に保持
+
   async function renderHistory(container) {
     setTitle('履歴・分析');
     container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
       const routes = await API.getRouteHistory({ limit: 20, include_stops: 'true' });
+      historyCache = routes;
       if (routes.length === 0) {
         container.innerHTML = '<div class="text-center text-dim mt-12">巡回履歴がありません</div>';
         return;
       }
 
       let html = '';
-      routes.forEach(r => {
+      routes.forEach((r, idx) => {
         const dateStr = r.date ? new Date(r.date).toLocaleDateString('ja-JP') : '不明';
         html += `
-          <div class="history-item">
+          <div class="history-item" data-idx="${idx}" style="cursor:pointer">
             <div class="flex-between">
               <span class="history-date">${dateStr}</span>
               <span class="badge badge-primary">${r.store_count || 0}店舗</span>
@@ -895,31 +899,90 @@ const App = (() => {
             ${r.note ? `<div class="text-sm mt-8">${esc(r.note)}</div>` : ''}
           </div>`;
       });
-      // 消去ボタン
-      html += `<div class="mt-12" style="text-align:center">
-        <button class="btn btn-sm btn-accent" id="btn-clear-history">履歴を消去</button>
-      </div>`;
 
       container.innerHTML = html;
 
-      // 2段階確認の消去ボタン
-      document.getElementById('btn-clear-history')?.addEventListener('click', () => {
-        if (!confirm('本当に消去しますか？')) return;
-        if (!confirm('取り消せません。実行しますか？')) return;
-        (async () => {
-          try {
-            await API.clearHistory();
-            await loadData();
-            toast('履歴を消去しました');
-            Router.navigate('history');
-          } catch (err) {
-            toast('消去に失敗: ' + err.message);
-          }
-        })();
+      // 各履歴タップ→詳細
+      container.querySelectorAll('.history-item').forEach(el => {
+        el.addEventListener('click', () => {
+          const idx = Number(el.dataset.idx);
+          Router.navigate('history-detail', { route: historyCache[idx] });
+        });
       });
     } catch (e) {
       container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
     }
+  }
+
+  function renderHistoryDetail(container, { route } = {}) {
+    if (!route) { Router.navigate('history'); return; }
+    setTitle('履歴詳細');
+
+    const dateStr = route.date ? new Date(route.date).toLocaleDateString('ja-JP') : '不明';
+    let html = '';
+
+    // 基本情報
+    html += `
+      <div class="card">
+        <div class="card-title">${dateStr} の巡回</div>
+        <div class="summary-grid">
+          <div class="summary-item"><div class="value">${route.store_count || 0}</div><div class="label">店舗数</div></div>
+          <div class="summary-item"><div class="value">${route.total_distance_km || 0}km</div><div class="label">距離</div></div>
+          <div class="summary-item"><div class="value">${Number(route.total_purchase || 0).toLocaleString()}円</div><div class="label">仕入れ</div></div>
+          <div class="summary-item"><div class="value">${route.total_items || 0}</div><div class="label">点数</div></div>
+        </div>
+      </div>`;
+
+    // 各店舗の詳細
+    if (route.stops && route.stops.length > 0) {
+      html += '<div class="card-title">訪問店舗</div>';
+      route.stops.forEach((s, i) => {
+        const storeName = s.store_name || s.store_id;
+        const statusBadge = s.status === 'visited' ? '<span class="badge badge-success">訪問済</span>'
+          : s.status === 'skipped' ? '<span class="badge">スキップ</span>' : '';
+        const purchase = Number(s.purchase_amount || 0);
+        html += `
+          <div class="card">
+            <div class="flex-between">
+              <span>${i + 1}. ${esc(storeName)}</span>
+              ${statusBadge}
+            </div>
+            ${purchase > 0 ? `<div class="text-sm mt-8">仕入れ: ${purchase.toLocaleString()}円</div>` : ''}
+            ${s.arrival_time ? `<div class="text-sm text-dim">到着: ${new Date(s.arrival_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</div>` : ''}
+            ${s.departure_time ? `<div class="text-sm text-dim">出発: ${new Date(s.departure_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</div>` : ''}
+          </div>`;
+      });
+    }
+
+    if (route.note) {
+      html += `<div class="card"><div class="card-title">メモ</div><div>${esc(route.note)}</div></div>`;
+    }
+
+    // 戻るボタン
+    html += `<button class="btn btn-outline btn-block mt-12" id="btn-back-history">履歴一覧に戻る</button>`;
+
+    // 個別消去ボタン
+    html += `<button class="btn btn-accent btn-block mt-12" id="btn-delete-route">この履歴を消去</button>`;
+
+    container.innerHTML = html;
+
+    document.getElementById('btn-back-history')?.addEventListener('click', () => {
+      Router.navigate('history');
+    });
+
+    document.getElementById('btn-delete-route')?.addEventListener('click', () => {
+      if (!confirm('この履歴を消去しますか？')) return;
+      (async () => {
+        try {
+          await API.deleteRoute({ route_id: route.route_id });
+          await loadData();
+          toast('履歴を消去しました');
+          Router.navigate('history');
+        } catch (err) {
+          toast('消去に失敗: ' + err.message);
+        }
+      })();
+    });
   }
 
   // ---------- 設定 ----------
@@ -966,6 +1029,11 @@ const App = (() => {
       <div class="card">
         <div class="card-title">データ</div>
         <button class="btn btn-outline btn-sm" id="btn-refresh">データ再取得</button>
+      </div>
+      <div class="card">
+        <div class="card-title">履歴消去</div>
+        <div class="text-sm text-dim mb-8">全ての巡回履歴・仕入れ記録を削除します。この操作は取り消せません。</div>
+        <button class="btn btn-sm btn-accent" id="btn-clear-history">全履歴を消去</button>
       </div>`;
 
     container.innerHTML = html;
@@ -1031,6 +1099,20 @@ const App = (() => {
       toast('データ再取得中...');
       await loadData();
       toast(`${stores.length}店舗のデータを更新しました`);
+    });
+
+    document.getElementById('btn-clear-history')?.addEventListener('click', () => {
+      if (!confirm('全ての巡回履歴を消去しますか？')) return;
+      if (!confirm('本当に消去しますか？この操作は取り消せません。')) return;
+      (async () => {
+        try {
+          await API.clearHistory();
+          await loadData();
+          toast('全履歴を消去しました');
+        } catch (err) {
+          toast('消去に失敗: ' + err.message);
+        }
+      })();
     });
   }
 

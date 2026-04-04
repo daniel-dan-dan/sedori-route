@@ -68,6 +68,7 @@ const API = (() => {
     addMemo:         (b)         => post('addMemo', b),
     addFind:         (b)         => post('addFind', b),
     updateConfig:    (entries)   => post('updateConfig', { entries }),
+    deleteRoute:     (b)         => post('deleteRoute', b),
     clearHistory:    ()          => post('clearHistory'),
   };
 })();
