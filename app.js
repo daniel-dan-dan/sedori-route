@@ -102,6 +102,17 @@ const App = (() => {
     return store.category || 'その他';
   }
 
+  function getDefaultFilter(mode) {
+    if (mode === 'chain') {
+      const chainCounts = {};
+      stores.forEach(s => { const c = getChain(s); chainCounts[c] = (chainCounts[c] || 0) + 1; });
+      const sorted = Object.keys(chainCounts).sort((a, b) => chainCounts[b] - chainCounts[a]);
+      return sorted[0] || 'その他';
+    }
+    if (mode === 'genre') return GENRE_ORDER[0];
+    return AREA_DISPLAY_ORDER[0];
+  }
+
   // ---------- 初期化 ----------
 
   async function init() {
@@ -184,6 +195,7 @@ const App = (() => {
 
   function renderHome(container) {
     setTitle('巡回ルート');
+    if (activeFilter === 'all') activeFilter = getDefaultFilter(filterMode);
     let html = '';
 
     // モード切替（エリア / ジャンル / チェーン）
@@ -195,7 +207,6 @@ const App = (() => {
 
     // フィルタータブ
     html += '<div class="filter-tabs">';
-    html += `<div class="filter-tab ${activeFilter === 'all' ? 'active' : ''}" data-cat="all">全て(${stores.length})</div>`;
     if (filterMode === 'chain') {
       // チェーン名を集計して店舗数順にソート
       const chainCounts = {};
@@ -230,9 +241,7 @@ const App = (() => {
 
     // 店舗フィルタリング
     let filtered;
-    if (activeFilter === 'all') {
-      filtered = stores;
-    } else if (filterMode === 'chain') {
+    if (filterMode === 'chain') {
       filtered = stores.filter(s => getChain(s) === activeFilter);
     } else if (filterMode === 'genre') {
       filtered = stores.filter(s => getGenre(s) === activeFilter);
@@ -299,7 +308,7 @@ const App = (() => {
     container.querySelectorAll('.mode-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         filterMode = btn.dataset.mode;
-        activeFilter = 'all';
+        activeFilter = getDefaultFilter(btn.dataset.mode);
         Router.navigate('home');
       });
     });
