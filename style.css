@@ -69,6 +69,7 @@ body {
   cursor: pointer;
   border: none;
   background: none;
+  touch-action: manipulation;
 }
 .nav-item.active { color: var(--primary); }
 .nav-item .icon { font-size: 20px; }
@@ -111,6 +112,7 @@ body {
   cursor: pointer;
   transition: border-color .15s, box-shadow .15s;
   box-shadow: var(--shadow);
+  touch-action: manipulation;
 }
 .store-item.selected {
   border-color: var(--primary);
@@ -169,6 +171,8 @@ body {
   color: #fff;
 }
 .btn:active { transform: scale(.97); }
+.btn { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+.btn:disabled { opacity: .5; pointer-events: none; }
 .btn-primary { background: var(--primary); }
 .btn-primary:hover { background: var(--primary-dark); }
 .btn-accent { background: var(--accent); }

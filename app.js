@@ -460,32 +460,34 @@ const App = (() => {
     // タイマー開始
     startPatrolTimer();
 
-    // イベント
-    document.getElementById('btn-arrive')?.addEventListener('click', async () => {
+    // イベント（UIを即更新、API同期はバックグラウンド）
+    document.getElementById('btn-arrive')?.addEventListener('click', () => {
       current.status = 'visiting';
       current.arrivalTime = new Date().toISOString();
-      await API.updateStop({
+      Router.navigate('patrol');
+      // バックグラウンドでAPI同期
+      API.updateStop({
         route_id: patrolState.routeId,
         store_id: current.store_id,
         status: 'visiting',
         arrival_time: current.arrivalTime
-      });
-      await Storage.saveCurrentRoute(patrolState);
-      Router.navigate('patrol');
+      }).catch(() => {});
+      Storage.saveCurrentRoute(patrolState);
     });
 
-    document.getElementById('btn-depart')?.addEventListener('click', async () => {
+    document.getElementById('btn-depart')?.addEventListener('click', () => {
       current.status = 'visited';
       current.departureTime = new Date().toISOString();
-      await API.updateStop({
+      // バックグラウンドでAPI同期
+      API.updateStop({
         route_id: patrolState.routeId,
         store_id: current.store_id,
         departure_time: current.departureTime,
         purchase_amount: current.purchaseAmount,
         purchase_items: current.purchaseItems
-      });
+      }).catch(() => {});
       patrolState.currentIdx++;
-      await Storage.saveCurrentRoute(patrolState);
+      Storage.saveCurrentRoute(patrolState);
       if (patrolState.currentIdx >= stops.length) {
         endPatrol();
       } else {
@@ -493,15 +495,16 @@ const App = (() => {
       }
     });
 
-    document.getElementById('btn-skip')?.addEventListener('click', async () => {
+    document.getElementById('btn-skip')?.addEventListener('click', () => {
       current.status = 'skipped';
-      await API.updateStop({
+      // バックグラウンドでAPI同期
+      API.updateStop({
         route_id: patrolState.routeId,
         store_id: current.store_id,
         status: 'skipped'
-      });
+      }).catch(() => {});
       patrolState.currentIdx++;
-      await Storage.saveCurrentRoute(patrolState);
+      Storage.saveCurrentRoute(patrolState);
       if (patrolState.currentIdx >= stops.length) {
         endPatrol();
       } else {
