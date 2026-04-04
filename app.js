@@ -8,7 +8,7 @@ const App = (() => {
   let selectedStoreIds = new Set();
   let optimizedRoute = null;
   let patrolState = null; // { routeId, stops, currentIdx }
-  let filterMode = 'area'; // 'category' or 'area'
+  let filterMode = 'area'; // 'chain' or 'area'
   let activeFilter = 'all';
   let patrolTimerInterval = null;
 
@@ -39,6 +39,50 @@ const App = (() => {
       if (a.test(store)) return a.id;
     }
     return 'other';
+  }
+
+  // ---------- チェーン名抽出 ----------
+
+  const CHAIN_RULES = [
+    // リサイクル系（長い名前を先に判定）
+    { re: /BOOKOFF|ブックオフ/i, chain: 'ブックオフ' },
+    { re: /スーパーセカンドストリート|セカンドストリート/, chain: 'セカンドストリート' },
+    { re: /トレファクスタイル|トレジャーファクトリー/, chain: 'トレファク' },
+    { re: /ハードオフ/, chain: 'ハードオフ' },
+    { re: /オフハウス/, chain: 'オフハウス' },
+    // 家電量販
+    { re: /ヤマダデンキ/, chain: 'ヤマダデンキ' },
+    { re: /ケーズデンキ/, chain: 'ケーズデンキ' },
+    { re: /コジマ|ビックカメラ/, chain: 'コジマ×ビックカメラ' },
+    { re: /エディオン/, chain: 'エディオン' },
+    { re: /ノジマ/, chain: 'ノジマ' },
+    { re: /ジョーシン/, chain: 'ジョーシン' },
+    // ドンキ系
+    { re: /ドン・キホーテ|ドンキ/, chain: 'ドンキホーテ' },
+    // HC系
+    { re: /カインズ/, chain: 'カインズ' },
+    { re: /DCM/, chain: 'DCM' },
+    { re: /ダイユーエイト/, chain: 'ダイユーエイト' },
+    { re: /サンデー/, chain: 'サンデー' },
+    { re: /コメリ/, chain: 'コメリ' },
+    { re: /コーナン/, chain: 'コーナン' },
+    // カー用品
+    { re: /オートバックス/, chain: 'オートバックス' },
+    { re: /イエローハット/, chain: 'イエローハット' },
+    { re: /ジェームス/, chain: 'ジェームス' },
+    // その他
+    { re: /イオン/, chain: 'イオン' },
+    { re: /コストコ/, chain: 'コストコ' },
+    { re: /トイザらス/, chain: 'トイザらス' },
+    { re: /オフィスベンダー/, chain: 'オフィスベンダー' },
+  ];
+
+  function getChain(store) {
+    const name = store.name || '';
+    for (const r of CHAIN_RULES) {
+      if (r.re.test(name)) return r.chain;
+    }
+    return name.split(/[\s　]/)[0] || 'その他';
   }
 
   // ---------- 初期化 ----------
@@ -124,20 +168,25 @@ const App = (() => {
     setTitle('巡回ルート');
     let html = '';
 
-    // モード切替（エリア / カテゴリ）
+    // モード切替（エリア / チェーン）
     html += `<div class="mode-toggle">
       <button class="mode-btn ${filterMode === 'area' ? 'active' : ''}" data-mode="area">エリア別</button>
-      <button class="mode-btn ${filterMode === 'category' ? 'active' : ''}" data-mode="category">カテゴリ別</button>
+      <button class="mode-btn ${filterMode === 'chain' ? 'active' : ''}" data-mode="chain">チェーン別</button>
     </div>`;
 
     // フィルタータブ
-    if (filterMode === 'category') {
-      const categories = ['all', '家電量販', 'HC', 'ドンキ', 'リサイクル', 'その他'];
+    if (filterMode === 'chain') {
+      // チェーン名を集計して店舗数順にソート
+      const chainCounts = {};
+      stores.forEach(s => {
+        const c = getChain(s);
+        chainCounts[c] = (chainCounts[c] || 0) + 1;
+      });
+      const chainNames = Object.keys(chainCounts).sort((a, b) => chainCounts[b] - chainCounts[a]);
       html += '<div class="filter-tabs">';
-      categories.forEach(c => {
-        const label = c === 'all' ? '全て' : c;
-        const count = c === 'all' ? stores.length : stores.filter(s => s.category === c).length;
-        html += `<div class="filter-tab ${activeFilter === c ? 'active' : ''}" data-cat="${c}">${label}(${count})</div>`;
+      html += `<div class="filter-tab ${activeFilter === 'all' ? 'active' : ''}" data-cat="all">全て(${stores.length})</div>`;
+      chainNames.forEach(c => {
+        html += `<div class="filter-tab ${activeFilter === c ? 'active' : ''}" data-cat="${c}">${c}(${chainCounts[c]})</div>`;
       });
       html += '</div>';
     } else {
@@ -158,8 +207,8 @@ const App = (() => {
     let filtered;
     if (activeFilter === 'all') {
       filtered = stores;
-    } else if (filterMode === 'category') {
-      filtered = stores.filter(s => s.category === activeFilter);
+    } else if (filterMode === 'chain') {
+      filtered = stores.filter(s => getChain(s) === activeFilter);
     } else {
       filtered = stores.filter(s => getArea(s) === activeFilter);
     }
@@ -171,7 +220,7 @@ const App = (() => {
     const allFilteredSelected = sorted.length > 0 && sorted.every(s => selectedStoreIds.has(s.store_id));
     if (activeFilter !== 'all' && sorted.length > 0) {
       html += `<div class="flex-between mt-8 mb-8">
-        <span class="text-sm" style="font-weight:600">${filterMode === 'area' ? AREAS.find(a => a.id === activeFilter)?.name : activeFilter} ${sorted.length}店舗</span>
+        <span class="text-sm" style="font-weight:600">${filterMode === 'area' ? (AREAS.find(a => a.id === activeFilter)?.name || activeFilter) : activeFilter} ${sorted.length}店舗</span>
         <button class="btn btn-sm ${allFilteredSelected ? 'btn-outline' : 'btn-primary'}" id="btn-select-area">${allFilteredSelected ? '全解除' : '全選択'}</button>
       </div>`;
     }
@@ -736,7 +785,7 @@ const App = (() => {
         <input type="text" class="form-input" id="sf-name" value="${esc(s.name || '')}"></div>
       <div class="form-group"><label class="form-label">カテゴリ</label>
         <select class="form-select" id="sf-category">
-          ${['家電量販','HC','ドンキ','リサイクル','その他'].map(c =>
+          ${['家電量販','HC','ドンキ','リサイクル','カー用品','その他'].map(c =>
             `<option ${s.category === c ? 'selected' : ''}>${c}</option>`).join('')}
         </select></div>
       <div class="form-group"><label class="form-label">住所</label>
@@ -804,7 +853,28 @@ const App = (() => {
             ${r.note ? `<div class="text-sm mt-8">${esc(r.note)}</div>` : ''}
           </div>`;
       });
+      // 消去ボタン
+      html += `<div class="mt-12" style="text-align:center">
+        <button class="btn btn-sm btn-accent" id="btn-clear-history">履歴を消去</button>
+      </div>`;
+
       container.innerHTML = html;
+
+      // 2段階確認の消去ボタン
+      document.getElementById('btn-clear-history')?.addEventListener('click', () => {
+        if (!confirm('本当に消去しますか？')) return;
+        if (!confirm('取り消せません。実行しますか？')) return;
+        (async () => {
+          try {
+            await API.clearHistory();
+            await loadData();
+            toast('履歴を消去しました');
+            Router.navigate('history');
+          } catch (err) {
+            toast('消去に失敗: ' + err.message);
+          }
+        })();
+      });
     } catch (e) {
       container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
     }
