@@ -477,12 +477,8 @@ const App = (() => {
         </div>`;
     }
 
-    // スキップ/終了
-    html += `
-      <div class="btn-group mt-12">
-        <button class="btn btn-sm btn-outline" style="flex:1;" id="btn-skip">スキップ</button>
-        <button class="btn btn-sm btn-accent" style="flex:1;" id="btn-end">巡回終了</button>
-      </div>`;
+    // スキップ
+    html += `<div class="mt-12"><button class="btn btn-sm btn-outline btn-block" id="btn-skip">スキップ</button></div>`;
 
     // 残りの店舗
     if (currentIdx < stops.length - 1) {
@@ -497,6 +493,9 @@ const App = (() => {
           </div>`;
       }
     }
+
+    // 巡回終了（残り店舗の下に離して配置）
+    html += `<div style="margin-top:40px;"><button class="btn btn-sm btn-accent btn-block" id="btn-end">巡回終了</button></div>`;
 
     container.innerHTML = html;
 
