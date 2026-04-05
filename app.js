@@ -948,16 +948,11 @@ const App = (() => {
 
     document.getElementById('btn-delete-route')?.addEventListener('click', () => {
       if (!confirm('この履歴を消去しますか？')) return;
-      (async () => {
-        try {
-          await API.deleteRoute({ route_id: route.route_id });
-          await loadData();
-          toast('履歴を消去しました');
-          Router.navigate('history');
-        } catch (err) {
-          toast('消去に失敗: ' + err.message);
-        }
-      })();
+      toast('履歴を消去しました');
+      Router.navigate('history');
+      // バックグラウンドでAPI同期
+      API.deleteRoute({ route_id: route.route_id }).catch(() => {});
+      loadData();
     });
   }
 
