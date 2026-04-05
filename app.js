@@ -913,7 +913,8 @@ const App = (() => {
     if (route.stops && route.stops.length > 0) {
       html += '<div class="card-title">訪問店舗</div>';
       route.stops.forEach((s, i) => {
-        const storeName = s.store_name || s.store_id;
+        const storeObj = stores.find(st => st.store_id === s.store_id);
+        const storeName = (storeObj && storeObj.name) || s.store_name || s.store_id;
         const statusBadge = s.status === 'visited' ? '<span class="badge badge-success">訪問済</span>'
           : s.status === 'skipped' ? '<span class="badge">スキップ</span>' : '';
         const purchase = Number(s.purchase_amount || 0);
