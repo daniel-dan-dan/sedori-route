@@ -5,7 +5,7 @@
 const App = (() => {
   let stores = [];
   let config = {};
-  let selectedStoreIds = new Set();
+  let selectedStoreIds = []; // 選択順を保持する配列
   let optimizedRoute = null;
   let patrolState = null; // { routeId, stops, currentIdx }
   let filterMode = 'area'; // 'area' | 'genre' | 'chain'
@@ -102,6 +102,20 @@ const App = (() => {
     return store.category || 'その他';
   }
 
+  // ---------- 選択順番号ヘルパー ----------
+  const CIRCLED_NUMBERS = [
+    '\u2460','\u2461','\u2462','\u2463','\u2464',
+    '\u2465','\u2466','\u2467','\u2468','\u2469',
+    '\u246A','\u246B','\u246C','\u246D','\u246E',
+    '\u246F','\u2470','\u2471','\u2472','\u2473'
+  ]; // ①〜⑳
+
+  function getSelectionLabel(index) {
+    // index は 0-based
+    if (index < 20) return CIRCLED_NUMBERS[index];
+    return `(${index + 1})`;
+  }
+
   function getDefaultFilter(mode) {
     if (mode === 'chain') {
       const chainCounts = {};
@@ -167,6 +181,7 @@ const App = (() => {
 
   function registerViews() {
     Router.register('home', renderHome);
+    Router.register('route-select', renderRouteSelect);
     Router.register('history', renderHistory);
     Router.register('history-detail', renderHistoryDetail);
     Router.register('settings', renderSettings);
@@ -260,7 +275,7 @@ const App = (() => {
     }
 
     // エリア一括選択ボタン
-    const allFilteredSelected = sorted.length > 0 && sorted.every(s => selectedStoreIds.has(s.store_id));
+    const allFilteredSelected = sorted.length > 0 && sorted.every(s => selectedStoreIds.includes(s.store_id));
     if (activeFilter !== 'all' && sorted.length > 0) {
       html += `<div class="flex-between mt-8 mb-8">
         <span class="text-sm" style="font-weight:600">${filterMode === 'area' ? (AREAS.find(a => a.id === activeFilter)?.name || activeFilter) : filterMode === 'genre' ? (GENRE_DISPLAY[activeFilter] || activeFilter) : activeFilter} ${sorted.length}店舗</span>
@@ -270,7 +285,8 @@ const App = (() => {
 
     // 店舗一覧
     sorted.forEach(s => {
-      const sel = selectedStoreIds.has(s.store_id) ? 'selected' : '';
+      const selIdx = selectedStoreIds.indexOf(s.store_id);
+      const sel = selIdx >= 0 ? 'selected' : '';
       const score = calcPriorityScore(s);
       html += `
         <div class="store-item ${sel}" data-sid="${s.store_id}">
@@ -280,7 +296,7 @@ const App = (() => {
             <div class="store-meta">${esc(s.category)} | ${formatTime(s.open_time)}-${formatTime(s.close_time)} | ${s.avg_stay_min}分</div>
             ${score > 0 ? `<div class="store-score">Score: ${score}</div>` : ''}
           </div>
-          <div class="store-check">${sel ? '&#x2713;' : ''}</div>
+          <div class="store-check">${selIdx >= 0 ? getSelectionLabel(selIdx) : ''}</div>
         </div>`;
     });
 
@@ -288,10 +304,10 @@ const App = (() => {
     html += `
       <div style="position:sticky;bottom:60px;padding:8px 0;background:var(--bg);">
         <div class="flex-between mb-8">
-          <span class="text-sm text-dim">${selectedStoreIds.size}店舗 選択中</span>
+          <span class="text-sm text-dim">${selectedStoreIds.length}店舗 選択中</span>
           <button class="btn btn-sm btn-outline" id="btn-clear">クリア</button>
         </div>
-        <button class="btn btn-primary btn-block" id="btn-optimize" ${selectedStoreIds.size < 1 ? 'disabled' : ''}>
+        <button class="btn btn-primary btn-block" id="btn-optimize" ${selectedStoreIds.length < 1 ? 'disabled' : ''}>
           ルート最適化
         </button>
       </div>`;
@@ -323,9 +339,12 @@ const App = (() => {
     // イベント: エリア一括選択
     document.getElementById('btn-select-area')?.addEventListener('click', () => {
       if (allFilteredSelected) {
-        sorted.forEach(s => selectedStoreIds.delete(s.store_id));
+        const removeSet = new Set(sorted.map(s => s.store_id));
+        selectedStoreIds = selectedStoreIds.filter(id => !removeSet.has(id));
       } else {
-        sorted.forEach(s => selectedStoreIds.add(s.store_id));
+        sorted.forEach(s => {
+          if (!selectedStoreIds.includes(s.store_id)) selectedStoreIds.push(s.store_id);
+        });
       }
       optimizedRoute = null;
       Router.navigate('home');
@@ -335,15 +354,16 @@ const App = (() => {
     container.querySelectorAll('.store-item').forEach(el => {
       el.addEventListener('click', () => {
         const sid = el.dataset.sid;
-        if (selectedStoreIds.has(sid)) selectedStoreIds.delete(sid);
-        else selectedStoreIds.add(sid);
+        const idx = selectedStoreIds.indexOf(sid);
+        if (idx >= 0) selectedStoreIds.splice(idx, 1);
+        else selectedStoreIds.push(sid);
         optimizedRoute = null;
         Router.navigate('home');
       });
     });
 
     document.getElementById('btn-clear')?.addEventListener('click', () => {
-      selectedStoreIds.clear();
+      selectedStoreIds = [];
       optimizedRoute = null;
       Router.navigate('home');
     });
@@ -352,19 +372,12 @@ const App = (() => {
   }
 
   function doOptimize() {
-    const selected = stores.filter(s => selectedStoreIds.has(s.store_id));
+    const selected = selectedStoreIds.map(id => stores.find(s => s.store_id === id)).filter(Boolean);
     const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
     const speed = Number(config.avg_speed_kmh) || 30;
-    optimizedRoute = RouteOptimizer.optimize(home, selected, speed);
-    Router.navigate('home');
-    // 最適化ルート表示部分へスクロール
-    setTimeout(() => {
-      const el = document.querySelector('.route-result');
-      if (el) {
-        const y = el.getBoundingClientRect().top + window.pageYOffset - 60;
-        window.scrollTo({ top: y, behavior: 'smooth' });
-      }
-    }, 100);
+    const optRoute = RouteOptimizer.optimize(home, selected, speed);
+    const selRoute = RouteOptimizer.calcSelectionOrder(home, selected, speed);
+    Router.navigate('route-select', { optRoute, selRoute });
   }
 
   function renderOptimizedRoute(container) {
@@ -401,6 +414,113 @@ const App = (() => {
     container.insertAdjacentHTML('beforeend', html);
 
     document.getElementById('btn-start-patrol')?.addEventListener('click', startPatrol);
+  }
+
+  // ---------- ルート選択画面 ----------
+
+  function renderRouteSelect(container, { optRoute, selRoute } = {}) {
+    if (!optRoute || !selRoute) { Router.navigate('home'); return; }
+    setTitle('ルート選択');
+
+    // 距離の差分を計算
+    const diffKm = Math.round((selRoute.totalDistanceKm - optRoute.totalDistanceKm) * 10) / 10;
+    const diffMin = selRoute.estimatedMinutes - optRoute.estimatedMinutes;
+
+    function formatEstimate(r) {
+      const h = Math.floor(r.estimatedMinutes / 60);
+      const m = r.estimatedMinutes % 60;
+      return h > 0 ? `${h}h${m}m` : `${m}m`;
+    }
+
+    function buildStopList(orderedStores) {
+      let html = '';
+      orderedStores.forEach((s, i) => {
+        html += `
+          <div class="route-stop">
+            <div class="stop-num">${i + 1}</div>
+            <span class="stop-name">${s.icon || ''} ${esc(s.name)}</span>
+            <span class="stop-stay">${s.avg_stay_min || 30}分</span>
+          </div>`;
+      });
+      return html;
+    }
+
+    let html = '<div class="text-sm text-dim text-center mb-8">巡回ルートを選択してください</div>';
+
+    // 最適化ルートカード
+    html += `
+      <div class="route-select-card selected" data-route="optimized">
+        <div class="route-select-header">
+          <div class="route-select-title">
+            <span class="route-select-icon">&#x26A1;</span>最適化ルート
+          </div>
+          <div class="route-select-badge badge badge-primary">おすすめ</div>
+        </div>
+        <div class="route-stats">
+          <div class="route-stat"><div class="value">${optRoute.totalDistanceKm}</div><div class="label">km</div></div>
+          <div class="route-stat"><div class="value">${formatEstimate(optRoute)}</div><div class="label">推定時間</div></div>
+          <div class="route-stat"><div class="value">${optRoute.orderedStores.length}</div><div class="label">店舗</div></div>
+        </div>
+        ${buildStopList(optRoute.orderedStores)}
+      </div>`;
+
+    // 選択順ルートカード
+    html += `
+      <div class="route-select-card" data-route="selection">
+        <div class="route-select-header">
+          <div class="route-select-title">
+            <span class="route-select-icon">&#x1F4CB;</span>選択順ルート
+          </div>
+          ${diffKm > 0 ? `<div class="text-sm text-dim">+${diffKm}km / +${diffMin}分</div>` : ''}
+        </div>
+        <div class="route-stats">
+          <div class="route-stat"><div class="value">${selRoute.totalDistanceKm}</div><div class="label">km</div></div>
+          <div class="route-stat"><div class="value">${formatEstimate(selRoute)}</div><div class="label">推定時間</div></div>
+          <div class="route-stat"><div class="value">${selRoute.orderedStores.length}</div><div class="label">店舗</div></div>
+        </div>
+        ${buildStopList(selRoute.orderedStores)}
+      </div>`;
+
+    // アクションボタン
+    html += `
+      <div style="position:sticky;bottom:60px;padding:8px 0;background:var(--bg);">
+        <button class="btn btn-success btn-block" id="btn-confirm-route">このルートで開始</button>
+        <button class="btn btn-outline btn-block mt-8" id="btn-back-select">戻る</button>
+      </div>`;
+
+    container.innerHTML = html;
+
+    // 選択状態管理
+    let selectedRoute = 'optimized';
+
+    container.querySelectorAll('.route-select-card').forEach(card => {
+      card.addEventListener('click', () => {
+        container.querySelectorAll('.route-select-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        selectedRoute = card.dataset.route;
+      });
+    });
+
+    document.getElementById('btn-confirm-route')?.addEventListener('click', () => {
+      optimizedRoute = selectedRoute === 'optimized' ? optRoute : selRoute;
+      // Google Maps URL生成してナビ画面へ
+      const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
+      const mapsUrl = RouteOptimizer.generateMapsUrl(home, optimizedRoute.orderedStores);
+      optimizedRoute._mapsUrl = mapsUrl;
+      Router.navigate('home');
+      // 最適化ルート表示部分へスクロール
+      setTimeout(() => {
+        const el = document.querySelector('.route-result');
+        if (el) {
+          const y = el.getBoundingClientRect().top + window.pageYOffset - 60;
+          window.scrollTo({ top: y, behavior: 'smooth' });
+        }
+      }, 100);
+    });
+
+    document.getElementById('btn-back-select')?.addEventListener('click', () => {
+      Router.navigate('home');
+    });
   }
 
   // ---------- 巡回モード ----------
@@ -768,7 +888,7 @@ const App = (() => {
     container.innerHTML = html;
     document.getElementById('btn-back-home')?.addEventListener('click', () => {
       optimizedRoute = null;
-      selectedStoreIds.clear();
+      selectedStoreIds = [];
       Router.navigate('home');
       setNavActive('home');
     });

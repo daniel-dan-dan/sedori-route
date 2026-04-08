@@ -140,5 +140,35 @@ const RouteOptimizer = (() => {
     return url;
   }
 
-  return { optimize, generateMapsUrl, haversine };
+  // 選択順ルートの距離・時間を計算（最適化なし、選択順そのまま）
+  function calcSelectionOrder(home, stores, avgSpeedKmh = 30) {
+    if (stores.length === 0) return { orderedStores: [], totalDistanceKm: 0, estimatedMinutes: 0 };
+
+    const storesWithCoords = stores.map(s => ({
+      ...s,
+      lat: Number(s.lat),
+      lng: Number(s.lng)
+    }));
+    const homeCoords = { lat: Number(home.lat), lng: Number(home.lng) };
+
+    // 自宅→店舗1→店舗2→...→店舗N→自宅 の総距離
+    let totalKm = 0;
+    let prev = homeCoords;
+    for (const s of storesWithCoords) {
+      totalKm += haversine(prev.lat, prev.lng, s.lat, s.lng);
+      prev = s;
+    }
+    totalKm += haversine(prev.lat, prev.lng, homeCoords.lat, homeCoords.lng);
+
+    const driveMin = totalKm / avgSpeedKmh * 60;
+    const stayMin = storesWithCoords.reduce((sum, s) => sum + (Number(s.avg_stay_min) || 30), 0);
+
+    return {
+      orderedStores: storesWithCoords,
+      totalDistanceKm: Math.round(totalKm * 10) / 10,
+      estimatedMinutes: Math.round(driveMin + stayMin)
+    };
+  }
+
+  return { optimize, calcSelectionOrder, generateMapsUrl, haversine };
 })();
