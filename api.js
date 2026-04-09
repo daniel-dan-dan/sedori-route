@@ -64,6 +64,7 @@ const API = (() => {
     startRoute:      (b)         => post('startRoute', b),
     updateStop:      (b)         => post('updateStop', b),
     endRoute:        (b)         => post('endRoute', b),
+    addStopToRoute:  (b)         => post('addStopToRoute', b),
     addPurchase:     (b)         => post('addPurchase', b),
     addMemo:         (b)         => post('addMemo', b),
     addFind:         (b)         => post('addFind', b),

@@ -614,6 +614,9 @@ const App = (() => {
       }
     }
 
+    // 店舗を追加ボタン
+    html += `<div class="mt-12"><button class="btn btn-sm btn-outline btn-block" id="btn-add-stop" style="border-style:dashed;color:var(--primary)">+ 店舗を追加</button></div>`;
+
     // 巡回終了（残り店舗の下に離して配置）
     html += `<div style="margin-top:40px;"><button class="btn btn-sm btn-accent btn-block" id="btn-end">巡回終了</button></div>`;
 
@@ -675,6 +678,30 @@ const App = (() => {
     });
 
     document.getElementById('btn-end')?.addEventListener('click', () => endPatrol());
+
+    document.getElementById('btn-add-stop')?.addEventListener('click', () => {
+      const existingIds = new Set(patrolState.stops.map(s => s.store_id));
+      showAddStopModal(existingIds, (store) => {
+        // ローカルのpatrolStateに追加
+        const newStop = {
+          ...store,
+          status: 'planned',
+          arrivalTime: null,
+          departureTime: null,
+          purchaseAmount: 0,
+          purchaseItems: 0
+        };
+        patrolState.stops.push(newStop);
+        Storage.saveCurrentRoute(patrolState);
+        toast(`${store.name} を追加しました`);
+        Router.navigate('patrol');
+        // バックグラウンドでAPI同期
+        API.addStopToRoute({
+          route_id: patrolState.routeId,
+          store_id: store.store_id
+        }).catch(() => {});
+      });
+    });
 
     document.getElementById('btn-purchase')?.addEventListener('click', () => showPurchaseModal(current));
     document.getElementById('btn-memo')?.addEventListener('click', () => showMemoModal(current));
@@ -842,6 +869,117 @@ const App = (() => {
       // バックグラウンドでAPI同期
       API.addFind(findData).catch(() => {});
     });
+  }
+
+  // ---------- 店舗追加モーダル（巡回中 & 履歴詳細共用） ----------
+
+  function showAddStopModal(existingStoreIds, onSelect) {
+    // existingStoreIds: Set of store_id already in the route
+    const available = stores.filter(s => !existingStoreIds.has(s.store_id));
+    if (available.length === 0) {
+      toast('追加できる店舗がありません');
+      return;
+    }
+
+    // エリア・チェーン情報付与
+    const storesWithMeta = available.map(s => ({
+      ...s,
+      _area: getArea(s),
+      _areaName: AREAS.find(a => a.id === getArea(s))?.name || 'その他',
+      _chain: getChain(s),
+      _genre: getGenre(s)
+    }));
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+
+    // フィルタオプション生成
+    const areaSet = [...new Set(storesWithMeta.map(s => s._area))];
+    const areaOptions = areaSet.map(id => {
+      const a = AREAS.find(x => x.id === id);
+      return `<option value="${id}">${a ? a.name : id}</option>`;
+    }).join('');
+
+    const genreSet = [...new Set(storesWithMeta.map(s => s._genre))];
+    const genreOptions = genreSet.map(g => `<option value="${g}">${GENRE_DISPLAY[g] || g}</option>`).join('');
+
+    overlay.innerHTML = `
+      <div class="modal" style="max-height:85vh;">
+        <div class="modal-title">店舗を追加</div>
+        <div class="form-group">
+          <input type="text" class="form-input" id="stop-search" placeholder="店舗名で検索...">
+        </div>
+        <div class="flex gap-8 mb-8">
+          <select class="form-select" id="stop-filter-area" style="flex:1;font-size:12px;padding:6px 8px;">
+            <option value="">エリア: すべて</option>
+            ${areaOptions}
+          </select>
+          <select class="form-select" id="stop-filter-genre" style="flex:1;font-size:12px;padding:6px 8px;">
+            <option value="">ジャンル: すべて</option>
+            ${genreOptions}
+          </select>
+        </div>
+        <div id="stop-store-list" style="max-height:50vh;overflow-y:auto;"></div>
+        <div class="mt-8">
+          <button class="btn btn-outline btn-block" id="stop-modal-cancel">閉じる</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const listEl = overlay.querySelector('#stop-store-list');
+    const searchInput = overlay.querySelector('#stop-search');
+    const areaFilter = overlay.querySelector('#stop-filter-area');
+    const genreFilter = overlay.querySelector('#stop-filter-genre');
+
+    function renderList() {
+      const query = (searchInput.value || '').trim().toLowerCase();
+      const areaVal = areaFilter.value;
+      const genreVal = genreFilter.value;
+
+      let filtered = storesWithMeta;
+      if (query) filtered = filtered.filter(s => s.name.toLowerCase().includes(query));
+      if (areaVal) filtered = filtered.filter(s => s._area === areaVal);
+      if (genreVal) filtered = filtered.filter(s => s._genre === genreVal);
+
+      if (filtered.length === 0) {
+        listEl.innerHTML = '<div class="text-center text-dim text-sm" style="padding:20px;">該当する店舗がありません</div>';
+        return;
+      }
+
+      let html = '';
+      filtered.forEach(s => {
+        html += `
+          <div class="store-item add-stop-item" data-sid="${s.store_id}" style="cursor:pointer;">
+            <span class="store-icon">${s.icon || '&#x1f3ea;'}</span>
+            <div class="store-info">
+              <div class="store-name">${esc(s.name)}</div>
+              <div class="store-meta">${esc(s._areaName)} | ${esc(s.category)} | ${formatTime(s.open_time)}-${formatTime(s.close_time)}</div>
+            </div>
+          </div>`;
+      });
+      listEl.innerHTML = html;
+
+      // 各店舗クリックで選択
+      listEl.querySelectorAll('.add-stop-item').forEach(el => {
+        el.addEventListener('click', () => {
+          const sid = el.dataset.sid;
+          const store = stores.find(s => s.store_id === sid);
+          if (store) {
+            overlay.remove();
+            onSelect(store);
+          }
+        });
+      });
+    }
+
+    renderList();
+
+    searchInput.addEventListener('input', renderList);
+    areaFilter.addEventListener('change', renderList);
+    genreFilter.addEventListener('change', renderList);
+
+    overlay.querySelector('#stop-modal-cancel').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   }
 
   // ---------- サマリー画面 ----------
@@ -1054,6 +1192,9 @@ const App = (() => {
       html += `<div class="card"><div class="card-title">メモ</div><div>${esc(route.note)}</div></div>`;
     }
 
+    // 店舗を追加ボタン
+    html += `<button class="btn btn-outline btn-block mt-12" id="btn-add-stop-history" style="border-style:dashed;color:var(--primary)">+ 店舗を追加</button>`;
+
     // 戻るボタン
     html += `<button class="btn btn-outline btn-block mt-12" id="btn-back-history">履歴一覧に戻る</button>`;
 
@@ -1061,6 +1202,32 @@ const App = (() => {
     html += `<button class="btn btn-accent btn-block mt-12" id="btn-delete-route">この履歴を消去</button>`;
 
     container.innerHTML = html;
+
+    document.getElementById('btn-add-stop-history')?.addEventListener('click', () => {
+      const existingIds = new Set((route.stops || []).map(s => s.store_id));
+      showAddStopModal(existingIds, async (store) => {
+        // route.stopsに追加（ローカル）
+        if (!route.stops) route.stops = [];
+        route.stops.push({
+          route_id: route.route_id,
+          store_id: store.store_id,
+          stop_order: route.stops.length + 1,
+          status: 'planned',
+          arrival_time: '',
+          departure_time: '',
+          purchase_amount: 0,
+          purchase_items: 0
+        });
+        route.store_count = route.stops.length;
+        toast(`${store.name} を追加しました`);
+        Router.navigate('history-detail', { route });
+        // API同期
+        API.addStopToRoute({
+          route_id: route.route_id,
+          store_id: store.store_id
+        }).catch(() => {});
+      });
+    });
 
     document.getElementById('btn-back-history')?.addEventListener('click', () => {
       Router.navigate('history');
