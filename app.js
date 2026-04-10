@@ -263,12 +263,19 @@ const App = (() => {
       filtered = stores.filter(s => getArea(s) === activeFilter);
     }
 
-    // ソート: エリア別はジャンル順→スコア順、それ以外はスコア順
+    // ソート: チェーン名でまとめ、同チェーン内はスコア順
     let sorted;
     if (filterMode === 'area') {
       sorted = [...filtered].sort((a, b) => {
         const gi = GENRE_ORDER.indexOf(getGenre(a)) - GENRE_ORDER.indexOf(getGenre(b));
-        return gi !== 0 ? gi : calcPriorityScore(b) - calcPriorityScore(a);
+        if (gi !== 0) return gi;
+        const ci = getChain(a).localeCompare(getChain(b));
+        return ci !== 0 ? ci : calcPriorityScore(b) - calcPriorityScore(a);
+      });
+    } else if (filterMode === 'genre') {
+      sorted = [...filtered].sort((a, b) => {
+        const ci = getChain(a).localeCompare(getChain(b));
+        return ci !== 0 ? ci : calcPriorityScore(b) - calcPriorityScore(a);
       });
     } else {
       sorted = [...filtered].sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a));
