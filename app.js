@@ -591,8 +591,6 @@ const App = (() => {
       html += `
         <div class="patrol-actions">
           <button class="btn btn-warning" id="btn-purchase">仕入れ記録</button>
-          <button class="btn btn-outline" id="btn-memo">メモ追加</button>
-          <button class="btn btn-outline" id="btn-find">商品発見</button>
           <button class="btn btn-success" id="btn-depart">出発</button>
         </div>`;
     }
@@ -704,8 +702,6 @@ const App = (() => {
     });
 
     document.getElementById('btn-purchase')?.addEventListener('click', () => showPurchaseModal(current));
-    document.getElementById('btn-memo')?.addEventListener('click', () => showMemoModal(current));
-    document.getElementById('btn-find')?.addEventListener('click', () => showFindModal(current));
   }
 
   function startPatrolTimer() {
@@ -800,74 +796,6 @@ const App = (() => {
         route_id: patrolState.routeId,
         amount, items_count: items, genre, note
       }).catch(() => {});
-    });
-  }
-
-  function showMemoModal(stop) {
-    const body = `
-      <div class="form-group">
-        <label class="form-label">タイプ</label>
-        <select class="form-select" id="m-type">
-          <option>値下げ</option><option>ワゴン</option><option>得意ジャンル</option>
-          <option>セール</option><option>注意</option><option>その他</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">内容</label>
-        <textarea class="form-textarea" id="m-content" rows="3"></textarea>
-      </div>`;
-    showModal('メモ追加', body, (el) => {
-      const type = el.querySelector('#m-type').value;
-      const content = el.querySelector('#m-content').value;
-      Storage.saveCurrentRoute(patrolState);
-      toast('メモを保存しました');
-      Router.navigate('patrol');
-      // バックグラウンドでAPI同期
-      API.addMemo({ store_id: stop.store_id, type, content }).catch(() => {});
-    });
-  }
-
-  function showFindModal(stop) {
-    const body = `
-      <div class="form-group">
-        <label class="form-label">ASIN</label>
-        <input type="text" class="form-input" id="m-asin" placeholder="B0XXXXXXXXX">
-      </div>
-      <div class="form-group">
-        <label class="form-label">商品名</label>
-        <input type="text" class="form-input" id="m-product">
-      </div>
-      <div class="form-group">
-        <label class="form-label">店頭価格</label>
-        <input type="number" class="form-input" id="m-sprice" placeholder="0">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Amazon価格</label>
-        <input type="number" class="form-input" id="m-aprice" placeholder="0">
-      </div>
-      <div class="form-group">
-        <label class="form-label">アクション</label>
-        <select class="form-select" id="m-action">
-          <option value="purchased">購入した</option>
-          <option value="skipped" selected>見送り</option>
-          <option value="out_of_stock">在庫なし</option>
-        </select>
-      </div>`;
-    showModal('商品発見', body, (el) => {
-      const findData = {
-        store_id: stop.store_id,
-        route_id: patrolState.routeId,
-        asin: el.querySelector('#m-asin').value,
-        product_name: el.querySelector('#m-product').value,
-        store_price: Number(el.querySelector('#m-sprice').value) || 0,
-        amazon_price: Number(el.querySelector('#m-aprice').value) || 0,
-        action: el.querySelector('#m-action').value
-      };
-      Storage.saveCurrentRoute(patrolState);
-      toast('商品発見を記録しました');
-      Router.navigate('patrol');
-      // バックグラウンドでAPI同期
-      API.addFind(findData).catch(() => {});
     });
   }
 
