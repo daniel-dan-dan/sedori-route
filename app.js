@@ -195,7 +195,7 @@ const App = (() => {
     const visits = Number(store.visit_count) || 0;
     const totalPurchase = Number(store.total_purchase) || 0;
     const avgPerVisit = visits > 0 ? totalPurchase / visits : 0;
-    const lastVisit = store.last_visit ? new Date(store.last_visit) : null;
+    const lastVisit = store.last_visited ? new Date(store.last_visited) : null;
     const daysSince = lastVisit ? (Date.now() - lastVisit.getTime()) / 86400000 : 999;
 
     let score = 0;
