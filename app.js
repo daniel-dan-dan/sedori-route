@@ -185,6 +185,7 @@ const App = (() => {
     Router.register('history', renderHistory);
     Router.register('history-detail', renderHistoryDetail);
     Router.register('settings', renderSettings);
+    Router.register('analytics', renderAnalytics);
     Router.register('patrol', renderPatrol);
     Router.register('summary', renderSummary);
   }
@@ -1301,6 +1302,314 @@ const App = (() => {
       selectedStoreIds = [];
       Router.navigate('home');
       setNavActive('home');
+    });
+  }
+
+  // ---------- 分析画面 ----------
+
+  async function renderAnalytics(container) {
+    setTitle('店舗分析');
+    setNavActive('analytics');
+    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+    try {
+      const [purchaseItems, routes, purchases] = await Promise.all([
+        API.getPurchaseItems({ limit: 10000 }),
+        API.getRouteHistory({ limit: 100, include_stops: 'true' }),
+        API.getPurchases({ limit: 10000 }),
+      ]);
+
+      if ((!purchaseItems || purchaseItems.length === 0) && (!purchases || purchases.length === 0)) {
+        container.innerHTML = `
+          <div class="text-center mt-12">
+            <div class="text-dim">まだデータがありません</div>
+            <div class="text-sm text-dim mt-8">巡回してCSVを取り込むとここに分析結果が表示されます</div>
+          </div>`;
+        return;
+      }
+
+      // 店舗ごとの集計
+      const storeStats = buildStoreStats(purchaseItems, routes, purchases, stores);
+      const sortedStats = Object.values(storeStats).sort((a, b) => b.totalExpectedProfit - a.totalExpectedProfit);
+
+      let html = '';
+
+      // 全体サマリー
+      const totalProfit = sortedStats.reduce((s, st) => s + st.totalExpectedProfit, 0);
+      const totalPurchase = sortedStats.reduce((s, st) => s + st.totalPurchaseAmount, 0);
+      const totalVisits = sortedStats.reduce((s, st) => s + st.visitCount, 0);
+      const totalItems = sortedStats.reduce((s, st) => s + st.itemCount, 0);
+
+      html += `
+        <div class="card">
+          <div class="card-title">全体サマリー</div>
+          <div class="summary-grid">
+            <div class="summary-item"><div class="value">${totalProfit.toLocaleString()}円</div><div class="label">見込み利益合計</div></div>
+            <div class="summary-item"><div class="value">${totalPurchase.toLocaleString()}円</div><div class="label">仕入れ合計</div></div>
+            <div class="summary-item"><div class="value">${totalVisits}</div><div class="label">総訪問回数</div></div>
+            <div class="summary-item"><div class="value">${totalItems}</div><div class="label">総仕入れ点数</div></div>
+          </div>
+        </div>`;
+
+      // タブ切り替え
+      html += `
+        <div class="flex gap-8 mt-12 mb-8">
+          <button class="btn btn-sm analytics-tab active" data-tab="ranking">利益ランキング</button>
+          <button class="btn btn-sm btn-outline analytics-tab" data-tab="efficiency">効率分析</button>
+          <button class="btn btn-sm btn-outline analytics-tab" data-tab="genre">ジャンル傾向</button>
+        </div>
+        <div id="analytics-content"></div>`;
+
+      container.innerHTML = html;
+
+      // タブイベント
+      const tabs = container.querySelectorAll('.analytics-tab');
+      tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+          tabs.forEach(t => { t.classList.remove('active'); t.classList.add('btn-outline'); });
+          tab.classList.add('active');
+          tab.classList.remove('btn-outline');
+          renderAnalyticsTab(container.querySelector('#analytics-content'), tab.dataset.tab, sortedStats);
+        });
+      });
+
+      // 初期表示
+      renderAnalyticsTab(container.querySelector('#analytics-content'), 'ranking', sortedStats);
+
+    } catch (e) {
+      container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
+    }
+  }
+
+  function buildStoreStats(purchaseItems, routes, purchases, allStores) {
+    const stats = {};
+
+    function ensureStore(storeId) {
+      if (!stats[storeId]) {
+        const s = allStores.find(x => x.store_id === storeId);
+        stats[storeId] = {
+          store_id: storeId,
+          name: s ? s.name : storeId,
+          category: s ? s.category : '',
+          totalExpectedProfit: 0,
+          totalPurchaseAmount: 0,
+          itemCount: 0,
+          visitCount: 0,
+          totalStayMin: 0,
+          items: [],
+          genres: {},
+        };
+      }
+      return stats[storeId];
+    }
+
+    // CSV取り込みデータから集計
+    (purchaseItems || []).forEach(pi => {
+      if (!pi.store_id) return;
+      const st = ensureStore(pi.store_id);
+      const profit = Number(pi.expected_profit) || 0;
+      const price = Number(pi.purchase_price) || 0;
+      const qty = Number(pi.quantity) || 1;
+      st.totalExpectedProfit += profit * qty;
+      st.totalPurchaseAmount += price * qty;
+      st.itemCount += qty;
+      st.items.push(pi);
+
+      // ジャンル集計（カテゴリから推定）
+      const genre = guessGenre(pi.product_name);
+      st.genres[genre] = (st.genres[genre] || 0) + profit * qty;
+    });
+
+    // 巡回データから訪問回数・滞在時間を集計
+    (routes || []).forEach(r => {
+      (r.stops || []).forEach(stop => {
+        if (stop.status !== 'visited') return;
+        const st = ensureStore(stop.store_id);
+        st.visitCount++;
+        if (stop.arrival_time && stop.departure_time) {
+          const stay = (new Date(stop.departure_time) - new Date(stop.arrival_time)) / 60000;
+          if (stay > 0 && stay < 480) st.totalStayMin += stay;
+        }
+      });
+    });
+
+    // purchasesデータからも仕入れ額を補完（CSV未取り込み分）
+    (purchases || []).forEach(p => {
+      if (!p.store_id) return;
+      const st = ensureStore(p.store_id);
+      // CSV取り込みデータがなければpurchasesの金額を使う
+      if (st.items.length === 0) {
+        st.totalPurchaseAmount += Number(p.amount) || 0;
+      }
+    });
+
+    return stats;
+  }
+
+  function guessGenre(productName) {
+    if (!productName) return 'その他';
+    const name = productName.toLowerCase();
+    if (/カーメイト|エンジンスターター|タイヤ|オイル|ワイパー|カー/.test(name)) return 'カー用品';
+    if (/テレビ|pc|パソコン|プリンタ|buffalo|エレコム|wifi|lan/.test(name)) return '家電・PC';
+    if (/洗剤|シャンプー|歯ブラシ|トイレ|キッチン/.test(name)) return '日用品';
+    if (/コールマン|テント|キャンプ|アウトドア|エバニュー|チタン/.test(name)) return 'アウトドア';
+    if (/ボッシュ|マキタ|京セラ|リョービ|ドリル|ノコ|インパクト/.test(name)) return '工具・DIY';
+    if (/おもちゃ|レゴ|プラレール|ゲーム/.test(name)) return 'おもちゃ・ゲーム';
+    return 'その他';
+  }
+
+  function renderAnalyticsTab(container, tab, sortedStats) {
+    if (tab === 'ranking') renderRankingTab(container, sortedStats);
+    else if (tab === 'efficiency') renderEfficiencyTab(container, sortedStats);
+    else if (tab === 'genre') renderGenreTab(container, sortedStats);
+  }
+
+  // 利益ランキングタブ
+  function renderRankingTab(container, sortedStats) {
+    if (sortedStats.length === 0) {
+      container.innerHTML = '<div class="text-center text-dim mt-12">データがありません</div>';
+      return;
+    }
+
+    let html = '';
+    sortedStats.forEach((st, i) => {
+      const profitPerVisit = st.visitCount > 0 ? Math.round(st.totalExpectedProfit / st.visitCount) : 0;
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+      const barWidth = sortedStats[0].totalExpectedProfit > 0
+        ? Math.max(5, Math.round(st.totalExpectedProfit / sortedStats[0].totalExpectedProfit * 100))
+        : 0;
+      const profitColor = st.totalExpectedProfit >= 0 ? 'var(--success)' : 'var(--accent)';
+
+      html += `
+        <div class="card mt-8">
+          <div class="flex-between">
+            <span><b>${medal} ${esc(st.name)}</b></span>
+            <span style="color:${profitColor};font-weight:bold">${st.totalExpectedProfit.toLocaleString()}円</span>
+          </div>
+          <div style="background:var(--border);border-radius:4px;height:6px;margin:6px 0">
+            <div style="background:${profitColor};border-radius:4px;height:6px;width:${barWidth}%"></div>
+          </div>
+          <div class="text-sm text-dim">
+            仕入れ ${st.totalPurchaseAmount.toLocaleString()}円 / ${st.itemCount}点 / ${st.visitCount}回訪問
+            ${profitPerVisit > 0 ? `/ 1回あたり ${profitPerVisit.toLocaleString()}円` : ''}
+          </div>
+        </div>`;
+    });
+    container.innerHTML = html;
+  }
+
+  // 効率分析タブ
+  function renderEfficiencyTab(container, sortedStats) {
+    const withVisits = sortedStats.filter(st => st.visitCount > 0);
+
+    if (withVisits.length === 0) {
+      container.innerHTML = '<div class="text-center text-dim mt-12">訪問データがありません</div>';
+      return;
+    }
+
+    // 訪問あたり利益でソート
+    const byProfitPerVisit = [...withVisits].sort((a, b) => {
+      const aVal = a.totalExpectedProfit / a.visitCount;
+      const bVal = b.totalExpectedProfit / b.visitCount;
+      return bVal - aVal;
+    });
+
+    // 時間あたり利益でソート
+    const withTime = withVisits.filter(st => st.totalStayMin > 0);
+    const byProfitPerHour = [...withTime].sort((a, b) => {
+      const aVal = a.totalExpectedProfit / (a.totalStayMin / 60);
+      const bVal = b.totalExpectedProfit / (b.totalStayMin / 60);
+      return bVal - aVal;
+    });
+
+    let html = '<div class="card-title">訪問あたり利益（高い順）</div>';
+    byProfitPerVisit.slice(0, 10).forEach((st, i) => {
+      const ppv = Math.round(st.totalExpectedProfit / st.visitCount);
+      html += `
+        <div class="card mt-8">
+          <div class="flex-between">
+            <span>${i + 1}. <b>${esc(st.name)}</b></span>
+            <span style="font-weight:bold">${ppv.toLocaleString()}円/回</span>
+          </div>
+          <div class="text-sm text-dim">${st.visitCount}回訪問 / 合計 ${st.totalExpectedProfit.toLocaleString()}円</div>
+        </div>`;
+    });
+
+    if (byProfitPerHour.length > 0) {
+      html += '<div class="card-title mt-12">時間あたり利益（高い順）</div>';
+      byProfitPerHour.slice(0, 10).forEach((st, i) => {
+        const pph = Math.round(st.totalExpectedProfit / (st.totalStayMin / 60));
+        const avgStay = Math.round(st.totalStayMin / st.visitCount);
+        html += `
+          <div class="card mt-8">
+            <div class="flex-between">
+              <span>${i + 1}. <b>${esc(st.name)}</b></span>
+              <span style="font-weight:bold">${pph.toLocaleString()}円/時</span>
+            </div>
+            <div class="text-sm text-dim">平均滞在 ${avgStay}分 / ${st.visitCount}回訪問</div>
+          </div>`;
+      });
+    }
+
+    container.innerHTML = html;
+  }
+
+  // ジャンル傾向タブ
+  function renderGenreTab(container, sortedStats) {
+    // 店舗ごとの得意ジャンルを表示
+    const storesWithGenres = sortedStats.filter(st => Object.keys(st.genres).length > 0);
+
+    if (storesWithGenres.length === 0) {
+      container.innerHTML = '<div class="text-center text-dim mt-12">CSV取り込みデータがありません</div>';
+      return;
+    }
+
+    // 全体のジャンル集計
+    const totalGenres = {};
+    storesWithGenres.forEach(st => {
+      for (const [genre, profit] of Object.entries(st.genres)) {
+        totalGenres[genre] = (totalGenres[genre] || 0) + profit;
+      }
+    });
+    const sortedGenres = Object.entries(totalGenres).sort((a, b) => b[1] - a[1]);
+
+    let html = '<div class="card-title">ジャンル別 見込み利益</div>';
+    const maxGenreProfit = sortedGenres.length > 0 ? sortedGenres[0][1] : 1;
+    sortedGenres.forEach(([genre, profit]) => {
+      const barWidth = Math.max(5, Math.round(profit / maxGenreProfit * 100));
+      html += `
+        <div class="card mt-8">
+          <div class="flex-between">
+            <span><b>${esc(genre)}</b></span>
+            <span style="font-weight:bold">${profit.toLocaleString()}円</span>
+          </div>
+          <div style="background:var(--border);border-radius:4px;height:6px;margin:4px 0">
+            <div style="background:var(--primary);border-radius:4px;height:6px;width:${barWidth}%"></div>
+          </div>
+        </div>`;
+    });
+
+    html += '<div class="card-title mt-12">店舗別の得意ジャンル</div>';
+    storesWithGenres.forEach(st => {
+      const topGenre = Object.entries(st.genres).sort((a, b) => b[1] - a[1]);
+      if (topGenre.length === 0) return;
+      html += `
+        <div class="card mt-8">
+          <div><b>${esc(st.name)}</b></div>
+          <div class="text-sm mt-4">
+            ${topGenre.slice(0, 3).map(([g, p]) =>
+              `<span class="badge" style="margin-right:4px">${esc(g)} ${p.toLocaleString()}円</span>`
+            ).join('')}
+          </div>
+        </div>`;
+    });
+
+    container.innerHTML = html;
+  }
+
+  function setNavActive(view) {
+    document.querySelectorAll('.nav-item').forEach(b => {
+      b.classList.toggle('active', b.dataset.view === view);
     });
   }
 
