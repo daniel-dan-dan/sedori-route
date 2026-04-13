@@ -1405,8 +1405,27 @@ const App = (() => {
 
     // CSV取り込みデータから集計
     (purchaseItems || []).forEach(pi => {
-      if (!pi.store_id) return;
-      const st = ensureStore(pi.store_id);
+      // store_idがあればそれを使い、なければsupplier_nameで集計
+      let key = pi.store_id;
+      if (!key && pi.supplier_name) {
+        key = 'supplier:' + pi.supplier_name;
+        if (!stats[key]) {
+          stats[key] = {
+            store_id: key,
+            name: pi.supplier_name,
+            category: '',
+            totalExpectedProfit: 0,
+            totalPurchaseAmount: 0,
+            itemCount: 0,
+            visitCount: 0,
+            totalStayMin: 0,
+            items: [],
+            genres: {},
+          };
+        }
+      }
+      if (!key) return;
+      const st = key.startsWith('supplier:') ? stats[key] : ensureStore(key);
       const profit = Number(pi.expected_profit) || 0;
       const price = Number(pi.purchase_price) || 0;
       const qty = Number(pi.quantity) || 1;
