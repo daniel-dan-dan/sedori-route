@@ -66,6 +66,8 @@ const API = (() => {
     endRoute:        (b)         => post('endRoute', b),
     addStopToRoute:  (b)         => post('addStopToRoute', b),
     addPurchase:     (b)         => post('addPurchase', b),
+    addPurchaseItems:(b)         => post('addPurchaseItems', b),
+    getPurchaseItems:(p = {})    => get('getPurchaseItems', p),
     updateConfig:    (entries)   => post('updateConfig', { entries }),
     deleteRoute:     (b)         => post('deleteRoute', b),
     clearHistory:    ()          => post('clearHistory'),
