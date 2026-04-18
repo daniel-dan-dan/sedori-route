@@ -686,19 +686,6 @@ const App = (() => {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
     }).addTo(mapInstance);
 
-    // 自宅マーカー
-    if (config.home_lat && config.home_lng) {
-      L.marker([centerLat, centerLng], {
-        icon: L.divIcon({
-          className: '',
-          html: `<div class="map-pin map-pin-home"><span class="map-pin-emoji">&#x1f3e0;</span></div>`,
-          iconSize: [48, 48],
-          iconAnchor: [24, 24],
-        }),
-        interactive: false,
-      }).addTo(mapInstance);
-    }
-
     // クラスタリングせず、全ピンを個別に表示するためLayerGroupを使用
     mapCluster = L.layerGroup();
     mapInstance.addLayer(mapCluster);
