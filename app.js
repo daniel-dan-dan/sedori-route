@@ -50,7 +50,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v57';
+  const ASSET_VER = 'v58';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -588,8 +588,8 @@ const App = (() => {
     return L.divIcon({
       className: '',
       html: `<div class="${cls}" style="${style}">${inner}${badge}</div>`,
-      iconSize: [48, 48],
-      iconAnchor: [24, 24],
+      iconSize: [36, 36],
+      iconAnchor: [18, 18],
     });
   }
 

@@ -719,32 +719,32 @@ body {
 
 /* ---- マップピン（ロケスマ風 ロゴピン） ---- */
 .map-pin {
-  width: 48px;
-  height: 48px;
+  width: 36px;
+  height: 36px;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #fff;
-  border: 3px solid var(--primary);
+  border: 2px solid var(--primary);
   border-radius: 50%;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
   transition: transform .15s;
   overflow: hidden;
 }
 .map-pin-logo {
-  width: 40px;
-  height: 40px;
+  width: 30px;
+  height: 30px;
   object-fit: contain;
-  padding: 2px;
+  padding: 1px;
 }
 .map-pin-emoji {
-  font-size: 24px;
+  font-size: 18px;
   line-height: 1;
   filter: drop-shadow(0 1px 1px rgba(0,0,0,0.35));
 }
 .map-pin-text {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 800;
   color: #111;
   letter-spacing: -0.5px;
