@@ -50,7 +50,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v60';
+  const ASSET_VER = 'v61';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -720,18 +720,16 @@ const App = (() => {
 
   function fitMapToMarkers() {
     if (!mapInstance || !mapCluster) return;
-    const latlngs = [];
+    // ズームは「全て」の店舗の境界で統一（チェーン絞込でも同じ縮尺）
+    const allLatLngs = [];
     stores.forEach(s => {
       const lat = Number(s.lat), lng = Number(s.lng);
       if (!lat || !lng) return;
-      if (mapChainFilter !== 'all' && getChain(s) !== mapChainFilter) return;
-      latlngs.push([lat, lng]);
+      allLatLngs.push([lat, lng]);
     });
-    if (latlngs.length === 0) return;
-    // DOM反映後のサイズを正確に取得
+    if (allLatLngs.length === 0) return;
     mapInstance.invalidateSize(false);
-    // ズームはfitBoundsで計算、中心は仙台駅固定
-    const bounds = L.latLngBounds(latlngs);
+    const bounds = L.latLngBounds(allLatLngs);
     const fitZoom = mapInstance.getBoundsZoom(bounds, false, [40, 40]);
     const target = Math.min(fitZoom + 2, mapInstance.getMaxZoom() || 19);
     mapInstance.setView(SENDAI_STATION, target, { animate: false });
