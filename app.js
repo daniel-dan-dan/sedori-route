@@ -569,11 +569,8 @@ const App = (() => {
       }).addTo(mapInstance);
     }
 
-    mapCluster = L.markerClusterGroup({
-      maxClusterRadius: 50,
-      spiderfyOnMaxZoom: true,
-      showCoverageOnHover: false,
-    });
+    // クラスタリングせず、全ピンを個別に表示するためLayerGroupを使用
+    mapCluster = L.layerGroup();
     mapInstance.addLayer(mapCluster);
     refreshMapMarkers();
     fitMapToMarkers();
