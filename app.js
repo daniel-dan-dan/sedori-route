@@ -60,6 +60,38 @@ const App = (() => {
     return `<span class="store-icon">${store.icon || '&#x1f3ea;'}</span>`;
   }
 
+  // 営業状態判定 → { label, cls }
+  function getBusinessStatus(store) {
+    const open = formatTime(store.open_time);
+    const close = formatTime(store.close_time);
+    if (!open || !close) return null;
+    const parseHM = (s) => {
+      const m = /^(\d{1,2}):(\d{2})/.exec(s);
+      return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+    };
+    const openM = parseHM(open);
+    let closeM = parseHM(close);
+    if (openM == null || closeM == null) return null;
+    if (closeM <= openM) closeM += 24 * 60; // 翌日またぎ
+    const now = new Date();
+    let nowM = now.getHours() * 60 + now.getMinutes();
+    // 深夜営業の場合の補正
+    if (closeM > 24 * 60 && nowM < openM) nowM += 24 * 60;
+    if (nowM < openM || nowM >= closeM) {
+      return { label: '閉店中', cls: 'closed' };
+    }
+    if (closeM - nowM <= 60) {
+      return { label: `あと${closeM - nowM}分`, cls: 'closing-soon' };
+    }
+    return { label: '営業中', cls: 'open' };
+  }
+
+  function renderStoreStatusPill(store) {
+    const st = getBusinessStatus(store);
+    if (!st) return '';
+    return `<span class="store-status ${st.cls}">${st.label}</span>`;
+  }
+
   // チェーン別ロゴ（公式サイト/Wikimedia Commons由来）
   const CHAIN_LOGOS = {
     'ヤマダデンキ': 'icons/chains/yamada.png',
@@ -389,26 +421,40 @@ const App = (() => {
           ${renderStoreIconHtml(s)}
           <div class="store-info">
             <div class="store-name">${esc(s.name)}</div>
-            <div class="store-meta">${esc(s.category)} | ${formatTime(s.open_time)}-${formatTime(s.close_time)} | ${s.avg_stay_min}分</div>
+            <div class="store-meta">${renderStoreStatusPill(s)}${esc(s.category)} | ${formatTime(s.open_time)}-${formatTime(s.close_time)} | ${s.avg_stay_min}分</div>
             ${score > 0 ? `<div class="store-score">Score: ${score}</div>` : ''}
           </div>
           <div class="store-check">${selIdx >= 0 ? getSelectionLabel(selIdx) : ''}</div>
         </div>`;
     });
 
-    // アクションボタン
-    html += `
-      <div style="position:sticky;bottom:60px;padding:8px 0;background:var(--bg);">
-        <div class="flex-between mb-8">
-          <span class="text-sm text-dim">${selectedStoreIds.length}店舗 選択中</span>
-          <button class="btn btn-sm btn-outline" id="btn-clear">クリア</button>
-        </div>
-        <button class="btn btn-primary btn-block" id="btn-optimize" ${selectedStoreIds.length < 1 ? 'disabled' : ''}>
-          ルート最適化
-        </button>
-      </div>`;
+    // フローティング操作バー（選択中の店舗がある場合のみ）
+    if (selectedStoreIds.length > 0) {
+      const selected = selectedStoreIds.map(id => stores.find(s => s.store_id === id)).filter(Boolean);
+      const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
+      const speed = Number(config.avg_speed_kmh) || 30;
+      let etaHtml = '';
+      if (home.lat && home.lng && selected.length >= 1) {
+        const est = RouteOptimizer.calcSelectionOrder(home, selected, speed);
+        etaHtml = `<span class="fab-eta">約 ${est.totalDistanceKm}km / ${est.estimatedMinutes}分</span>`;
+      }
+      html += `
+        <div class="floating-action-bar">
+          <div class="floating-action-bar-inner">
+            <div class="fab-summary">
+              <span class="fab-count">${selectedStoreIds.length}店舗 選択中</span>
+              ${etaHtml}
+              <button class="fab-clear" id="btn-clear">クリア</button>
+            </div>
+            <button class="btn btn-primary btn-block" id="btn-optimize">
+              ルート最適化
+            </button>
+          </div>
+        </div>`;
+    }
 
     container.innerHTML = html;
+    container.classList.toggle('has-floating-bar', selectedStoreIds.length > 0);
 
     // 最適化済みルートがあれば表示
     if (optimizedRoute) {
@@ -443,6 +489,19 @@ const App = (() => {
         if (newTabs) newTabs.scrollLeft = savedScroll;
       });
     });
+
+    // アクティブなフィルタータブを自動で可視領域に
+    const activeTab = container.querySelector('.filter-tab.active');
+    if (activeTab) {
+      const tabsEl = container.querySelector('.filter-tabs');
+      if (tabsEl) {
+        const tabRect = activeTab.getBoundingClientRect();
+        const containerRect = tabsEl.getBoundingClientRect();
+        if (tabRect.left < containerRect.left || tabRect.right > containerRect.right) {
+          activeTab.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'center' });
+        }
+      }
+    }
 
     // イベント: エリア一括選択
     document.getElementById('btn-select-area')?.addEventListener('click', () => {
@@ -1527,7 +1586,7 @@ const App = (() => {
             ${renderStoreIconHtml(s)}
             <div class="store-info">
               <div class="store-name">${esc(s.name)}</div>
-              <div class="store-meta">${esc(s._areaName)} | ${esc(s.category)} | ${formatTime(s.open_time)}-${formatTime(s.close_time)}</div>
+              <div class="store-meta">${renderStoreStatusPill(s)}${esc(s._areaName)} | ${esc(s.category)} | ${formatTime(s.open_time)}-${formatTime(s.close_time)}</div>
             </div>
           </div>`;
       });
