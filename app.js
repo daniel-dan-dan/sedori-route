@@ -66,6 +66,9 @@ const App = (() => {
     const close = formatTime(store.close_time);
     if (!open || !close) return null;
     const parseHM = (s) => {
+      if (!s) return null;
+      const mj = /^翌\s*(\d{1,2}):(\d{2})/.exec(s);
+      if (mj) return Number(mj[1]) * 60 + Number(mj[2]) + 24 * 60;
       const m = /^(\d{1,2}):(\d{2})/.exec(s);
       return m ? Number(m[1]) * 60 + Number(m[2]) : null;
     };
@@ -2045,9 +2048,9 @@ const App = (() => {
       </div>
       <div class="flex gap-8">
         <div class="form-group" style="flex:1"><label class="form-label">開店</label>
-          <input type="text" class="form-input" id="sf-open" value="${s.open_time || '10:00'}"></div>
+          <input type="text" class="form-input" id="sf-open" value="${formatTime(s.open_time) || '10:00'}"></div>
         <div class="form-group" style="flex:1"><label class="form-label">閉店</label>
-          <input type="text" class="form-input" id="sf-close" value="${s.close_time || '20:00'}"></div>
+          <input type="text" class="form-input" id="sf-close" value="${formatTime(s.close_time) || '20:00'}"></div>
       </div>
       <div class="flex gap-8">
         <div class="form-group" style="flex:1"><label class="form-label">平均滞在(分)</label>
@@ -2389,17 +2392,24 @@ const App = (() => {
   // ---------- ユーティリティ ----------
 
   function formatTime(val) {
-    if (!val) return '';
-    // "10:00" のような文字列はそのまま返す
-    if (typeof val === 'string' && /^\d{1,2}:\d{2}/.test(val) && !val.includes('T')) return val;
-    // Google Sheets の時刻値: "1899-12-30T02:00:00.000Z" → ローカル時間に変換
-    if (typeof val === 'string' && (val.includes('1899-') || val.includes('T'))) {
-      const d = new Date(val);
-      if (!isNaN(d.getTime())) {
-        const h = d.getHours();
-        const m = d.getMinutes();
-        return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+    if (val == null || val === '') return '';
+    if (typeof val === 'string') {
+      // 翌日またぎ表記 "翌2:00"
+      const mj = /^翌\s*(\d{1,2}):(\d{2})/.exec(val);
+      if (mj) return `翌${mj[1]}:${mj[2]}`;
+      // 標準 "HH:MM" or "H:MM"
+      const mn = /^(\d{1,2}):(\d{2})/.exec(val);
+      if (mn) return `${String(mn[1]).padStart(2,'0')}:${mn[2]}`;
+      // 旧キャッシュの ISO 文字列
+      if (val.includes('T')) {
+        const d = new Date(val);
+        if (!isNaN(d.getTime())) {
+          return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        }
       }
+    }
+    if (val instanceof Date && !isNaN(val.getTime())) {
+      return `${String(val.getHours()).padStart(2,'0')}:${String(val.getMinutes()).padStart(2,'0')}`;
     }
     return String(val);
   }
