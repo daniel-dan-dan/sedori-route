@@ -50,6 +50,16 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
+  function renderStoreIconHtml(store) {
+    const chain = getChain(store);
+    const logo = CHAIN_LOGOS[chain];
+    if (logo) {
+      const color = CHAIN_COLORS[chain] || '#6B7280';
+      return `<span class="store-icon store-icon-logo" style="border-color:${color}"><img src="${logo}" alt=""></span>`;
+    }
+    return `<span class="store-icon">${store.icon || '&#x1f3ea;'}</span>`;
+  }
+
   // チェーン別ロゴ（公式サイト/Wikimedia Commons由来）
   const CHAIN_LOGOS = {
     'ヤマダデンキ': 'icons/chains/yamada.png',
@@ -376,7 +386,7 @@ const App = (() => {
       const score = calcPriorityScore(s);
       html += `
         <div class="store-item ${sel}" data-sid="${s.store_id}">
-          <span class="store-icon">${s.icon || '&#x1f3ea;'}</span>
+          ${renderStoreIconHtml(s)}
           <div class="store-info">
             <div class="store-name">${esc(s.name)}</div>
             <div class="store-meta">${esc(s.category)} | ${formatTime(s.open_time)}-${formatTime(s.close_time)} | ${s.avg_stay_min}分</div>
@@ -1514,7 +1524,7 @@ const App = (() => {
       filtered.forEach(s => {
         html += `
           <div class="store-item add-stop-item" data-sid="${s.store_id}" style="cursor:pointer;">
-            <span class="store-icon">${s.icon || '&#x1f3ea;'}</span>
+            ${renderStoreIconHtml(s)}
             <div class="store-info">
               <div class="store-name">${esc(s.name)}</div>
               <div class="store-meta">${esc(s._areaName)} | ${esc(s.category)} | ${formatTime(s.open_time)}-${formatTime(s.close_time)}</div>
@@ -2206,7 +2216,7 @@ const App = (() => {
       stores.forEach(s => {
         storeHtml += `
           <div class="store-item" data-sid="${s.store_id}" style="cursor:default">
-            <span class="store-icon">${s.icon || '&#x1f3ea;'}</span>
+            ${renderStoreIconHtml(s)}
             <div class="store-info">
               <div class="store-name">${esc(s.name)}</div>
               <div class="store-meta">
