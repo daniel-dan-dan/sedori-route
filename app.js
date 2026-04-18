@@ -52,7 +52,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  // チェーン別ロゴ（Wikimedia Commons由来）
+  // チェーン別ロゴ（公式サイト/Wikimedia Commons由来）
   const CHAIN_LOGOS = {
     'ヤマダデンキ': 'icons/chains/yamada.png',
     'ケーズデンキ': 'icons/chains/kdenki.png',
@@ -66,26 +66,24 @@ const App = (() => {
     'セカンドストリート': 'icons/chains/2ndstreet.png',
     'トレファク': 'icons/chains/trefac.png',
     'ハードオフ': 'icons/chains/hardoff.png',
+    'オフハウス': 'icons/chains/offhouse.png',
     'ドンキホーテ': 'icons/chains/donki.png',
     'カインズ': 'icons/chains/cainz.png',
     'DCM': 'icons/chains/dcm.png',
     'ダイユーエイト': 'icons/chains/daiyu8.png',
+    'サンデー': 'icons/chains/sunday.png',
     'コメリ': 'icons/chains/komeri.png',
     'コーナン': 'icons/chains/kohnan.png',
+    'オートバックス': 'icons/chains/autobacs.png',
     'イエローハット': 'icons/chains/yhat.png',
+    'ジェームス': 'icons/chains/james.png',
     'イオン': 'icons/chains/aeon.png',
     'コストコ': 'icons/chains/costco.png',
     'トイザらス': 'icons/chains/toysrus.png',
+    'オフィスベンダー': 'icons/chains/ofv.png',
   };
 
-  // ロゴ未登録チェーン向けのテキスト略称（2〜3文字）
-  const CHAIN_ABBR = {
-    'オフハウス': 'オフ',
-    'サンデー': 'サン',
-    'オートバックス': 'AB',
-    'ジェームス': 'JM',
-    'オフィスベンダー': 'OV',
-  };
+  const CHAIN_ABBR = {};
 
   // ---------- エリア定義（座標ベース自動分類） ----------
 
