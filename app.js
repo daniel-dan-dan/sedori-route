@@ -50,7 +50,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v63';
+  const ASSET_VER = 'v64';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -875,21 +875,10 @@ const App = (() => {
 
     document.getElementById('btn-confirm-route')?.addEventListener('click', () => {
       optimizedRoute = selectedRoute === 'optimized' ? optRoute : selRoute;
-      // Google Maps URL生成してナビ画面へ
       const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
-      const mapsUrl = RouteOptimizer.generateMapsUrl(home, optimizedRoute.orderedStores);
-      optimizedRoute._mapsUrl = mapsUrl;
-      // 最適化ルートはリストビューで表示されるため、viewModeを切り替えてからホームへ
-      viewMode = 'list';
-      Router.navigate('home');
-      // 最適化ルート表示部分へスクロール
-      setTimeout(() => {
-        const el = document.querySelector('.route-result');
-        if (el) {
-          const y = el.getBoundingClientRect().top + window.pageYOffset - 60;
-          window.scrollTo({ top: y, behavior: 'smooth' });
-        }
-      }, 100);
+      optimizedRoute._mapsUrl = RouteOptimizer.generateMapsUrl(home, optimizedRoute.orderedStores);
+      // ワンタップで巡回開始
+      startPatrol();
     });
 
     document.getElementById('btn-back-select')?.addEventListener('click', () => {
