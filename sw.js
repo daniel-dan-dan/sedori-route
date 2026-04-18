@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sedori-route-v53';
+const CACHE_NAME = 'sedori-route-v54';
 const ASSETS = [
   './',
   './index.html',
@@ -29,9 +29,17 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   // GAS API はキャッシュしない
   if (e.request.url.includes('script.google.com')) return;
-  // ネットワーク優先、失敗時にキャッシュ（オフライン対応）
+  // ネットワーク優先、HTTPキャッシュをバイパスして常に最新を取得（失敗時にSWキャッシュ）
+  const req = new Request(e.request.url, {
+    method: 'GET',
+    headers: e.request.headers,
+    mode: e.request.mode === 'navigate' ? 'cors' : e.request.mode,
+    credentials: e.request.credentials,
+    redirect: e.request.redirect,
+    cache: 'no-cache',
+  });
   e.respondWith(
-    fetch(e.request)
+    fetch(req)
       .then(res => {
         const clone = res.clone();
         caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
