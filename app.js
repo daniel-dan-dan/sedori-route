@@ -50,7 +50,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v71';
+  const ASSET_VER = 'v72';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -419,11 +419,6 @@ const App = (() => {
       sorted = [...filtered].sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a));
     }
 
-    if (activeFilter !== 'all' && sorted.length > 0) {
-      html += `<div class="mt-8 mb-8">
-        <span class="text-sm" style="font-weight:600">${filterMode === 'area' ? (AREAS.find(a => a.id === activeFilter)?.name || activeFilter) : filterMode === 'genre' ? (GENRE_DISPLAY[activeFilter] || activeFilter) : activeFilter} ${sorted.length}店舗</span>
-      </div>`;
-    }
 
     // 店舗一覧
     sorted.forEach(s => {
