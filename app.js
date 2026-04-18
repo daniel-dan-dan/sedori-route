@@ -14,6 +14,43 @@ const App = (() => {
   let viewMode = 'list'; // 'list' | 'map'
   let mapInstance = null;
   let mapCluster = null;
+  let mapChainFilter = 'all';
+
+  // チェーン別ブランドカラー（ピン・チップの色分け）
+  const CHAIN_COLORS = {
+    'ヤマダデンキ': '#0080C8',
+    'ケーズデンキ': '#E60012',
+    'コジマ×ビックカメラ': '#E60012',
+    'エディオン': '#E94709',
+    'ノジマ': '#FF6A00',
+    'ジョーシン': '#1E67B3',
+    'ブックオフ': '#F5D200',
+    'ブックオフSB': '#F5D200',
+    'ブックオフPLUS': '#F5D200',
+    'セカンドストリート': '#4CAF50',
+    'トレファク': '#F08300',
+    'ハードオフ': '#F08300',
+    'オフハウス': '#4FC3F7',
+    'ドンキホーテ': '#FFCC00',
+    'カインズ': '#2E7D32',
+    'DCM': '#FF7F00',
+    'ダイユーエイト': '#2A6EB5',
+    'サンデー': '#1E67B3',
+    'コメリ': '#E60012',
+    'コーナン': '#1E67B3',
+    'オートバックス': '#FFB300',
+    'イエローハット': '#FFC107',
+    'ジェームス': '#1E67B3',
+    'イオン': '#C71585',
+    'コストコ': '#E60012',
+    'トイザらス': '#E60012',
+    'オフィスベンダー': '#6B7280',
+  };
+
+  function getChainColor(store) {
+    const chain = getChain(store);
+    return CHAIN_COLORS[chain] || '#6B7280';
+  }
 
   // ---------- エリア定義（座標ベース自動分類） ----------
 
@@ -416,22 +453,47 @@ const App = (() => {
     const emoji = store.icon || '&#x1f3ea;';
     const selected = selectionIdx >= 0;
     const label = selected ? getSelectionLabel(selectionIdx) : '';
+    const color = getChainColor(store);
     const cls = selected ? 'map-pin selected' : 'map-pin';
     const badge = selected ? `<span class="map-pin-badge">${label}</span>` : '';
+    const style = `background:${color}`;
     return L.divIcon({
       className: '',
-      html: `<div class="${cls}"><span class="map-pin-emoji">${emoji}</span>${badge}</div>`,
-      iconSize: [40, 40],
-      iconAnchor: [20, 40],
+      html: `<div class="${cls}" style="${style}"><span class="map-pin-emoji">${emoji}</span>${badge}</div>`,
+      iconSize: [44, 44],
+      iconAnchor: [22, 22],
     });
   }
 
   function renderMapView(container) {
+    // チェーン別集計（座標ありのみ）
+    const chainCounts = {};
+    stores.forEach(s => {
+      if (!Number(s.lat) || !Number(s.lng)) return;
+      const c = getChain(s);
+      chainCounts[c] = (chainCounts[c] || 0) + 1;
+    });
+    const chainNames = Object.keys(chainCounts).sort((a, b) => chainCounts[b] - chainCounts[a]);
+    const totalMapped = Object.values(chainCounts).reduce((a, b) => a + b, 0);
+
+    // フィルター対象が存在しない場合は「全て」に戻す
+    if (mapChainFilter !== 'all' && !chainCounts[mapChainFilter]) mapChainFilter = 'all';
+
+    let chipHtml = `<div class="map-chain-filter">`;
+    chipHtml += `<button class="chain-chip ${mapChainFilter === 'all' ? 'active' : ''}" data-chain="all">全て(${totalMapped})</button>`;
+    chainNames.forEach(c => {
+      const color = CHAIN_COLORS[c] || '#6B7280';
+      const active = mapChainFilter === c ? 'active' : '';
+      chipHtml += `<button class="chain-chip ${active}" data-chain="${esc(c)}" style="--chip-color:${color}">${esc(c)}(${chainCounts[c]})</button>`;
+    });
+    chipHtml += `</div>`;
+
     container.innerHTML = `
       <div class="view-toggle">
         <button class="view-btn" data-view="list">&#x1f4cb; リスト</button>
         <button class="view-btn active" data-view="map">&#x1f5fa;&#xfe0f; マップ</button>
       </div>
+      ${chipHtml}
       <div id="map-view"></div>
       <div class="map-bottom-bar">
         <div class="flex-between mb-8">
@@ -453,6 +515,15 @@ const App = (() => {
       });
     });
 
+    // チェーンチップ: 押したチェーンだけ表示
+    container.querySelectorAll('.chain-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        mapChainFilter = chip.dataset.chain;
+        if (mapInstance) { mapInstance.remove(); mapInstance = null; mapCluster = null; }
+        Router.navigate('home');
+      });
+    });
+
     // Leaflet初期化
     setTimeout(() => initMap(), 10);
 
@@ -468,8 +539,9 @@ const App = (() => {
   function initMap() {
     const mapEl = document.getElementById('map-view');
     if (!mapEl) return;
+    if (mapInstance) { mapInstance.remove(); mapInstance = null; mapCluster = null; }
 
-    // 中心は自宅 or 仙台駅
+    // 中心は自宅 or 仙台駅（fitBounds前の仮中心）
     const centerLat = Number(config.home_lat) || 38.2603;
     const centerLng = Number(config.home_lng) || 140.8828;
 
@@ -490,8 +562,8 @@ const App = (() => {
         icon: L.divIcon({
           className: '',
           html: `<div class="map-pin map-pin-home"><span class="map-pin-emoji">&#x1f3e0;</span></div>`,
-          iconSize: [40, 40],
-          iconAnchor: [20, 40],
+          iconSize: [44, 44],
+          iconAnchor: [22, 22],
         }),
         interactive: false,
       }).addTo(mapInstance);
@@ -504,6 +576,7 @@ const App = (() => {
     });
     mapInstance.addLayer(mapCluster);
     refreshMapMarkers();
+    fitMapToMarkers();
   }
 
   function refreshMapMarkers() {
@@ -513,6 +586,7 @@ const App = (() => {
       const lat = Number(s.lat);
       const lng = Number(s.lng);
       if (!lat || !lng) return;
+      if (mapChainFilter !== 'all' && getChain(s) !== mapChainFilter) return;
       const selIdx = selectedStoreIds.indexOf(s.store_id);
       const marker = L.marker([lat, lng], { icon: buildPinIcon(s, selIdx) });
       marker.bindPopup(
@@ -526,6 +600,23 @@ const App = (() => {
       );
       mapCluster.addLayer(marker);
     });
+  }
+
+  function fitMapToMarkers() {
+    if (!mapInstance || !mapCluster) return;
+    const latlngs = [];
+    stores.forEach(s => {
+      const lat = Number(s.lat), lng = Number(s.lng);
+      if (!lat || !lng) return;
+      if (mapChainFilter !== 'all' && getChain(s) !== mapChainFilter) return;
+      latlngs.push([lat, lng]);
+    });
+    if (config.home_lat && config.home_lng) {
+      latlngs.push([Number(config.home_lat), Number(config.home_lng)]);
+    }
+    if (latlngs.length === 0) return;
+    const bounds = L.latLngBounds(latlngs);
+    mapInstance.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
   }
 
   function toggleMapSelection(sid) {

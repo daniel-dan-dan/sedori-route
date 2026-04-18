@@ -544,36 +544,62 @@ body {
   z-index: 5;
 }
 
-/* ---- マップピン ---- */
+/* ---- チェーンフィルターチップ ---- */
+.map-chain-filter {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin-bottom: 10px;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.map-chain-filter::-webkit-scrollbar { display: none; }
+.chain-chip {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border: 2px solid var(--chip-color, var(--border));
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 20px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chain-chip.active {
+  background: var(--chip-color, var(--primary));
+  color: #fff;
+  border-color: var(--chip-color, var(--primary));
+}
+
+/* ---- マップピン（ロケスマ風 丸形） ---- */
 .map-pin {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fff;
-  border: 2px solid var(--primary);
-  border-radius: 50% 50% 50% 0;
-  transform: rotate(-45deg);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  background: var(--primary);
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
   transition: transform .15s;
 }
 .map-pin-emoji {
-  transform: rotate(45deg);
-  font-size: 20px;
+  font-size: 22px;
   line-height: 1;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.35));
 }
 .map-pin.selected {
-  background: var(--primary);
-  border-color: var(--primary-dark);
-}
-.map-pin.selected .map-pin-emoji {
-  color: #fff;
+  border-color: var(--accent);
+  border-width: 4px;
+  transform: scale(1.15);
 }
 .map-pin-home {
-  background: var(--warning);
-  border-color: #d97706;
+  background: #F59E0B !important;
+  border-color: #fff;
 }
 .map-pin-badge {
   position: absolute;
@@ -581,7 +607,7 @@ body {
   right: -6px;
   background: var(--accent);
   color: #fff;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   min-width: 20px;
   height: 20px;
@@ -590,7 +616,6 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  transform: rotate(45deg);
   border: 2px solid #fff;
 }
 
