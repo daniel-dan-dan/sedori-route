@@ -11,6 +11,9 @@ const App = (() => {
   let filterMode = 'area'; // 'area' | 'genre' | 'chain'
   let activeFilter = 'all';
   let patrolTimerInterval = null;
+  let viewMode = 'list'; // 'list' | 'map'
+  let mapInstance = null;
+  let mapCluster = null;
 
   // ---------- エリア定義（座標ベース自動分類） ----------
 
@@ -211,7 +214,18 @@ const App = (() => {
   function renderHome(container) {
     setTitle('巡回ルート');
     if (activeFilter === 'all') activeFilter = getDefaultFilter(filterMode);
+
+    if (viewMode === 'map') {
+      return renderMapView(container);
+    }
+
     let html = '';
+
+    // 表示切替（リスト / マップ）
+    html += `<div class="view-toggle">
+      <button class="view-btn active" data-view="list">&#x1f4cb; リスト</button>
+      <button class="view-btn" data-view="map">&#x1f5fa;&#xfe0f; マップ</button>
+    </div>`;
 
     // モード切替（エリア / ジャンル / チェーン）
     html += `<div class="mode-toggle">
@@ -327,6 +341,14 @@ const App = (() => {
       renderOptimizedRoute(container);
     }
 
+    // イベント: 表示切替（リスト ↔ マップ）
+    container.querySelectorAll('.view-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        viewMode = btn.dataset.view;
+        Router.navigate('home');
+      });
+    });
+
     // イベント: モード切替
     container.querySelectorAll('.mode-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -386,6 +408,141 @@ const App = (() => {
     const optRoute = RouteOptimizer.optimize(home, selected, speed);
     const selRoute = RouteOptimizer.calcSelectionOrder(home, selected, speed);
     Router.navigate('route-select', { optRoute, selRoute });
+  }
+
+  // ---------- マップビュー ----------
+
+  function buildPinIcon(store, selectionIdx) {
+    const emoji = store.icon || '&#x1f3ea;';
+    const selected = selectionIdx >= 0;
+    const label = selected ? getSelectionLabel(selectionIdx) : '';
+    const cls = selected ? 'map-pin selected' : 'map-pin';
+    const badge = selected ? `<span class="map-pin-badge">${label}</span>` : '';
+    return L.divIcon({
+      className: '',
+      html: `<div class="${cls}"><span class="map-pin-emoji">${emoji}</span>${badge}</div>`,
+      iconSize: [40, 40],
+      iconAnchor: [20, 40],
+    });
+  }
+
+  function renderMapView(container) {
+    container.innerHTML = `
+      <div class="view-toggle">
+        <button class="view-btn" data-view="list">&#x1f4cb; リスト</button>
+        <button class="view-btn active" data-view="map">&#x1f5fa;&#xfe0f; マップ</button>
+      </div>
+      <div id="map-view"></div>
+      <div class="map-bottom-bar">
+        <div class="flex-between mb-8">
+          <span class="text-sm text-dim"><span id="map-sel-count">${selectedStoreIds.length}</span>店舗 選択中</span>
+          <button class="btn btn-sm btn-outline" id="btn-map-clear">クリア</button>
+        </div>
+        <button class="btn btn-primary btn-block" id="btn-map-optimize" ${selectedStoreIds.length < 1 ? 'disabled' : ''}>
+          ルート最適化
+        </button>
+      </div>
+    `;
+
+    // 表示切替イベント
+    container.querySelectorAll('.view-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        viewMode = btn.dataset.view;
+        if (mapInstance) { mapInstance.remove(); mapInstance = null; mapCluster = null; }
+        Router.navigate('home');
+      });
+    });
+
+    // Leaflet初期化
+    setTimeout(() => initMap(), 10);
+
+    document.getElementById('btn-map-clear').addEventListener('click', () => {
+      selectedStoreIds = [];
+      optimizedRoute = null;
+      refreshMapMarkers();
+      updateMapBottomBar();
+    });
+    document.getElementById('btn-map-optimize').addEventListener('click', doOptimize);
+  }
+
+  function initMap() {
+    const mapEl = document.getElementById('map-view');
+    if (!mapEl) return;
+
+    // 中心は自宅 or 仙台駅
+    const centerLat = Number(config.home_lat) || 38.2603;
+    const centerLng = Number(config.home_lng) || 140.8828;
+
+    mapInstance = L.map(mapEl, {
+      center: [centerLat, centerLng],
+      zoom: 11,
+      zoomControl: true,
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(mapInstance);
+
+    // 自宅マーカー
+    if (config.home_lat && config.home_lng) {
+      L.marker([centerLat, centerLng], {
+        icon: L.divIcon({
+          className: '',
+          html: `<div class="map-pin map-pin-home"><span class="map-pin-emoji">&#x1f3e0;</span></div>`,
+          iconSize: [40, 40],
+          iconAnchor: [20, 40],
+        }),
+        interactive: false,
+      }).addTo(mapInstance);
+    }
+
+    mapCluster = L.markerClusterGroup({
+      maxClusterRadius: 50,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+    });
+    mapInstance.addLayer(mapCluster);
+    refreshMapMarkers();
+  }
+
+  function refreshMapMarkers() {
+    if (!mapInstance || !mapCluster) return;
+    mapCluster.clearLayers();
+    stores.forEach(s => {
+      const lat = Number(s.lat);
+      const lng = Number(s.lng);
+      if (!lat || !lng) return;
+      const selIdx = selectedStoreIds.indexOf(s.store_id);
+      const marker = L.marker([lat, lng], { icon: buildPinIcon(s, selIdx) });
+      marker.bindPopup(
+        `<div class="map-popup">
+          <div class="map-popup-name">${esc(s.name)}</div>
+          <div class="map-popup-meta">${esc(s.category || '')}</div>
+          <button class="btn btn-sm btn-primary" data-sid="${s.store_id}" onclick="App.toggleMapSelection('${s.store_id}')">
+            ${selIdx >= 0 ? '選択解除' : '選択'}
+          </button>
+        </div>`
+      );
+      mapCluster.addLayer(marker);
+    });
+  }
+
+  function toggleMapSelection(sid) {
+    const idx = selectedStoreIds.indexOf(sid);
+    if (idx >= 0) selectedStoreIds.splice(idx, 1);
+    else selectedStoreIds.push(sid);
+    optimizedRoute = null;
+    if (mapInstance) mapInstance.closePopup();
+    refreshMapMarkers();
+    updateMapBottomBar();
+  }
+
+  function updateMapBottomBar() {
+    const countEl = document.getElementById('map-sel-count');
+    const btn = document.getElementById('btn-map-optimize');
+    if (countEl) countEl.textContent = selectedStoreIds.length;
+    if (btn) btn.disabled = selectedStoreIds.length < 1;
   }
 
   function renderOptimizedRoute(container) {
@@ -2060,5 +2217,5 @@ const App = (() => {
   // ---------- 起動 ----------
   document.addEventListener('DOMContentLoaded', init);
 
-  return { init, loadData };
+  return { init, loadData, toggleMapSelection };
 })();

@@ -501,3 +501,101 @@ body {
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
 .gap-8 { gap: 8px; }
 .hidden { display: none !important; }
+
+/* ---- 表示切替（リスト / マップ） ---- */
+.view-toggle {
+  display: flex;
+  gap: 8px;
+  background: var(--surface);
+  padding: 8px;
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+}
+.view-btn {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.view-btn.active {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* ---- マップビュー ---- */
+#map-view {
+  height: calc(100vh - 260px);
+  min-height: 300px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  background: var(--surface2);
+}
+.map-bottom-bar {
+  position: sticky;
+  bottom: 60px;
+  padding: 10px 0;
+  background: var(--bg);
+  z-index: 5;
+}
+
+/* ---- マップピン ---- */
+.map-pin {
+  width: 40px;
+  height: 40px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 2px solid var(--primary);
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  transition: transform .15s;
+}
+.map-pin-emoji {
+  transform: rotate(45deg);
+  font-size: 20px;
+  line-height: 1;
+}
+.map-pin.selected {
+  background: var(--primary);
+  border-color: var(--primary-dark);
+}
+.map-pin.selected .map-pin-emoji {
+  color: #fff;
+}
+.map-pin-home {
+  background: var(--warning);
+  border-color: #d97706;
+}
+.map-pin-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(45deg);
+  border: 2px solid #fff;
+}
+
+/* ---- ポップアップ ---- */
+.map-popup { min-width: 160px; }
+.map-popup-name { font-weight: 700; font-size: 14px; margin-bottom: 4px; color: var(--text); }
+.map-popup-meta { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+.leaflet-popup-content { margin: 12px; }
