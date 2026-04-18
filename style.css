@@ -673,8 +673,8 @@ body {
 
 /* ---- マップビュー ---- */
 #map-view {
-  height: calc(100vh - 400px);
-  min-height: 280px;
+  height: calc(100vh - 270px);
+  min-height: 340px;
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow);
