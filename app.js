@@ -50,7 +50,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v61';
+  const ASSET_VER = 'v62';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -879,6 +879,8 @@ const App = (() => {
       const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
       const mapsUrl = RouteOptimizer.generateMapsUrl(home, optimizedRoute.orderedStores);
       optimizedRoute._mapsUrl = mapsUrl;
+      // 最適化ルートはリストビューで表示されるため、viewModeを切り替えてからホームへ
+      viewMode = 'list';
       Router.navigate('home');
       // 最適化ルート表示部分へスクロール
       setTimeout(() => {
