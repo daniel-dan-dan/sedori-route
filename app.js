@@ -50,7 +50,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v69';
+  const ASSET_VER = 'v70';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -1672,6 +1672,7 @@ const App = (() => {
         API.getRouteHistory({ limit: 100, include_stops: 'true' }),
         API.getPurchases({ limit: 10000 }),
       ]);
+      if (Router.getCurrentView() !== 'analytics') return;
 
       if ((!purchaseItems || purchaseItems.length === 0) && (!purchases || purchases.length === 0)) {
         container.innerHTML = `
@@ -2064,6 +2065,7 @@ const App = (() => {
 
     try {
       const routes = await API.getRouteHistory({ limit: 20, include_stops: 'true' });
+      if (Router.getCurrentView() !== 'history') return;
       historyCache = routes;
       if (routes.length === 0) {
         container.innerHTML = '<div class="text-center text-dim mt-12">巡回履歴がありません</div>';
@@ -2097,6 +2099,7 @@ const App = (() => {
         });
       });
     } catch (e) {
+      if (Router.getCurrentView() !== 'history') return;
       container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
     }
   }
@@ -2395,7 +2398,8 @@ const App = (() => {
   }
 
   function setTitle(t) {
-    document.getElementById('header-title').textContent = t;
+    const el = document.getElementById('header-title');
+    if (el) el.textContent = t;
   }
 
   function setNavActive(view) {
