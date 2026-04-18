@@ -92,6 +92,17 @@ const App = (() => {
     return `<span class="store-status ${st.cls}">${st.label}</span>`;
   }
 
+  // コンパクトなインライン用ロゴ（巡回リスト等）
+  function renderStopIconHtml(store) {
+    const chain = getChain(store);
+    const logo = CHAIN_LOGOS[chain];
+    if (logo) {
+      const color = CHAIN_COLORS[chain] || '#6B7280';
+      return `<span class="stop-icon-logo" style="border-color:${color}"><img src="${logo}" alt=""></span>`;
+    }
+    return `<span class="stop-icon-emoji">${store.icon || '&#x1f3ea;'}</span>`;
+  }
+
   // チェーン別ロゴ（公式サイト/Wikimedia Commons由来）
   const CHAIN_LOGOS = {
     'ヤマダデンキ': 'icons/chains/yamada.png',
@@ -768,7 +779,7 @@ const App = (() => {
       html += `
         <div class="route-stop">
           <div class="stop-num">${i + 1}</div>
-          <span class="stop-name">${s.icon || ''} ${esc(s.name)}</span>
+          <span class="stop-name">${renderStopIconHtml(s)}${esc(s.name)}</span>
           <span class="stop-stay">${s.avg_stay_min}分</span>
         </div>`;
     });
@@ -807,7 +818,7 @@ const App = (() => {
         html += `
           <div class="route-stop">
             <div class="stop-num">${i + 1}</div>
-            <span class="stop-name">${s.icon || ''} ${esc(s.name)}</span>
+            <span class="stop-name">${renderStopIconHtml(s)}${esc(s.name)}</span>
             <span class="stop-stay">${s.avg_stay_min || 30}分</span>
           </div>`;
       });
@@ -949,7 +960,7 @@ const App = (() => {
     html += `
       <div class="patrol-current">
         <div class="current-label">${current.status === 'planned' ? '次の店舗' : '滞在中'}</div>
-        <div class="current-name">${current.icon || ''} ${esc(current.name)}</div>
+        <div class="current-name">${renderStopIconHtml(current)}${esc(current.name)}</div>
         <div class="current-meta">${esc(current.category)} | ${formatTime(current.open_time)}-${formatTime(current.close_time)}</div>
       </div>`;
 
@@ -975,7 +986,7 @@ const App = (() => {
         html += `
           <div class="route-stop">
             <div class="stop-num" style="background:var(--border);color:var(--text-dim)">${i + 1}</div>
-            <span class="stop-name">${s.icon || ''} ${esc(s.name)}</span>
+            <span class="stop-name">${renderStopIconHtml(s)}${esc(s.name)}</span>
             <span class="badge ${s.status === 'visited' ? 'badge-success' : ''}">${s.status === 'visited' ? '訪問済' : ''}</span>
           </div>`;
       }
@@ -1647,7 +1658,7 @@ const App = (() => {
         html += `
           <div class="card">
             <div class="flex-between">
-              <span>${i + 1}. ${s.icon || ''} ${esc(s.name)}</span>
+              <span>${i + 1}. ${renderStopIconHtml(s)}${esc(s.name)}</span>
               <span class="badge badge-success">${s.purchaseAmount.toLocaleString()}円</span>
             </div>
           </div>`;

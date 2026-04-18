@@ -382,7 +382,53 @@ body {
   font-weight: 700;
   flex-shrink: 0;
 }
-.route-stop .stop-name { font-size: 13px; flex: 1; }
+.route-stop .stop-name {
+  font-size: 13px;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stop-icon-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.stop-icon-logo img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+.stop-icon-emoji {
+  font-size: 16px;
+  flex: 0 0 auto;
+}
+.patrol-current .current-name .stop-icon-logo {
+  width: 36px;
+  height: 36px;
+  border-width: 3px;
+}
+.patrol-current .current-name .stop-icon-logo img {
+  width: 28px;
+  height: 28px;
+}
+.patrol-current .current-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+}
 .route-stop .stop-stay { font-size: 11px; color: var(--text-dim); }
 
 /* ---- Route Select Cards ---- */
