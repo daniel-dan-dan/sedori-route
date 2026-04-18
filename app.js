@@ -50,7 +50,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v59';
+  const ASSET_VER = 'v60';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -668,17 +668,16 @@ const App = (() => {
     document.getElementById('btn-map-optimize').addEventListener('click', doOptimize);
   }
 
+  // 初期中心は常に仙台駅固定
+  const SENDAI_STATION = [38.2603, 140.8828];
+
   function initMap() {
     const mapEl = document.getElementById('map-view');
     if (!mapEl) return;
     if (mapInstance) { mapInstance.remove(); mapInstance = null; mapCluster = null; }
 
-    // 中心は自宅 or 仙台駅（fitBounds前の仮中心）
-    const centerLat = Number(config.home_lat) || 38.2603;
-    const centerLng = Number(config.home_lng) || 140.8828;
-
     mapInstance = L.map(mapEl, {
-      center: [centerLat, centerLng],
+      center: SENDAI_STATION,
       zoom: 11,
       zoomControl: true,
     });
@@ -731,11 +730,11 @@ const App = (() => {
     if (latlngs.length === 0) return;
     // DOM反映後のサイズを正確に取得
     mapInstance.invalidateSize(false);
+    // ズームはfitBoundsで計算、中心は仙台駅固定
     const bounds = L.latLngBounds(latlngs);
-    mapInstance.fitBounds(bounds, { padding: [40, 40], animate: false });
-    const base = mapInstance.getZoom();
-    const target = Math.min(base + 2, mapInstance.getMaxZoom() || 19);
-    mapInstance.setZoom(target, { animate: false });
+    const fitZoom = mapInstance.getBoundsZoom(bounds, false, [40, 40]);
+    const target = Math.min(fitZoom + 2, mapInstance.getMaxZoom() || 19);
+    mapInstance.setView(SENDAI_STATION, target, { animate: false });
   }
 
   function toggleMapSelection(sid) {
