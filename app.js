@@ -35,6 +35,7 @@ const App = (() => {
     'サンデー': '#1E67B3',
     'コメリ': '#E60012',
     'コーナン': '#1E67B3',
+    'ビバホーム': '#DE611C',
     'オートバックス': '#FFB300',
     'イエローハット': '#FFC107',
     'ジェームス': '#1E67B3',
@@ -68,6 +69,7 @@ const App = (() => {
     'サンデー': 'icons/chains/sunday.png',
     'コメリ': 'icons/chains/komeri.png',
     'コーナン': 'icons/chains/kohnan.png',
+    'ビバホーム': 'icons/chains/vivahome.png',
     'オートバックス': 'icons/chains/autobacs.png',
     'イエローハット': 'icons/chains/yhat.png',
     'ジェームス': 'icons/chains/james.png',
@@ -143,6 +145,7 @@ const App = (() => {
     { re: /サンデー/, chain: 'サンデー' },
     { re: /コメリ/, chain: 'コメリ' },
     { re: /コーナン/, chain: 'コーナン' },
+    { re: /スーパービバホーム|ビバホーム/, chain: 'ビバホーム' },
     // カー用品
     { re: /オートバックス/, chain: 'オートバックス' },
     { re: /イエローハット/, chain: 'イエローハット' },
