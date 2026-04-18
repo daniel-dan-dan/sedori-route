@@ -425,8 +425,12 @@ const App = (() => {
     // イベント: フィルタータブ
     container.querySelectorAll('.filter-tab').forEach(tab => {
       tab.addEventListener('click', () => {
+        const tabs = container.querySelector('.filter-tabs');
+        const savedScroll = tabs ? tabs.scrollLeft : 0;
         activeFilter = tab.dataset.cat;
         Router.navigate('home');
+        const newTabs = document.querySelector('.filter-tabs');
+        if (newTabs) newTabs.scrollLeft = savedScroll;
       });
     });
 
@@ -556,9 +560,13 @@ const App = (() => {
     // チェーンチップ: 押したチェーンだけ表示
     container.querySelectorAll('.chain-chip').forEach(chip => {
       chip.addEventListener('click', () => {
+        const chips = container.querySelector('.map-chain-filter');
+        const savedScroll = chips ? chips.scrollLeft : 0;
         mapChainFilter = chip.dataset.chain;
         if (mapInstance) { mapInstance.remove(); mapInstance = null; mapCluster = null; }
         Router.navigate('home');
+        const newChips = document.querySelector('.map-chain-filter');
+        if (newChips) newChips.scrollLeft = savedScroll;
       });
     });
 
