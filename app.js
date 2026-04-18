@@ -50,7 +50,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v66';
+  const ASSET_VER = 'v67';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -622,6 +622,7 @@ const App = (() => {
         <button class="view-btn" data-view="list">&#x1f4cb; リスト</button>
       </div>
       ${chipHtml}
+      <div id="map-view"></div>
       <div class="map-bottom-bar">
         <div class="flex-between mb-8">
           <span class="text-sm text-dim"><span id="map-sel-count">${selectedStoreIds.length}</span>店舗 選択中</span>
@@ -631,7 +632,6 @@ const App = (() => {
           ルート最適化
         </button>
       </div>
-      <div id="map-view"></div>
     `;
 
     // 表示切替イベント
