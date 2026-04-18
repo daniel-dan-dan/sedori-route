@@ -52,6 +52,41 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
+  // チェーン別ロゴ（Wikimedia Commons由来）
+  const CHAIN_LOGOS = {
+    'ヤマダデンキ': 'icons/chains/yamada.png',
+    'ケーズデンキ': 'icons/chains/kdenki.png',
+    'コジマ×ビックカメラ': 'icons/chains/kojima.png',
+    'エディオン': 'icons/chains/edion.png',
+    'ノジマ': 'icons/chains/nojima.png',
+    'ジョーシン': 'icons/chains/joshin.png',
+    'ブックオフ': 'icons/chains/bookoff.png',
+    'ブックオフPLUS': 'icons/chains/bookoff-plus.png',
+    'ブックオフSB': 'icons/chains/bookoff-sb.png',
+    'セカンドストリート': 'icons/chains/2ndstreet.png',
+    'トレファク': 'icons/chains/trefac.png',
+    'ハードオフ': 'icons/chains/hardoff.png',
+    'ドンキホーテ': 'icons/chains/donki.png',
+    'カインズ': 'icons/chains/cainz.png',
+    'DCM': 'icons/chains/dcm.png',
+    'ダイユーエイト': 'icons/chains/daiyu8.png',
+    'コメリ': 'icons/chains/komeri.png',
+    'コーナン': 'icons/chains/kohnan.png',
+    'イエローハット': 'icons/chains/yhat.png',
+    'イオン': 'icons/chains/aeon.png',
+    'コストコ': 'icons/chains/costco.png',
+    'トイザらス': 'icons/chains/toysrus.png',
+  };
+
+  // ロゴ未登録チェーン向けのテキスト略称（2〜3文字）
+  const CHAIN_ABBR = {
+    'オフハウス': 'オフ',
+    'サンデー': 'サン',
+    'オートバックス': 'AB',
+    'ジェームス': 'JM',
+    'オフィスベンダー': 'OV',
+  };
+
   // ---------- エリア定義（座標ベース自動分類） ----------
 
   const AREAS = [
@@ -450,18 +485,29 @@ const App = (() => {
   // ---------- マップビュー ----------
 
   function buildPinIcon(store, selectionIdx) {
-    const emoji = store.icon || '&#x1f3ea;';
+    const chain = getChain(store);
+    const logo = CHAIN_LOGOS[chain];
+    const abbr = CHAIN_ABBR[chain];
     const selected = selectionIdx >= 0;
     const label = selected ? getSelectionLabel(selectionIdx) : '';
     const color = getChainColor(store);
     const cls = selected ? 'map-pin selected' : 'map-pin';
     const badge = selected ? `<span class="map-pin-badge">${label}</span>` : '';
-    const style = `background:${color}`;
+
+    let inner;
+    if (logo) {
+      inner = `<img class="map-pin-logo" src="${logo}" alt="">`;
+    } else if (abbr) {
+      inner = `<span class="map-pin-text">${esc(abbr)}</span>`;
+    } else {
+      inner = `<span class="map-pin-emoji">${store.icon || '&#x1f3ea;'}</span>`;
+    }
+    const style = `border-color:${color}`;
     return L.divIcon({
       className: '',
-      html: `<div class="${cls}" style="${style}"><span class="map-pin-emoji">${emoji}</span>${badge}</div>`,
-      iconSize: [44, 44],
-      iconAnchor: [22, 22],
+      html: `<div class="${cls}" style="${style}">${inner}${badge}</div>`,
+      iconSize: [48, 48],
+      iconAnchor: [24, 24],
     });
   }
 
@@ -562,8 +608,8 @@ const App = (() => {
         icon: L.divIcon({
           className: '',
           html: `<div class="map-pin map-pin-home"><span class="map-pin-emoji">&#x1f3e0;</span></div>`,
-          iconSize: [44, 44],
-          iconAnchor: [22, 22],
+          iconSize: [48, 48],
+          iconAnchor: [24, 24],
         }),
         interactive: false,
       }).addTo(mapInstance);
