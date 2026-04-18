@@ -50,7 +50,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v70';
+  const ASSET_VER = 'v71';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -419,12 +419,9 @@ const App = (() => {
       sorted = [...filtered].sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a));
     }
 
-    // エリア一括選択ボタン
-    const allFilteredSelected = sorted.length > 0 && sorted.every(s => selectedStoreIds.includes(s.store_id));
     if (activeFilter !== 'all' && sorted.length > 0) {
-      html += `<div class="flex-between mt-8 mb-8">
+      html += `<div class="mt-8 mb-8">
         <span class="text-sm" style="font-weight:600">${filterMode === 'area' ? (AREAS.find(a => a.id === activeFilter)?.name || activeFilter) : filterMode === 'genre' ? (GENRE_DISPLAY[activeFilter] || activeFilter) : activeFilter} ${sorted.length}店舗</span>
-        <button class="btn btn-sm ${allFilteredSelected ? 'btn-outline' : 'btn-primary'}" id="btn-select-area">${allFilteredSelected ? '全解除' : '全選択'}</button>
       </div>`;
     }
 
@@ -519,20 +516,6 @@ const App = (() => {
         }
       }
     }
-
-    // イベント: エリア一括選択
-    document.getElementById('btn-select-area')?.addEventListener('click', () => {
-      if (allFilteredSelected) {
-        const removeSet = new Set(sorted.map(s => s.store_id));
-        selectedStoreIds = selectedStoreIds.filter(id => !removeSet.has(id));
-      } else {
-        sorted.forEach(s => {
-          if (!selectedStoreIds.includes(s.store_id)) selectedStoreIds.push(s.store_id);
-        });
-      }
-      optimizedRoute = null;
-      Router.navigate('home');
-    });
 
     // イベント: 個別店舗選択
     container.querySelectorAll('.store-item').forEach(el => {
