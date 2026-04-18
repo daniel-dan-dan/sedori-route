@@ -36,6 +36,7 @@ const App = (() => {
     'コメリ': '#E60012',
     'コーナン': '#1E67B3',
     'ビバホーム': '#DE611C',
+    'ダイシン': '#E60012',
     'オートバックス': '#FFB300',
     'イエローハット': '#FFC107',
     'ジェームス': '#1E67B3',
@@ -50,7 +51,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v72';
+  const ASSET_VER = 'v73';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -129,6 +130,7 @@ const App = (() => {
     'コメリ': 'icons/chains/komeri.png',
     'コーナン': 'icons/chains/kohnan.png',
     'ビバホーム': 'icons/chains/vivahome.png',
+    'ダイシン': 'icons/chains/daishin.png',
     'オートバックス': 'icons/chains/autobacs.png',
     'イエローハット': 'icons/chains/yhat.png',
     'ジェームス': 'icons/chains/james.png',
@@ -205,6 +207,7 @@ const App = (() => {
     { re: /コメリ/, chain: 'コメリ' },
     { re: /コーナン/, chain: 'コーナン' },
     { re: /スーパービバホーム|ビバホーム/, chain: 'ビバホーム' },
+    { re: /ダイシン/, chain: 'ダイシン' },
     // カー用品
     { re: /オートバックス/, chain: 'オートバックス' },
     { re: /イエローハット/, chain: 'イエローハット' },
