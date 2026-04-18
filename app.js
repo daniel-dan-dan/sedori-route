@@ -50,12 +50,15 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
+  const ASSET_VER = 'v55';
+  function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
+
   function renderStoreIconHtml(store) {
     const chain = getChain(store);
     const logo = CHAIN_LOGOS[chain];
     if (logo) {
       const color = CHAIN_COLORS[chain] || '#6B7280';
-      return `<span class="store-icon store-icon-logo" style="border-color:${color}"><img src="${logo}" alt=""></span>`;
+      return `<span class="store-icon store-icon-logo" style="border-color:${color}"><img src="${withVer(logo)}" alt=""></span>`;
     }
     return `<span class="store-icon">${store.icon || '&#x1f3ea;'}</span>`;
   }
@@ -101,7 +104,7 @@ const App = (() => {
     const logo = CHAIN_LOGOS[chain];
     if (logo) {
       const color = CHAIN_COLORS[chain] || '#6B7280';
-      return `<span class="stop-icon-logo" style="border-color:${color}"><img src="${logo}" alt=""></span>`;
+      return `<span class="stop-icon-logo" style="border-color:${color}"><img src="${withVer(logo)}" alt=""></span>`;
     }
     return `<span class="stop-icon-emoji">${store.icon || '&#x1f3ea;'}</span>`;
   }
@@ -575,7 +578,7 @@ const App = (() => {
 
     let inner;
     if (logo) {
-      inner = `<img class="map-pin-logo" src="${logo}" alt="">`;
+      inner = `<img class="map-pin-logo" src="${withVer(logo)}" alt="">`;
     } else if (abbr) {
       inner = `<span class="map-pin-text">${esc(abbr)}</span>`;
     } else {

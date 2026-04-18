@@ -48,7 +48,25 @@
   <script src="app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js');
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+        // 新バージョン検出時に自動適用
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing;
+          if (!nw) return;
+          nw.addEventListener('statechange', () => {
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+              nw.postMessage({ type: 'SKIP_WAITING' });
+            }
+          });
+        });
+        // controllerが変わったら一度だけリロードして新コードで表示
+        let reloaded = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (reloaded) return;
+          reloaded = true;
+          location.reload();
+        });
+      });
     }
   </script>
 </body>

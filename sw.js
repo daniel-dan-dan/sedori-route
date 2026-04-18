@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sedori-route-v54';
+const CACHE_NAME = 'sedori-route-v55';
 const ASSETS = [
   './',
   './index.html',
@@ -12,8 +12,16 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)));
+  e.waitUntil(
+    caches.open(CACHE_NAME).then(c =>
+      Promise.all(ASSETS.map(url => fetch(url, { cache: 'reload' }).then(r => c.put(url, r))))
+    )
+  );
   self.skipWaiting();
+});
+
+self.addEventListener('message', e => {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {
