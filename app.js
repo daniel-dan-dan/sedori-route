@@ -743,8 +743,10 @@ const App = (() => {
     }
     if (latlngs.length === 0) return;
     const bounds = L.latLngBounds(latlngs);
-    mapInstance.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
-    mapInstance.zoomIn(2, { animate: false });
+    mapInstance.fitBounds(bounds, { padding: [40, 40], animate: false });
+    const base = mapInstance.getZoom();
+    const target = Math.min(base + 2, mapInstance.getMaxZoom() || 19);
+    mapInstance.setZoom(target, { animate: false });
   }
 
   function toggleMapSelection(sid) {
