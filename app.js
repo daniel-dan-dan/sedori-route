@@ -50,7 +50,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v55';
+  const ASSET_VER = 'v56';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -656,8 +656,8 @@ const App = (() => {
       });
     });
 
-    // Leaflet初期化
-    setTimeout(() => initMap(), 10);
+    // Leaflet初期化（DOMレイアウト完了後）
+    requestAnimationFrame(() => requestAnimationFrame(() => initMap()));
 
     document.getElementById('btn-map-clear').addEventListener('click', () => {
       selectedStoreIds = [];
@@ -728,10 +728,9 @@ const App = (() => {
       if (mapChainFilter !== 'all' && getChain(s) !== mapChainFilter) return;
       latlngs.push([lat, lng]);
     });
-    if (config.home_lat && config.home_lng) {
-      latlngs.push([Number(config.home_lat), Number(config.home_lng)]);
-    }
     if (latlngs.length === 0) return;
+    // DOM反映後のサイズを正確に取得
+    mapInstance.invalidateSize(false);
     const bounds = L.latLngBounds(latlngs);
     mapInstance.fitBounds(bounds, { padding: [40, 40], animate: false });
     const base = mapInstance.getZoom();
