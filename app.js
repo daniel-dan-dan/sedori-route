@@ -11,7 +11,7 @@ const App = (() => {
   let filterMode = 'area'; // 'area' | 'genre' | 'chain'
   let activeFilter = 'all';
   let patrolTimerInterval = null;
-  let viewMode = 'list'; // 'list' | 'map'
+  let viewMode = 'map'; // 'list' | 'map'
   let mapInstance = null;
   let mapCluster = null;
   let mapChainFilter = 'all';
@@ -341,10 +341,10 @@ const App = (() => {
 
     let html = '';
 
-    // 表示切替（リスト / マップ）
+    // 表示切替（マップ / リスト）
     html += `<div class="view-toggle">
-      <button class="view-btn active" data-view="list">&#x1f4cb; リスト</button>
       <button class="view-btn" data-view="map">&#x1f5fa;&#xfe0f; マップ</button>
+      <button class="view-btn active" data-view="list">&#x1f4cb; リスト</button>
     </div>`;
 
     // モード切替（エリア / ジャンル / チェーン）
@@ -615,8 +615,8 @@ const App = (() => {
 
     container.innerHTML = `
       <div class="view-toggle">
-        <button class="view-btn" data-view="list">&#x1f4cb; リスト</button>
         <button class="view-btn active" data-view="map">&#x1f5fa;&#xfe0f; マップ</button>
+        <button class="view-btn" data-view="list">&#x1f4cb; リスト</button>
       </div>
       ${chipHtml}
       <div id="map-view"></div>
