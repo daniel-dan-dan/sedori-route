@@ -649,15 +649,15 @@ body {
 /* ---- 表示切替（リスト / マップ） ---- */
 .view-toggle {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   background: var(--surface);
-  padding: 8px;
+  padding: 4px;
   border-radius: var(--radius);
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 .view-btn {
   flex: 1;
-  padding: 10px;
+  padding: 8px;
   border: none;
   background: transparent;
   color: var(--text-dim);
@@ -673,19 +673,26 @@ body {
 
 /* ---- マップビュー ---- */
 #map-view {
-  height: calc(100vh - 260px);
-  min-height: 300px;
+  height: calc(100vh - 180px);
+  min-height: 360px;
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow);
   background: var(--surface2);
 }
 .map-bottom-bar {
-  position: sticky;
-  bottom: 60px;
-  padding: 10px 0;
-  background: var(--bg);
-  z-index: 5;
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+  width: calc(100% - 24px);
+  max-width: 576px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 -2px 12px rgba(0,0,0,0.15);
+  z-index: 50;
 }
 
 /* ---- チェーンフィルターチップ ---- */
@@ -693,7 +700,7 @@ body {
   display: flex;
   gap: 6px;
   overflow-x: auto;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   padding-bottom: 4px;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
