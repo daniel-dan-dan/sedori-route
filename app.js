@@ -54,7 +54,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v84';
+  const ASSET_VER = 'v85';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -712,7 +712,13 @@ const App = (() => {
     const target = Math.round(cur + extra);
     const clamped = Math.max(mapInstance.getMinZoom() || 1, Math.min(mapInstance.getMaxZoom() || 19, target));
     if (clamped !== cur) {
-      mapInstance.setZoomAround(latlng, clamped, { animate: true });
+      // 次フレームで発火してLeafletの収束アニメとシームレスに繋げる
+      // duration長めでeasingをなだらかにしガクつきを回避
+      requestAnimationFrame(() => {
+        if (mapInstance) {
+          mapInstance.setZoomAround(latlng, clamped, { animate: true, duration: 0.6, easeLinearity: 0.25 });
+        }
+      });
     }
   }
 
@@ -751,9 +757,9 @@ const App = (() => {
             const ratio = last.d / first.d; // 1より大→拡大、小→縮小
             const zoomDelta = Math.log2(ratio); // zoom相当
             const vel = zoomDelta / dt; // zoom/ms
-            let extra = vel * 500; // 500ms分延長（控えめな慣性）
-            extra = Math.max(-2, Math.min(2, extra));
-            if (Math.abs(extra) > 0.15) {
+            let extra = vel * 250; // 250ms分延長（弱い慣性）
+            extra = Math.max(-1.5, Math.min(1.5, extra));
+            if (Math.abs(extra) > 0.2) {
               const rect = mapEl.getBoundingClientRect();
               const pt = L.point(pinch.cx - rect.left, pinch.cy - rect.top);
               const latlng = mapInstance.containerPointToLatLng(pt);
