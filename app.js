@@ -52,7 +52,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v74';
+  const ASSET_VER = 'v75';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -289,11 +289,13 @@ const App = (() => {
   async function loadData() {
     try {
       [stores, config] = await Promise.all([API.getStores(), API.getConfig()]);
+      stores = stores.filter(s => s && s.name && String(s.name).trim());
       await Storage.cacheStores(stores);
       await Storage.cacheConfig(config);
     } catch (e) {
       console.warn('API fetch failed, using cache:', e);
       stores = await Storage.getCachedStores();
+      stores = stores.filter(s => s && s.name && String(s.name).trim());
       config = await Storage.getCachedConfig();
       if (stores.length === 0) {
         toast('データ取得に失敗しました');
