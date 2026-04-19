@@ -53,7 +53,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v79';
+  const ASSET_VER = 'v80';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -688,6 +688,73 @@ const App = (() => {
     mapMarkers.clear();
     refreshMapMarkers();
     fitMapToMarkers();
+
+    // ピンチズーム慣性（指を離した後も少し続く）
+    if (!mapEl._pinchInertiaInstalled) {
+      installPinchZoomInertia(mapEl);
+      mapEl._pinchInertiaInstalled = true;
+    }
+  }
+
+  function installPinchZoomInertia(mapEl) {
+    let pinch = null;
+    const dist = (t1, t2) => Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+
+    mapEl.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        pinch = {
+          samples: [{ d: dist(e.touches[0], e.touches[1]), t: performance.now() }],
+          cx: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+          cy: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+        };
+      } else {
+        pinch = null;
+      }
+    }, { passive: true });
+
+    mapEl.addEventListener('touchmove', (e) => {
+      if (pinch && e.touches.length === 2) {
+        pinch.samples.push({ d: dist(e.touches[0], e.touches[1]), t: performance.now() });
+        if (pinch.samples.length > 8) pinch.samples.shift();
+      }
+    }, { passive: true });
+
+    mapEl.addEventListener('touchend', (e) => {
+      if (pinch && e.touches.length < 2 && mapInstance) {
+        // 直近3サンプルから速度算出（指止め直後の離し対応）
+        const recent = pinch.samples.slice(-3);
+        if (recent.length >= 2) {
+          const first = recent[0];
+          const last = recent[recent.length - 1];
+          const dt = last.t - first.t;
+          if (dt > 5) {
+            const ratio = last.d / first.d; // 1より大→拡大、小→縮小
+            const zoomDelta = Math.log2(ratio); // zoom相当
+            const vel = zoomDelta / dt; // zoom/ms
+            let extra = vel * 450; // 450ms分延長
+            extra = Math.max(-2, Math.min(2, extra));
+            if (Math.abs(extra) > 0.25) {
+              const cur = mapInstance.getZoom();
+              const target = Math.round(cur + extra);
+              const clamped = Math.max(mapInstance.getMinZoom() || 1, Math.min(mapInstance.getMaxZoom() || 19, target));
+              if (clamped !== cur) {
+                const rect = mapEl.getBoundingClientRect();
+                const pt = L.point(pinch.cx - rect.left, pinch.cy - rect.top);
+                const latlng = mapInstance.containerPointToLatLng(pt);
+                // Leafletのタッチ終了処理後に発火させる
+                setTimeout(() => {
+                  if (mapInstance) mapInstance.setZoomAround(latlng, clamped, { animate: true });
+                }, 30);
+              }
+            }
+          }
+        }
+        pinch = null;
+      }
+      if (e.touches.length === 0) pinch = null;
+    }, { passive: true });
+
+    mapEl.addEventListener('touchcancel', () => { pinch = null; }, { passive: true });
   }
 
   function buildMapPopupHtml(s, selIdx) {
