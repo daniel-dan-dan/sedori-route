@@ -16,6 +16,7 @@ const App = (() => {
   let mapCluster = null;
   let mapMarkers = new Map(); // store_id → L.marker（差分更新用）
   let mapChainFilter = 'all';
+  let pendingInertia = null; // ピンチズーム慣性の次フレーム予約
 
   // チェーン別ブランドカラー（ピン・チップの色分け）
   const CHAIN_COLORS = {
@@ -53,7 +54,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v81';
+  const ASSET_VER = 'v82';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -689,10 +690,29 @@ const App = (() => {
     refreshMapMarkers();
     fitMapToMarkers();
 
+    // ピンチズーム慣性の発火点: Leafletがズーム終了した直後
+    mapInstance.on('zoomend', applyInertiaIfPending);
+
     // ピンチズーム慣性（指を離した後も少し続く）
     if (!mapEl._pinchInertiaInstalled) {
       installPinchZoomInertia(mapEl);
       mapEl._pinchInertiaInstalled = true;
+    }
+  }
+
+  function applyInertiaIfPending() {
+    if (!pendingInertia || !mapInstance) return;
+    if (performance.now() > pendingInertia.expires) {
+      pendingInertia = null;
+      return;
+    }
+    const { extra, latlng } = pendingInertia;
+    pendingInertia = null;
+    const cur = mapInstance.getZoom();
+    const target = Math.round(cur + extra);
+    const clamped = Math.max(mapInstance.getMinZoom() || 1, Math.min(mapInstance.getMaxZoom() || 19, target));
+    if (clamped !== cur) {
+      mapInstance.setZoomAround(latlng, clamped, { animate: true });
     }
   }
 
@@ -731,21 +751,14 @@ const App = (() => {
             const ratio = last.d / first.d; // 1より大→拡大、小→縮小
             const zoomDelta = Math.log2(ratio); // zoom相当
             const vel = zoomDelta / dt; // zoom/ms
-            let extra = vel * 1200; // 1200ms分延長（慣性強め）
-            extra = Math.max(-4, Math.min(4, extra));
-            if (Math.abs(extra) > 0.15) {
-              const cur = mapInstance.getZoom();
-              const target = Math.round(cur + extra);
-              const clamped = Math.max(mapInstance.getMinZoom() || 1, Math.min(mapInstance.getMaxZoom() || 19, target));
-              if (clamped !== cur) {
-                const rect = mapEl.getBoundingClientRect();
-                const pt = L.point(pinch.cx - rect.left, pinch.cy - rect.top);
-                const latlng = mapInstance.containerPointToLatLng(pt);
-                // Leafletのタッチ終了処理後に発火させる
-                setTimeout(() => {
-                  if (mapInstance) mapInstance.setZoomAround(latlng, clamped, { animate: true });
-                }, 30);
-              }
+            let extra = vel * 2500; // 2500ms分延長（強い慣性）
+            extra = Math.max(-6, Math.min(6, extra));
+            if (Math.abs(extra) > 0.1) {
+              const rect = mapEl.getBoundingClientRect();
+              const pt = L.point(pinch.cx - rect.left, pinch.cy - rect.top);
+              const latlng = mapInstance.containerPointToLatLng(pt);
+              // zoomendを待って発火（Leafletのピンチ処理後に正しい基準値から計算）
+              pendingInertia = { extra, latlng, expires: performance.now() + 1000 };
             }
           }
         }
