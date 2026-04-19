@@ -54,7 +54,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v91';
+  const ASSET_VER = 'v92';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -677,9 +677,9 @@ const App = (() => {
     L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
       maxZoom: 19,
       subdomains: 'abcd',
-      updateWhenIdle: true,
-      updateWhenZooming: false,
-      keepBuffer: 4,
+      updateWhenIdle: false,     // アニメ終了を待たずタイル取得を開始
+      updateWhenZooming: false,  // アニメ中の描画更新は抑制（ガクつき防止）
+      keepBuffer: 2,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
     }).addTo(mapInstance);
 
