@@ -14,6 +14,7 @@ const App = (() => {
   let viewMode = 'map'; // 'list' | 'map'
   let mapInstance = null;
   let mapCluster = null;
+  let mapMarkers = new Map(); // store_id → L.marker（差分更新用）
   let mapChainFilter = 'all';
 
   // チェーン別ブランドカラー（ピン・チップの色分け）
@@ -52,7 +53,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v76';
+  const ASSET_VER = 'v77';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -661,47 +662,77 @@ const App = (() => {
   function initMap() {
     const mapEl = document.getElementById('map-view');
     if (!mapEl) return;
-    if (mapInstance) { mapInstance.remove(); mapInstance = null; mapCluster = null; }
+    if (mapInstance) { mapInstance.remove(); mapInstance = null; mapCluster = null; mapMarkers.clear(); }
 
     mapInstance = L.map(mapEl, {
       center: SENDAI_STATION,
       zoom: 11,
       zoomControl: true,
+      preferCanvas: true,
+      fadeAnimation: false,
+      markerZoomAnimation: false,
     });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
       maxZoom: 19,
       subdomains: 'abcd',
+      updateWhenIdle: true,
+      updateWhenZooming: false,
+      keepBuffer: 4,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
     }).addTo(mapInstance);
 
     // クラスタリングせず、全ピンを個別に表示するためLayerGroupを使用
     mapCluster = L.layerGroup();
     mapInstance.addLayer(mapCluster);
+    mapMarkers.clear();
     refreshMapMarkers();
     fitMapToMarkers();
   }
 
-  function refreshMapMarkers() {
-    if (!mapInstance || !mapCluster) return;
-    mapCluster.clearLayers();
-    stores.forEach(s => {
-      const lat = Number(s.lat);
-      const lng = Number(s.lng);
-      if (!lat || !lng) return;
-      if (mapChainFilter !== 'all' && getChain(s) !== mapChainFilter) return;
-      const selIdx = selectedStoreIds.indexOf(s.store_id);
-      const marker = L.marker([lat, lng], { icon: buildPinIcon(s, selIdx) });
-      marker.bindPopup(
-        `<div class="map-popup">
+  function buildMapPopupHtml(s, selIdx) {
+    return `<div class="map-popup">
           <div class="map-popup-name">${esc(s.name)}</div>
           <div class="map-popup-meta">${esc(s.category || '')}</div>
           <button class="btn btn-sm btn-primary" data-sid="${s.store_id}" onclick="App.toggleMapSelection('${s.store_id}')">
             ${selIdx >= 0 ? '選択解除' : '選択'}
           </button>
-        </div>`
-      );
-      mapCluster.addLayer(marker);
+        </div>`;
+  }
+
+  function refreshMapMarkers() {
+    if (!mapInstance || !mapCluster) return;
+    // 差分更新: 既存markerを使いまわし、不要分だけ削除・新規だけ追加
+    const wanted = new Map();
+    stores.forEach(s => {
+      const lat = Number(s.lat);
+      const lng = Number(s.lng);
+      if (!lat || !lng) return;
+      if (mapChainFilter !== 'all' && getChain(s) !== mapChainFilter) return;
+      wanted.set(s.store_id, s);
+    });
+
+    mapMarkers.forEach((marker, sid) => {
+      if (!wanted.has(sid)) {
+        mapCluster.removeLayer(marker);
+        mapMarkers.delete(sid);
+      }
+    });
+
+    wanted.forEach((s, sid) => {
+      const lat = Number(s.lat);
+      const lng = Number(s.lng);
+      const selIdx = selectedStoreIds.indexOf(sid);
+      const existing = mapMarkers.get(sid);
+      if (existing) {
+        existing.setIcon(buildPinIcon(s, selIdx));
+        existing.setPopupContent(buildMapPopupHtml(s, selIdx));
+      } else {
+        const marker = L.marker([lat, lng], { icon: buildPinIcon(s, selIdx) });
+        marker.bindPopup(buildMapPopupHtml(s, selIdx));
+        mapCluster.addLayer(marker);
+        mapMarkers.set(sid, marker);
+      }
     });
   }
 
