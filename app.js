@@ -53,7 +53,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v78';
+  const ASSET_VER = 'v79';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -669,7 +669,7 @@ const App = (() => {
       zoom: 11,
       zoomControl: true,
       preferCanvas: true,
-      fadeAnimation: false,
+      fadeAnimation: true,
       markerZoomAnimation: true,
     });
 

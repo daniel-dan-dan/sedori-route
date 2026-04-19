@@ -790,3 +790,16 @@ body {
 .map-popup-name { font-weight: 700; font-size: 14px; margin-bottom: 4px; color: var(--text); }
 .map-popup-meta { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
 .leaflet-popup-content { margin: 12px; }
+
+/* ピンチズーム終了時のピンのちらつきを抑止（GPUレイヤー固定） */
+.leaflet-marker-pane,
+.leaflet-shadow-pane {
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.leaflet-marker-icon {
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
