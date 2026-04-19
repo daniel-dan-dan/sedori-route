@@ -68,6 +68,8 @@ const API = (() => {
     addPurchase:     (b)         => post('addPurchase', b),
     addPurchaseItems:(b)         => post('addPurchaseItems', b),
     getPurchaseItems:(p = {})    => get('getPurchaseItems', p),
+    getAmbiguousPurchases:(p={}) => get('getAmbiguousPurchases', p),
+    updatePurchaseStore:(b)      => post('updatePurchaseStore', b),
     updateConfig:    (entries)   => post('updateConfig', { entries }),
     deleteRoute:     (b)         => post('deleteRoute', b),
     clearHistory:    ()          => post('clearHistory'),
