@@ -54,7 +54,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v82';
+  const ASSET_VER = 'v83';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -771,10 +771,11 @@ const App = (() => {
   }
 
   function buildMapPopupHtml(s, selIdx) {
+    const categoryLabel = GENRE_DISPLAY[s.category] || s.category || '';
     return `<div class="map-popup">
           <div class="map-popup-name">${esc(s.name)}</div>
-          <div class="map-popup-meta">${esc(s.category || '')}</div>
-          <button class="btn btn-sm btn-primary" data-sid="${s.store_id}" onclick="App.toggleMapSelection('${s.store_id}')">
+          <div class="map-popup-meta">${esc(categoryLabel)}</div>
+          <button class="btn btn-primary map-popup-btn" data-sid="${s.store_id}" onclick="App.toggleMapSelection('${s.store_id}')">
             ${selIdx >= 0 ? '選択解除' : '選択'}
           </button>
         </div>`;
