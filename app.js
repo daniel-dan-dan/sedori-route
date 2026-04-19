@@ -54,7 +54,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v86';
+  const ASSET_VER = 'v87';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -757,7 +757,7 @@ const App = (() => {
             const ratio = last.d / first.d; // 1より大→拡大、小→縮小
             const zoomDelta = Math.log2(ratio); // zoom相当
             const vel = zoomDelta / dt; // zoom/ms
-            let extra = vel * 180; // 180ms分延長（ごく弱い慣性）
+            let extra = vel * 120; // 120ms分延長（さらに弱め）
             extra = Math.max(-0.8, Math.min(0.8, extra));
             if (Math.abs(extra) > 0.35) {
               const rect = mapEl.getBoundingClientRect();
