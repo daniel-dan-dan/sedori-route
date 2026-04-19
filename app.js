@@ -44,6 +44,7 @@ const App = (() => {
     'コストコ': '#E60012',
     'トイザらス': '#E60012',
     'オフィスベンダー': '#6B7280',
+    'TSUTAYA': '#1D3480',
   };
 
   function getChainColor(store) {
@@ -51,7 +52,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v73';
+  const ASSET_VER = 'v74';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -138,6 +139,7 @@ const App = (() => {
     'コストコ': 'icons/chains/costco.png',
     'トイザらス': 'icons/chains/toysrus.png',
     'オフィスベンダー': 'icons/chains/ofv.png',
+    'TSUTAYA': 'icons/chains/tsutaya.png',
   };
 
   const CHAIN_ABBR = {};
@@ -174,12 +176,13 @@ const App = (() => {
   // ---------- ジャンル・チェーン定義 ----------
 
   // カテゴリ表示順
-  const GENRE_ORDER = ['家電量販', 'HC', 'ドンキ', 'リサイクル', 'カー用品', 'その他'];
+  const GENRE_ORDER = ['家電量販', 'HC', 'ドンキ', 'リサイクル', '書店', 'カー用品', 'その他'];
   const GENRE_DISPLAY = {
     '家電量販': '家電量販店',
     'HC': 'ホームセンター',
     'ドンキ': 'ドンキホーテ',
     'リサイクル': 'リサイクルショップ',
+    '書店': '書店',
     'カー用品': 'カー用品店',
     'その他': 'その他'
   };
@@ -217,6 +220,7 @@ const App = (() => {
     { re: /コストコ/, chain: 'コストコ' },
     { re: /トイザらス/, chain: 'トイザらス' },
     { re: /オフィスベンダー/, chain: 'オフィスベンダー' },
+    { re: /TSUTAYA|蔦屋書店|ツタヤ/i, chain: 'TSUTAYA' },
   ];
 
   function getChain(store) {
