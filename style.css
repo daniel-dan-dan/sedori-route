@@ -799,15 +799,25 @@ body {
 }
 .leaflet-popup-content { margin: 12px; }
 
-/* ピンチズーム終了時のピンのちらつきを抑止（GPUレイヤー固定） */
+/* ピンチズーム終了時のピンのちらつき・慣性アニメのガクつきを抑止（GPUレイヤー固定） */
+.leaflet-map-pane,
+.leaflet-tile-pane,
 .leaflet-marker-pane,
-.leaflet-shadow-pane {
+.leaflet-shadow-pane,
+.leaflet-overlay-pane {
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  -webkit-transform: translate3d(0, 0, 0);
+  transform: translate3d(0, 0, 0);
+}
+.leaflet-marker-icon,
+.leaflet-tile {
   will-change: transform;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
 }
-.leaflet-marker-icon {
+/* ズーム中のアニメーションCSSはLeafletのtransformを尊重しつつGPU描画を優先 */
+.leaflet-zoom-anim .leaflet-zoom-animated {
   will-change: transform;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
 }

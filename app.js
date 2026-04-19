@@ -54,7 +54,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v87';
+  const ASSET_VER = 'v88';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -716,7 +716,7 @@ const App = (() => {
       // duration長めでeasingをなだらかにしガクつきを回避
       requestAnimationFrame(() => {
         if (mapInstance) {
-          mapInstance.setZoomAround(latlng, clamped, { animate: true, duration: 0.6, easeLinearity: 0.25 });
+          mapInstance.setZoomAround(latlng, clamped, { animate: true, duration: 1.0, easeLinearity: 0.1 });
         }
       });
     }
