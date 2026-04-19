@@ -54,7 +54,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v90';
+  const ASSET_VER = 'v91';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -690,7 +690,7 @@ const App = (() => {
     refreshMapMarkers();
     fitMapToMarkers();
 
-    // ピンチズーム慣性の発火点: Leafletがズーム終了した直後
+    // 慣性のフォールバック発火点（_animateZoomパッチで通常は吸収される）
     mapInstance.on('zoomend', applyInertiaIfPending);
 
     // Leafletのズームアニメ終了は250ms固定。慣性時のみ延長するためパッチ
@@ -704,6 +704,26 @@ const App = (() => {
       } else {
         origOnZoomEnd.call(mapInstance);
       }
+    };
+
+    // _animateZoomをパッチ: Leafletのtouchend snapアニメに慣性を合成して1回のアニメで完結させる
+    // これによりピンチ直後の「snap→停止→慣性」2段階がなくなり、切れ目のない1本のズームになる
+    const origAnimateZoom = mapInstance._animateZoom;
+    mapInstance._animateZoom = function (center, zoom, startAnim, noUpdate) {
+      if (startAnim && pendingInertia && performance.now() <= pendingInertia.expires) {
+        const { extra, latlng } = pendingInertia;
+        pendingInertia = null;
+        const target = zoom + extra;
+        const clamped = Math.max(this.getMinZoom() || 1, Math.min(this.getMaxZoom() || 19, target));
+        if (clamped !== zoom) {
+          const container = this.getContainer();
+          container.classList.add('inertia-zoom');
+          this._inertiaExtendMs = 230;
+          this.once('zoomend', () => container.classList.remove('inertia-zoom'));
+          return origAnimateZoom.call(this, latlng, clamped, startAnim, noUpdate);
+        }
+      }
+      return origAnimateZoom.call(this, center, zoom, startAnim, noUpdate);
     };
 
     // ピンチズーム慣性（指を離した後も少し続く）
