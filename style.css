@@ -821,3 +821,9 @@ body {
 .leaflet-zoom-anim .leaflet-zoom-animated {
   will-change: transform;
 }
+
+/* 慣性ズーム中だけCSS transitionを長めにし、強いease-outで「最初速く・最後ゆっくり」 */
+.inertia-zoom .leaflet-zoom-anim .leaflet-zoom-animated {
+  transition: transform 0.7s cubic-bezier(0.05, 0.9, 0.15, 1) !important;
+  -webkit-transition: -webkit-transform 0.7s cubic-bezier(0.05, 0.9, 0.15, 1) !important;
+}

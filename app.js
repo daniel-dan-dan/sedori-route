@@ -54,7 +54,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v88';
+  const ASSET_VER = 'v89';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -693,6 +693,19 @@ const App = (() => {
     // ピンチズーム慣性の発火点: Leafletがズーム終了した直後
     mapInstance.on('zoomend', applyInertiaIfPending);
 
+    // Leafletのズームアニメ終了は250ms固定。慣性時のみ延長するためパッチ
+    mapInstance._inertiaExtendMs = 0;
+    const origOnZoomEnd = mapInstance._onZoomTransitionEnd;
+    mapInstance._onZoomTransitionEnd = function () {
+      if (mapInstance._inertiaExtendMs > 0) {
+        const extend = mapInstance._inertiaExtendMs;
+        mapInstance._inertiaExtendMs = 0;
+        setTimeout(() => origOnZoomEnd.call(mapInstance), extend);
+      } else {
+        origOnZoomEnd.call(mapInstance);
+      }
+    };
+
     // ピンチズーム慣性（指を離した後も少し続く）
     if (!mapEl._pinchInertiaInstalled) {
       installPinchZoomInertia(mapEl);
@@ -712,12 +725,16 @@ const App = (() => {
     const target = Math.round(cur + extra);
     const clamped = Math.max(mapInstance.getMinZoom() || 1, Math.min(mapInstance.getMaxZoom() || 19, target));
     if (clamped !== cur) {
-      // 次フレームで発火してLeafletの収束アニメとシームレスに繋げる
-      // duration長めでeasingをなだらかにしガクつきを回避
       requestAnimationFrame(() => {
-        if (mapInstance) {
-          mapInstance.setZoomAround(latlng, clamped, { animate: true, duration: 1.0, easeLinearity: 0.1 });
-        }
+        if (!mapInstance) return;
+        const container = mapInstance.getContainer();
+        container.classList.add('inertia-zoom');
+        // Leafletの収束タイミングを450ms延ばし、CSS側の長め(700ms)transitionと合わせる
+        mapInstance._inertiaExtendMs = 450;
+        mapInstance.once('zoomend', () => {
+          container.classList.remove('inertia-zoom');
+        });
+        mapInstance.setZoomAround(latlng, clamped, { animate: true });
       });
     }
   }
