@@ -53,7 +53,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v77';
+  const ASSET_VER = 'v78';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -670,7 +670,7 @@ const App = (() => {
       zoomControl: true,
       preferCanvas: true,
       fadeAnimation: false,
-      markerZoomAnimation: false,
+      markerZoomAnimation: true,
     });
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
