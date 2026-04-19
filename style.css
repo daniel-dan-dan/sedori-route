@@ -822,8 +822,8 @@ body {
   will-change: transform;
 }
 
-/* 慣性ズーム中だけCSS transitionを長めにし、強いease-outで「最初速く・最後ゆっくり」 */
+/* 慣性ズーム: ease-out-quart（初速 = 4×距離/時間）でピンチ速度から滑らかに減速 */
 .inertia-zoom .leaflet-zoom-anim .leaflet-zoom-animated {
-  transition: transform 0.7s cubic-bezier(0.05, 0.9, 0.15, 1) !important;
-  -webkit-transition: -webkit-transform 0.7s cubic-bezier(0.05, 0.9, 0.15, 1) !important;
+  transition: transform 0.48s cubic-bezier(0.25, 1, 0.5, 1) !important;
+  -webkit-transition: -webkit-transform 0.48s cubic-bezier(0.25, 1, 0.5, 1) !important;
 }

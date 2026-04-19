@@ -54,7 +54,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v89';
+  const ASSET_VER = 'v90';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -730,7 +730,8 @@ const App = (() => {
         const container = mapInstance.getContainer();
         container.classList.add('inertia-zoom');
         // Leafletの収束タイミングを450ms延ばし、CSS側の長め(700ms)transitionと合わせる
-        mapInstance._inertiaExtendMs = 450;
+        // CSS側の0.48s transitionに合わせる（250ms + 230ms = 480ms）
+        mapInstance._inertiaExtendMs = 230;
         mapInstance.once('zoomend', () => {
           container.classList.remove('inertia-zoom');
         });
