@@ -689,6 +689,11 @@ const App = (() => {
       </div>
     `;
 
+    // 予定ルートがある場合は最上部までスクロール（マップで隠れないように）
+    if (plannedRoute && plannedRoute.orderedStores && plannedRoute.orderedStores.length) {
+      window.scrollTo(0, 0);
+    }
+
     // 予定ルートのボタン
     wirePlannedRouteHandlers();
 
