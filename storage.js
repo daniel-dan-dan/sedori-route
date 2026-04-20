@@ -79,6 +79,16 @@ const Storage = (() => {
     });
   }
 
+  async function del(storeName, key) {
+    const d = await open();
+    const tx = d.transaction(storeName, 'readwrite');
+    tx.objectStore(storeName).delete(key);
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = e => reject(e.target.error);
+    });
+  }
+
   // 同期キュー
   async function addPendingAction(actionObj) {
     const d = await open();
@@ -145,7 +155,18 @@ const Storage = (() => {
     return get('currentRoute', 'current');
   }
   async function clearCurrentRoute() {
-    return clear('currentRoute');
+    return del('currentRoute', 'current');
+  }
+
+  // 予定ルート（タイマー未開始で保存するプラン）
+  async function savePlannedRoute(routeData) {
+    return put('currentRoute', { id: 'planned', ...routeData, savedAt: Date.now() });
+  }
+  async function getPlannedRoute() {
+    return get('currentRoute', 'planned');
+  }
+  async function clearPlannedRoute() {
+    return del('currentRoute', 'planned');
   }
 
   // online復帰時の自動同期
@@ -158,6 +179,7 @@ const Storage = (() => {
     addPendingAction, getPendingActions, clearPendingActions, syncPending,
     cacheStores, getCachedStores,
     cacheConfig, getCachedConfig,
-    saveCurrentRoute, getCurrentRoute, clearCurrentRoute
+    saveCurrentRoute, getCurrentRoute, clearCurrentRoute,
+    savePlannedRoute, getPlannedRoute, clearPlannedRoute
   };
 })();

@@ -8,6 +8,7 @@ const App = (() => {
   let selectedStoreIds = []; // 選択順を保持する配列
   let optimizedRoute = null;
   let patrolState = null; // { routeId, stops, currentIdx }
+  let plannedRoute = null; // 予定として保存されたルート（startTime 未打刻）
   let filterMode = 'area'; // 'area' | 'genre' | 'chain'
   let activeFilter = 'all';
   let patrolTimerInterval = null;
@@ -285,6 +286,15 @@ const App = (() => {
     }
 
     await loadData();
+
+    // 予定ルートを復元
+    try {
+      const planned = await Storage.getPlannedRoute();
+      if (planned && planned.orderedStores && planned.orderedStores.length) {
+        plannedRoute = planned;
+      }
+    } catch (e) { /* ignore */ }
+
     Router.navigate('home');
   }
 
@@ -354,6 +364,36 @@ const App = (() => {
     }
 
     let html = '';
+
+    // 予定ルートバナー（保存済みがあれば最上段に表示）
+    if (plannedRoute && plannedRoute.orderedStores && plannedRoute.orderedStores.length) {
+      const pr = plannedRoute;
+      const prHours = Math.floor((pr.estimatedMinutes || 0) / 60);
+      const prMins = (pr.estimatedMinutes || 0) % 60;
+      const savedStr = pr.savedAt ? new Date(pr.savedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      html += `
+        <div class="route-result" style="border:2px solid var(--primary);">
+          <div class="card-title">&#x1F4C5; 予定ルート${savedStr ? `<span class="text-dim text-sm" style="font-weight:normal;margin-left:8px;">(${esc(savedStr)} 保存)</span>` : ''}</div>
+          <div class="route-stats">
+            <div class="route-stat"><div class="value">${pr.totalDistanceKm}</div><div class="label">km</div></div>
+            <div class="route-stat"><div class="value">${prHours}h${prMins}m</div><div class="label">推定時間</div></div>
+            <div class="route-stat"><div class="value">${pr.orderedStores.length}</div><div class="label">店舗</div></div>
+          </div>`;
+      pr.orderedStores.forEach((s, i) => {
+        html += `
+          <div class="route-stop">
+            <div class="stop-num">${i + 1}</div>
+            <span class="stop-name">${renderStopIconHtml(s)}${esc(s.name)}</span>
+            <span class="stop-stay">${s.avg_stay_min || 30}分</span>
+          </div>`;
+      });
+      html += `
+          <div class="btn-group mt-8">
+            <button class="btn btn-outline" id="btn-planned-delete" style="flex:0 0 auto;">削除</button>
+            <button class="btn btn-success" id="btn-planned-start" style="flex:1;">この予定で巡回開始</button>
+          </div>
+        </div>`;
+    }
 
     // 表示切替（マップ / リスト）
     html += `<div class="view-toggle">
@@ -475,6 +515,21 @@ const App = (() => {
 
     container.innerHTML = html;
     container.classList.toggle('has-floating-bar', selectedStoreIds.length > 0);
+
+    // 予定ルートのボタン
+    document.getElementById('btn-planned-start')?.addEventListener('click', () => {
+      if (!plannedRoute) return;
+      optimizedRoute = plannedRoute;
+      plannedRoute = null;
+      Storage.clearPlannedRoute().catch(() => {});
+      startPatrol();
+    });
+    document.getElementById('btn-planned-delete')?.addEventListener('click', async () => {
+      if (!confirm('保存した予定ルートを削除しますか？')) return;
+      plannedRoute = null;
+      try { await Storage.clearPlannedRoute(); } catch (e) {}
+      Router.navigate('home');
+    });
 
     // 最適化済みルートがあれば表示
     if (optimizedRoute) {
@@ -999,7 +1054,8 @@ const App = (() => {
     // アクションボタン
     html += `
       <div style="position:sticky;bottom:60px;padding:8px 0;background:var(--bg);">
-        <button class="btn btn-success btn-block" id="btn-confirm-route">このルートで開始</button>
+        <button class="btn btn-success btn-block" id="btn-confirm-route">今すぐ巡回開始</button>
+        <button class="btn btn-primary btn-block mt-8" id="btn-save-planned">予定として保存（後で開始）</button>
         <button class="btn btn-outline btn-block mt-8" id="btn-back-select">戻る</button>
       </div>`;
 
@@ -1016,12 +1072,32 @@ const App = (() => {
       });
     });
 
-    document.getElementById('btn-confirm-route')?.addEventListener('click', () => {
-      optimizedRoute = selectedRoute === 'optimized' ? optRoute : selRoute;
+    function pickRoute() {
+      const chosen = selectedRoute === 'optimized' ? optRoute : selRoute;
       const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
-      optimizedRoute._mapsUrl = RouteOptimizer.generateMapsUrl(home, optimizedRoute.orderedStores);
-      // ワンタップで巡回開始
+      chosen._mapsUrl = RouteOptimizer.generateMapsUrl(home, chosen.orderedStores);
+      return chosen;
+    }
+
+    document.getElementById('btn-confirm-route')?.addEventListener('click', () => {
+      optimizedRoute = pickRoute();
+      // 今すぐ開始するので、既存の予定ルートは消しておく
+      plannedRoute = null;
+      Storage.clearPlannedRoute().catch(() => {});
       startPatrol();
+    });
+
+    document.getElementById('btn-save-planned')?.addEventListener('click', async () => {
+      const chosen = pickRoute();
+      plannedRoute = chosen;
+      optimizedRoute = null;
+      try {
+        await Storage.savePlannedRoute(chosen);
+        toast('予定として保存しました');
+      } catch (e) {
+        toast('保存に失敗しました');
+      }
+      Router.navigate('home');
     });
 
     document.getElementById('btn-back-select')?.addEventListener('click', () => {
