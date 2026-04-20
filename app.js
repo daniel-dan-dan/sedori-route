@@ -353,6 +353,55 @@ const App = (() => {
     return Math.round(score);
   }
 
+  // ---------- 予定ルートバナー（ホーム共通） ----------
+
+  function buildPlannedRouteBanner() {
+    if (!plannedRoute || !plannedRoute.orderedStores || !plannedRoute.orderedStores.length) return '';
+    const pr = plannedRoute;
+    const prHours = Math.floor((pr.estimatedMinutes || 0) / 60);
+    const prMins = (pr.estimatedMinutes || 0) % 60;
+    const savedStr = pr.savedAt ? new Date(pr.savedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    let html = `
+      <div class="route-result" style="border:2px solid var(--primary);">
+        <div class="card-title">&#x1F4C5; 予定ルート${savedStr ? `<span class="text-dim text-sm" style="font-weight:normal;margin-left:8px;">(${esc(savedStr)} 保存)</span>` : ''}</div>
+        <div class="route-stats">
+          <div class="route-stat"><div class="value">${pr.totalDistanceKm}</div><div class="label">km</div></div>
+          <div class="route-stat"><div class="value">${prHours}h${prMins}m</div><div class="label">推定時間</div></div>
+          <div class="route-stat"><div class="value">${pr.orderedStores.length}</div><div class="label">店舗</div></div>
+        </div>`;
+    pr.orderedStores.forEach((s, i) => {
+      html += `
+        <div class="route-stop">
+          <div class="stop-num">${i + 1}</div>
+          <span class="stop-name">${renderStopIconHtml(s)}${esc(s.name)}</span>
+          <span class="stop-stay">${s.avg_stay_min || 30}分</span>
+        </div>`;
+    });
+    html += `
+        <div class="btn-group mt-8">
+          <button class="btn btn-outline" id="btn-planned-delete" style="flex:0 0 auto;">削除</button>
+          <button class="btn btn-success" id="btn-planned-start" style="flex:1;">この予定で巡回開始</button>
+        </div>
+      </div>`;
+    return html;
+  }
+
+  function wirePlannedRouteHandlers() {
+    document.getElementById('btn-planned-start')?.addEventListener('click', () => {
+      if (!plannedRoute) return;
+      optimizedRoute = plannedRoute;
+      plannedRoute = null;
+      Storage.clearPlannedRoute().catch(() => {});
+      startPatrol();
+    });
+    document.getElementById('btn-planned-delete')?.addEventListener('click', async () => {
+      if (!confirm('保存した予定ルートを削除しますか？')) return;
+      plannedRoute = null;
+      try { await Storage.clearPlannedRoute(); } catch (e) {}
+      Router.navigate('home');
+    });
+  }
+
   // ---------- ホーム画面（ルート計画） ----------
 
   function renderHome(container) {
@@ -365,35 +414,8 @@ const App = (() => {
 
     let html = '';
 
-    // 予定ルートバナー（保存済みがあれば最上段に表示）
-    if (plannedRoute && plannedRoute.orderedStores && plannedRoute.orderedStores.length) {
-      const pr = plannedRoute;
-      const prHours = Math.floor((pr.estimatedMinutes || 0) / 60);
-      const prMins = (pr.estimatedMinutes || 0) % 60;
-      const savedStr = pr.savedAt ? new Date(pr.savedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-      html += `
-        <div class="route-result" style="border:2px solid var(--primary);">
-          <div class="card-title">&#x1F4C5; 予定ルート${savedStr ? `<span class="text-dim text-sm" style="font-weight:normal;margin-left:8px;">(${esc(savedStr)} 保存)</span>` : ''}</div>
-          <div class="route-stats">
-            <div class="route-stat"><div class="value">${pr.totalDistanceKm}</div><div class="label">km</div></div>
-            <div class="route-stat"><div class="value">${prHours}h${prMins}m</div><div class="label">推定時間</div></div>
-            <div class="route-stat"><div class="value">${pr.orderedStores.length}</div><div class="label">店舗</div></div>
-          </div>`;
-      pr.orderedStores.forEach((s, i) => {
-        html += `
-          <div class="route-stop">
-            <div class="stop-num">${i + 1}</div>
-            <span class="stop-name">${renderStopIconHtml(s)}${esc(s.name)}</span>
-            <span class="stop-stay">${s.avg_stay_min || 30}分</span>
-          </div>`;
-      });
-      html += `
-          <div class="btn-group mt-8">
-            <button class="btn btn-outline" id="btn-planned-delete" style="flex:0 0 auto;">削除</button>
-            <button class="btn btn-success" id="btn-planned-start" style="flex:1;">この予定で巡回開始</button>
-          </div>
-        </div>`;
-    }
+    // 予定ルートバナー
+    html += buildPlannedRouteBanner();
 
     // 表示切替（マップ / リスト）
     html += `<div class="view-toggle">
@@ -517,19 +539,7 @@ const App = (() => {
     container.classList.toggle('has-floating-bar', selectedStoreIds.length > 0);
 
     // 予定ルートのボタン
-    document.getElementById('btn-planned-start')?.addEventListener('click', () => {
-      if (!plannedRoute) return;
-      optimizedRoute = plannedRoute;
-      plannedRoute = null;
-      Storage.clearPlannedRoute().catch(() => {});
-      startPatrol();
-    });
-    document.getElementById('btn-planned-delete')?.addEventListener('click', async () => {
-      if (!confirm('保存した予定ルートを削除しますか？')) return;
-      plannedRoute = null;
-      try { await Storage.clearPlannedRoute(); } catch (e) {}
-      Router.navigate('home');
-    });
+    wirePlannedRouteHandlers();
 
     // 最適化済みルートがあれば表示
     if (optimizedRoute) {
@@ -661,6 +671,7 @@ const App = (() => {
     chipHtml += `</div>`;
 
     container.innerHTML = `
+      ${buildPlannedRouteBanner()}
       <div class="view-toggle">
         <button class="view-btn active" data-view="map">&#x1f5fa;&#xfe0f; マップ</button>
         <button class="view-btn" data-view="list">&#x1f4cb; リスト</button>
@@ -677,6 +688,9 @@ const App = (() => {
         </button>
       </div>
     `;
+
+    // 予定ルートのボタン
+    wirePlannedRouteHandlers();
 
     // 表示切替イベント
     container.querySelectorAll('.view-btn').forEach(btn => {
