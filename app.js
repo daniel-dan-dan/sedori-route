@@ -1091,6 +1091,7 @@ const App = (() => {
       const chosen = pickRoute();
       plannedRoute = chosen;
       optimizedRoute = null;
+      selectedStoreIds = [];
       try {
         await Storage.savePlannedRoute(chosen);
         toast('予定として保存しました');
