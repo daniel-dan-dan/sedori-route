@@ -1688,24 +1688,28 @@ const App = (() => {
     container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-      const [purchaseItems, routes, purchases] = await Promise.all([
-        API.getPurchaseItems({ limit: 10000 }),
-        API.getRouteHistory({ limit: 100, include_stops: 'true' }),
-        API.getPurchases({ limit: 10000 }),
+      // 過去1年分の在庫管理データを取得（店舗資産化の中核データソース）
+      const d = new Date();
+      const toStr = d.toISOString().slice(0, 10);
+      const from = new Date(d.getFullYear() - 1, d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+
+      const [inventoryItems, routes] = await Promise.all([
+        API.getInventoryPurchases({ from, to: toStr }),
+        API.getRouteHistory({ limit: 200, include_stops: 'true' }),
       ]);
       if (Router.getCurrentView() !== 'analytics') return;
 
-      if ((!purchaseItems || purchaseItems.length === 0) && (!purchases || purchases.length === 0)) {
+      if (!inventoryItems || inventoryItems.length === 0) {
         container.innerHTML = `
           <div class="text-center mt-12">
             <div class="text-dim">まだデータがありません</div>
-            <div class="text-sm text-dim mt-8">巡回してCSVを取り込むとここに分析結果が表示されます</div>
+            <div class="text-sm text-dim mt-8">在庫管理シートに仕入れ品が登録されるとここに分析結果が表示されます</div>
           </div>`;
         return;
       }
 
-      // 店舗ごとの集計
-      const storeStats = buildStoreStats(purchaseItems, routes, purchases, stores);
+      // 店舗ごとの集計（在庫管理ベース）
+      const storeStats = buildStoreStats(inventoryItems, routes, stores);
       const sortedStats = Object.values(storeStats).sort((a, b) => b.totalExpectedProfit - a.totalExpectedProfit);
 
       let html = '';
@@ -1715,12 +1719,13 @@ const App = (() => {
       const totalPurchase = sortedStats.reduce((s, st) => s + st.totalPurchaseAmount, 0);
       const totalVisits = sortedStats.reduce((s, st) => s + st.visitCount, 0);
       const totalItems = sortedStats.reduce((s, st) => s + st.itemCount, 0);
+      const profitColorAll = totalProfit >= 0 ? 'var(--success)' : 'var(--accent)';
 
       html += `
         <div class="card">
-          <div class="card-title">全体サマリー</div>
+          <div class="card-title">全体サマリー（過去1年）</div>
           <div class="summary-grid">
-            <div class="summary-item"><div class="value">${totalProfit.toLocaleString()}円</div><div class="label">見込み利益合計</div></div>
+            <div class="summary-item"><div class="value" style="color:${profitColorAll}">${totalProfit.toLocaleString()}円</div><div class="label">見込み利益合計</div></div>
             <div class="summary-item"><div class="value">${totalPurchase.toLocaleString()}円</div><div class="label">仕入れ合計</div></div>
             <div class="summary-item"><div class="value">${totalVisits}</div><div class="label">総訪問回数</div></div>
             <div class="summary-item"><div class="value">${totalItems}</div><div class="label">総仕入れ点数</div></div>
@@ -1757,7 +1762,9 @@ const App = (() => {
     }
   }
 
-  function buildStoreStats(purchaseItems, routes, purchases, allStores) {
+  // 在庫管理の行を店舗にマッピングして集計
+  // マッチ優先度: ①L列=shopが既存店舗名と一致 → ②チェーン判定で店舗マスタに1件だけ該当 → ③チェーン単位で集約 → ④仕入先名で集約
+  function buildStoreStats(inventoryItems, routes, allStores) {
     const stats = {};
 
     function ensureStore(storeId) {
@@ -1767,7 +1774,10 @@ const App = (() => {
           store_id: storeId,
           name: s ? s.name : storeId,
           category: s ? s.category : '',
+          chain: s ? getChain(s) : '',
+          kind: 'store',
           totalExpectedProfit: 0,
+          totalExpectedSale: 0,
           totalPurchaseAmount: 0,
           itemCount: 0,
           visitCount: 0,
@@ -1779,40 +1789,77 @@ const App = (() => {
       return stats[storeId];
     }
 
-    // CSV取り込みデータから集計
-    (purchaseItems || []).forEach(pi => {
-      // store_idがあればそれを使い、なければsupplier_nameで集計
-      let key = pi.store_id;
-      if (!key && pi.supplier_name) {
-        key = 'supplier:' + pi.supplier_name;
-        if (!stats[key]) {
-          stats[key] = {
-            store_id: key,
-            name: pi.supplier_name,
-            category: '',
-            totalExpectedProfit: 0,
-            totalPurchaseAmount: 0,
-            itemCount: 0,
-            visitCount: 0,
-            totalStayMin: 0,
-            items: [],
-            genres: {},
-          };
+    function ensureVirtual(key, displayName, kind) {
+      if (!stats[key]) {
+        stats[key] = {
+          store_id: key,
+          name: displayName,
+          category: '',
+          chain: kind === 'chain' ? displayName : '',
+          kind,
+          totalExpectedProfit: 0,
+          totalExpectedSale: 0,
+          totalPurchaseAmount: 0,
+          itemCount: 0,
+          visitCount: 0,
+          totalStayMin: 0,
+          items: [],
+          genres: {},
+        };
+      }
+      return stats[key];
+    }
+
+    // chainごとの店舗マスタ内件数を事前計算
+    const chainToStores = {};
+    allStores.forEach(s => {
+      const c = getChain(s);
+      if (!c) return;
+      (chainToStores[c] = chainToStores[c] || []).push(s);
+    });
+
+    (inventoryItems || []).forEach(it => {
+      const profit = Number(it.expected_profit) || 0;
+      const sale = Number(it.expected_sale_price) || 0;
+      const cost = Number(it.purchase_price) || 0;
+
+      let target = null;
+
+      // ① L列の店舗名で一致
+      if (it.shop) {
+        const hit = allStores.find(s => s.name === it.shop);
+        if (hit) target = ensureStore(hit.store_id);
+      }
+
+      // ② チェーン判定で店舗マスタに1件だけ該当
+      if (!target) {
+        const supplier = it.supplier || it.alias || '';
+        const chain = supplier ? getChain({ name: supplier }) : '';
+        if (chain) {
+          const candidates = chainToStores[chain] || [];
+          if (candidates.length === 1) {
+            target = ensureStore(candidates[0].store_id);
+          } else if (candidates.length > 1) {
+            // ③ チェーン単位で集約（どの店舗か特定不能）
+            target = ensureVirtual('chain:' + chain, chain + '（店舗未確定）', 'chain');
+          }
         }
       }
-      if (!key) return;
-      const st = key.startsWith('supplier:') ? stats[key] : ensureStore(key);
-      const profit = Number(pi.expected_profit) || 0;
-      const price = Number(pi.purchase_price) || 0;
-      const qty = Number(pi.quantity) || 1;
-      st.totalExpectedProfit += profit * qty;
-      st.totalPurchaseAmount += price * qty;
-      st.itemCount += qty;
-      st.items.push(pi);
 
-      // ジャンル集計（カテゴリから推定）
-      const genre = guessGenre(pi.product_name);
-      st.genres[genre] = (st.genres[genre] || 0) + profit * qty;
+      // ④ 仕入先名で集約（チェーン判定できない＝ルート外・新店舗・表記ゆれ）
+      if (!target) {
+        const supplier = it.supplier || it.alias || '不明';
+        target = ensureVirtual('supplier:' + supplier, supplier, 'supplier');
+      }
+
+      target.totalExpectedProfit += profit;
+      target.totalExpectedSale += sale;
+      target.totalPurchaseAmount += cost;
+      target.itemCount += 1;
+      target.items.push(it);
+
+      const genre = guessGenre(it.product_name);
+      target.genres[genre] = (target.genres[genre] || 0) + profit;
     });
 
     // 巡回データから訪問回数・滞在時間を集計
@@ -1826,16 +1873,6 @@ const App = (() => {
           if (stay > 0 && stay < 480) st.totalStayMin += stay;
         }
       });
-    });
-
-    // purchasesデータからも仕入れ額を補完（CSV未取り込み分）
-    (purchases || []).forEach(p => {
-      if (!p.store_id) return;
-      const st = ensureStore(p.store_id);
-      // CSV取り込みデータがなければpurchasesの金額を使う
-      if (st.items.length === 0) {
-        st.totalPurchaseAmount += Number(p.amount) || 0;
-      }
     });
 
     return stats;
@@ -1867,26 +1904,33 @@ const App = (() => {
     }
 
     let html = '';
+    const topProfit = sortedStats[0].totalExpectedProfit;
     sortedStats.forEach((st, i) => {
       const profitPerVisit = st.visitCount > 0 ? Math.round(st.totalExpectedProfit / st.visitCount) : 0;
       const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-      const barWidth = sortedStats[0].totalExpectedProfit > 0
-        ? Math.max(5, Math.round(st.totalExpectedProfit / sortedStats[0].totalExpectedProfit * 100))
+      const barWidth = topProfit > 0
+        ? Math.max(5, Math.round(st.totalExpectedProfit / topProfit * 100))
         : 0;
       const profitColor = st.totalExpectedProfit >= 0 ? 'var(--success)' : 'var(--accent)';
+      const label = st.kind === 'chain' ? '<span class="badge" style="background:#fff7e6;color:#d35400">店舗未確定</span>'
+                  : st.kind === 'supplier' ? '<span class="badge" style="background:#fef3c7;color:#92400e">ルート外</span>'
+                  : '';
+      const visitInfo = st.kind === 'store'
+        ? `${st.visitCount}回訪問${profitPerVisit > 0 ? ` / 1回あたり ${profitPerVisit.toLocaleString()}円` : ''}`
+        : '';
 
       html += `
         <div class="card mt-8">
           <div class="flex-between">
-            <span><b>${medal} ${esc(st.name)}</b></span>
+            <span><b>${medal} ${esc(st.name)}</b> ${label}</span>
             <span style="color:${profitColor};font-weight:bold">${st.totalExpectedProfit.toLocaleString()}円</span>
           </div>
           <div style="background:var(--border);border-radius:4px;height:6px;margin:6px 0">
             <div style="background:${profitColor};border-radius:4px;height:6px;width:${barWidth}%"></div>
           </div>
           <div class="text-sm text-dim">
-            仕入れ ${st.totalPurchaseAmount.toLocaleString()}円 / ${st.itemCount}点 / ${st.visitCount}回訪問
-            ${profitPerVisit > 0 ? `/ 1回あたり ${profitPerVisit.toLocaleString()}円` : ''}
+            仕入 ${st.totalPurchaseAmount.toLocaleString()}円 → 販売予定 ${st.totalExpectedSale.toLocaleString()}円 / ${st.itemCount}点
+            ${visitInfo ? ' / ' + visitInfo : ''}
           </div>
         </div>`;
     });
@@ -1955,7 +1999,7 @@ const App = (() => {
     const storesWithGenres = sortedStats.filter(st => Object.keys(st.genres).length > 0);
 
     if (storesWithGenres.length === 0) {
-      container.innerHTML = '<div class="text-center text-dim mt-12">CSV取り込みデータがありません</div>';
+      container.innerHTML = '<div class="text-center text-dim mt-12">在庫管理データがありません</div>';
       return;
     }
 
