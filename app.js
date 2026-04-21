@@ -2287,16 +2287,35 @@ const App = (() => {
       return;
     }
 
-    // 訪問店舗別
+    // この巡回の合計（店舗資産化の中核指標を一目でわかる位置に）
+    const relatedItems = Object.values(byStore).flat();
+    const totalProfit = relatedItems.reduce((n, x) => n + (Number(x.expected_profit) || 0), 0);
+    const totalCost = relatedItems.reduce((n, x) => n + (Number(x.purchase_price) || 0), 0);
+    const profitColor = totalProfit >= 0 ? 'var(--success)' : 'var(--accent)';
+    html += `
+      <div class="card" style="background:var(--primary-light)">
+        <div class="summary-grid">
+          <div class="summary-item"><div class="value" style="color:${profitColor}">${totalProfit.toLocaleString()}円</div><div class="label">見込み利益</div></div>
+          <div class="summary-item"><div class="value">${totalCost.toLocaleString()}円</div><div class="label">仕入合計</div></div>
+          <div class="summary-item"><div class="value">${relatedItems.length}</div><div class="label">点数</div></div>
+        </div>
+      </div>`;
+
+    // 訪問店舗別（仕入額と見込み利益を集計表示。見込み利益は店舗資産化の中核指標）
     visitedStores.forEach(vs => {
       const arr = byStore[vs.store_id] || [];
       if (arr.length === 0) return;
-      const sum = arr.reduce((n, x) => n + (Number(x.purchase_price) || 0), 0);
+      const sumCost = arr.reduce((n, x) => n + (Number(x.purchase_price) || 0), 0);
+      const sumProfit = arr.reduce((n, x) => n + (Number(x.expected_profit) || 0), 0);
+      const profitColor = sumProfit >= 0 ? 'var(--success)' : 'var(--accent)';
       html += `
         <div class="card mt-8">
           <div class="flex-between">
             <div><b>${esc(vs.name)}</b> <span class="badge badge-success">${arr.length}点</span></div>
-            <div class="text-sm">仕入 ${sum.toLocaleString()}円</div>
+            <div style="text-align:right">
+              <div class="text-sm text-dim">仕入 ${sumCost.toLocaleString()}円</div>
+              <div style="color:${profitColor};font-weight:bold">見込利益 ${sumProfit.toLocaleString()}円</div>
+            </div>
           </div>`;
       arr.forEach(it => {
         html += inventoryItemLine_(it);
@@ -2311,6 +2330,9 @@ const App = (() => {
         <div class="text-sm text-dim mb-8">同じ日に同チェーンの複数店舗を訪問しました。正しい店舗を選んでください。</div>`;
       ambiguous.forEach((amb, idx) => {
         const it = amb.item;
+        const cost = Number(it.purchase_price) || 0;
+        const profit = Number(it.expected_profit) || 0;
+        const pc = profit >= 0 ? 'var(--success)' : 'var(--accent)';
         const options = ['<option value="">-- 選択 --</option>']
           .concat(amb.candidates.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`))
           .join('');
@@ -2318,7 +2340,10 @@ const App = (() => {
           <div class="card" data-ambig-idx="${idx}">
             <div class="text-sm text-dim">仕入先: ${esc(it.supplier || it.alias || '')}</div>
             <div style="font-weight:600;margin:4px 0">${esc(it.product_name || '(商品名なし)')}</div>
-            <div class="text-sm text-dim">¥${Number(it.purchase_price || 0).toLocaleString()}</div>
+            <div class="text-sm">
+              <span style="color:${pc};font-weight:bold">見込利益 ${profit.toLocaleString()}円</span>
+              <span class="text-dim" style="margin-left:8px">仕入 ${cost.toLocaleString()}円</span>
+            </div>
             <select class="form-select mt-8 js-ambig-sel" data-row="${it.row}">${options}</select>
           </div>`;
       });
@@ -2334,10 +2359,17 @@ const App = (() => {
       html += `<details class="card mt-8" open><summary class="text-dim">ルート外の仕入れ（${unrelated.length}件） — 手動で紐付け可能</summary>
         <div class="text-sm text-dim mb-8 mt-8">仕入先の表記でチェーン判定できなかった商品です。正しい訪問店舗を選ぶと在庫管理シートに店舗名が書き戻されます。</div>`;
       unrelated.forEach((it, idx) => {
+        const cost = Number(it.purchase_price) || 0;
+        const sale = Number(it.expected_sale_price) || 0;
+        const profit = Number(it.expected_profit) || 0;
+        const pc = profit >= 0 ? 'var(--success)' : 'var(--accent)';
         html += `<div class="card" data-unrel-idx="${idx}">
           <div class="text-sm text-dim">仕入先: ${esc(it.supplier || it.alias || '(未記入)')}</div>
           <div style="font-weight:600;margin:4px 0">${esc(it.product_name || '(商品名なし)')}</div>
-          <div class="text-sm text-dim">¥${Number(it.purchase_price || 0).toLocaleString()}</div>
+          <div class="text-sm">
+            <span style="color:${pc};font-weight:bold">見込利益 ${profit.toLocaleString()}円</span>
+            <span class="text-dim" style="margin-left:8px">仕入 ${cost.toLocaleString()}円 → 販売予定 ${sale.toLocaleString()}円</span>
+          </div>
           <select class="form-select mt-8 js-unrel-sel" data-row="${it.row}">${allStoreOptions}</select>
         </div>`;
       });
@@ -2387,11 +2419,21 @@ const App = (() => {
   function inventoryItemLine_(it) {
     const name = it.product_name || '(商品名なし)';
     const shortName = name.length > 40 ? name.substring(0, 40) + '...' : name;
-    return `<div class="text-sm" style="padding:4px 0;border-bottom:1px solid var(--border)">
+    const cost = Number(it.purchase_price) || 0;
+    const sale = Number(it.expected_sale_price) || 0;
+    const profit = Number(it.expected_profit) || 0;
+    const profitColor = profit >= 0 ? 'var(--success)' : 'var(--accent)';
+    const hasSale = sale > 0 || profit !== 0;
+    return `<div class="text-sm" style="padding:6px 0;border-bottom:1px solid var(--border)">
       <div class="flex-between">
         <span>${esc(shortName)}</span>
-        <span style="white-space:nowrap;margin-left:8px">¥${Number(it.purchase_price || 0).toLocaleString()}</span>
+        ${hasSale
+          ? `<span style="white-space:nowrap;margin-left:8px;color:${profitColor};font-weight:bold">利 ${profit.toLocaleString()}円</span>`
+          : `<span style="white-space:nowrap;margin-left:8px">¥${cost.toLocaleString()}</span>`}
       </div>
+      ${hasSale
+        ? `<div class="text-dim" style="font-size:12px">仕入 ${cost.toLocaleString()}円 → 販売予定 ${sale.toLocaleString()}円</div>`
+        : ''}
     </div>`;
   }
 
