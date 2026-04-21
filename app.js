@@ -2325,13 +2325,20 @@ const App = (() => {
       html += `</div>`;
     }
 
-    // ルート外（参考表示）
+    // ルート外（チェーン判定で一致する訪問店舗が無かった仕入れ）
+    // → 訪問店舗を手動で選べるようにし、在庫管理シートのL列に書き戻す
     if (unrelated.length > 0) {
-      html += `<details class="card mt-8"><summary class="text-dim">ルート外の仕入れ（${unrelated.length}件）</summary>`;
-      unrelated.forEach(it => {
-        html += `<div class="text-sm" style="padding:4px 0;border-bottom:1px solid var(--border)">
-          <div>${esc(it.product_name || '')} <span class="text-dim">/ 仕入先: ${esc(it.supplier || it.alias || '')}</span></div>
-          <div class="text-dim">¥${Number(it.purchase_price || 0).toLocaleString()}</div>
+      const allStoreOptions = ['<option value="">-- 店舗を選択 --</option>']
+        .concat(visitedStores.map(vs => `<option value="${esc(vs.name)}">${esc(vs.name)}</option>`))
+        .join('');
+      html += `<details class="card mt-8" open><summary class="text-dim">ルート外の仕入れ（${unrelated.length}件） — 手動で紐付け可能</summary>
+        <div class="text-sm text-dim mb-8 mt-8">仕入先の表記でチェーン判定できなかった商品です。正しい訪問店舗を選ぶと在庫管理シートに店舗名が書き戻されます。</div>`;
+      unrelated.forEach((it, idx) => {
+        html += `<div class="card" data-unrel-idx="${idx}">
+          <div class="text-sm text-dim">仕入先: ${esc(it.supplier || it.alias || '(未記入)')}</div>
+          <div style="font-weight:600;margin:4px 0">${esc(it.product_name || '(商品名なし)')}</div>
+          <div class="text-sm text-dim">¥${Number(it.purchase_price || 0).toLocaleString()}</div>
+          <select class="form-select mt-8 js-unrel-sel" data-row="${it.row}">${allStoreOptions}</select>
         </div>`;
       });
       html += `</details>`;
@@ -2350,6 +2357,24 @@ const App = (() => {
           await API.updateInventoryShop({ row, shop });
           toast(`${shop} に確定しました`);
           // 画面を再読み込みして反映
+          loadInventoryForRoute(route);
+        } catch (e) {
+          sel.disabled = false;
+          toast('保存失敗: ' + e.message);
+        }
+      });
+    });
+
+    // ルート外の手動紐付けイベント（チェーン判定を跨いで訪問店舗に割り当て可能）
+    section.querySelectorAll('.js-unrel-sel').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        const row = Number(sel.dataset.row);
+        const shop = sel.value;
+        if (!row || !shop) return;
+        sel.disabled = true;
+        try {
+          await API.updateInventoryShop({ row, shop });
+          toast(`${shop} に紐付けました`);
           loadInventoryForRoute(route);
         } catch (e) {
           sel.disabled = false;
