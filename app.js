@@ -402,6 +402,32 @@ const App = (() => {
     });
   }
 
+  // ---------- 巡回中バナー（ホーム共通） ----------
+
+  function buildPatrolBanner() {
+    if (!patrolState || !patrolState.stops || !patrolState.stops.length) return '';
+    const { stops, currentIdx } = patrolState;
+    const current = stops[currentIdx];
+    const total = stops.length;
+    const visited = stops.filter(s => s.status === 'visited').length;
+    const currentName = current ? current.name : '';
+    return `
+      <div class="card planned-route-banner" id="patrol-banner" style="border-color:#22c55e;background:#f0fdf4">
+        <div class="flex-between mb-8">
+          <span style="font-weight:600;color:#166534">🚗 巡回中 (${visited}/${total})</span>
+          <span class="badge" style="background:#22c55e;color:white">${current ? (currentIdx + 1) + '店舗目' : '完了'}</span>
+        </div>
+        ${current ? `<div class="text-sm" style="color:#166534">現在: ${esc(currentName)}</div>` : ''}
+        <button class="btn btn-success btn-block mt-8" id="btn-patrol-return">巡回画面に戻る</button>
+      </div>`;
+  }
+
+  function wirePatrolBannerHandlers() {
+    document.getElementById('btn-patrol-return')?.addEventListener('click', () => {
+      Router.navigate('patrol');
+    });
+  }
+
   // ---------- ホーム画面（ルート計画） ----------
 
   function renderHome(container) {
@@ -413,6 +439,9 @@ const App = (() => {
     }
 
     let html = '';
+
+    // 巡回中バナー（最優先）
+    html += buildPatrolBanner();
 
     // 予定ルートバナー
     html += buildPlannedRouteBanner();
@@ -538,8 +567,9 @@ const App = (() => {
     container.innerHTML = html;
     container.classList.toggle('has-floating-bar', selectedStoreIds.length > 0);
 
-    // 予定ルートのボタン
+    // 予定ルート・巡回中バナーのボタン
     wirePlannedRouteHandlers();
+    wirePatrolBannerHandlers();
 
     // 最適化済みルートがあれば表示
     if (optimizedRoute) {
@@ -671,6 +701,7 @@ const App = (() => {
     chipHtml += `</div>`;
 
     container.innerHTML = `
+      ${buildPatrolBanner()}
       ${buildPlannedRouteBanner()}
       <div class="view-toggle">
         <button class="view-btn active" data-view="map">&#x1f5fa;&#xfe0f; マップ</button>
@@ -689,13 +720,14 @@ const App = (() => {
       </div>
     `;
 
-    // 予定ルートがある場合は最上部までスクロール（マップで隠れないように）
-    if (plannedRoute && plannedRoute.orderedStores && plannedRoute.orderedStores.length) {
+    // 予定ルートまたは巡回中バナーがある場合は最上部までスクロール
+    if ((plannedRoute && plannedRoute.orderedStores && plannedRoute.orderedStores.length) || patrolState) {
       window.scrollTo(0, 0);
     }
 
-    // 予定ルートのボタン
+    // 予定ルート・巡回中バナーのボタン
     wirePlannedRouteHandlers();
+    wirePatrolBannerHandlers();
 
     // 表示切替イベント
     container.querySelectorAll('.view-btn').forEach(btn => {
@@ -738,6 +770,7 @@ const App = (() => {
     const mapEl = document.getElementById('map-view');
     if (!mapEl) return;
     if (mapInstance) { mapInstance.remove(); mapInstance = null; mapCluster = null; mapMarkers.clear(); }
+    patrolPolyline = null;
 
     mapInstance = L.map(mapEl, {
       center: SENDAI_STATION,
@@ -901,13 +934,18 @@ const App = (() => {
 
   function refreshMapMarkers() {
     if (!mapInstance || !mapCluster) return;
+
+    // 巡回中は巡回ルートの店舗を必ず表示しフィルター無視
+    const patrolIds = patrolState ? patrolState.stops.map(s => s.store_id) : [];
+    const patrolIdSet = new Set(patrolIds);
+
     // 差分更新: 既存markerを使いまわし、不要分だけ削除・新規だけ追加
     const wanted = new Map();
     stores.forEach(s => {
       const lat = Number(s.lat);
       const lng = Number(s.lng);
       if (!lat || !lng) return;
-      if (mapChainFilter !== 'all' && getChain(s) !== mapChainFilter) return;
+      if (mapChainFilter !== 'all' && getChain(s) !== mapChainFilter && !patrolIdSet.has(s.store_id)) return;
       wanted.set(s.store_id, s);
     });
 
@@ -921,7 +959,9 @@ const App = (() => {
     wanted.forEach((s, sid) => {
       const lat = Number(s.lat);
       const lng = Number(s.lng);
-      const selIdx = selectedStoreIds.indexOf(sid);
+      // 巡回中は巡回順を優先、なければ通常の選択順
+      const patrolIdx = patrolIds.indexOf(sid);
+      const selIdx = patrolIdx >= 0 ? patrolIdx : selectedStoreIds.indexOf(sid);
       const existing = mapMarkers.get(sid);
       if (existing) {
         existing.setIcon(buildPinIcon(s, selIdx));
@@ -933,6 +973,30 @@ const App = (() => {
         mapMarkers.set(sid, marker);
       }
     });
+
+    // 巡回ルートのポリライン描画
+    drawPatrolPolyline();
+  }
+
+  let patrolPolyline = null;
+  function drawPatrolPolyline() {
+    if (!mapInstance) return;
+    if (patrolPolyline) { mapInstance.removeLayer(patrolPolyline); patrolPolyline = null; }
+    if (!patrolState || !patrolState.stops || patrolState.stops.length < 2) return;
+    const latlngs = patrolState.stops
+      .map(s => {
+        const store = stores.find(st => st.store_id === s.store_id) || s;
+        const lat = Number(store.lat), lng = Number(store.lng);
+        return (lat && lng) ? [lat, lng] : null;
+      })
+      .filter(Boolean);
+    if (latlngs.length < 2) return;
+    patrolPolyline = L.polyline(latlngs, {
+      color: '#22c55e',
+      weight: 4,
+      opacity: 0.75,
+      dashArray: '8 6',
+    }).addTo(mapInstance);
   }
 
   function fitMapToMarkers() {
@@ -1334,6 +1398,53 @@ const App = (() => {
       API.endRoute({ route_id: routeId }).catch(() => {});
       loadData();
     }
+  }
+
+  function resumePatrolFromHistory(route) {
+    if (!route || !route.stops || route.stops.length === 0) {
+      toast('この履歴には店舗データがないため再開できません');
+      return;
+    }
+    if (patrolState) {
+      if (!confirm('現在、別の巡回が進行中です。中断してこの履歴を再開しますか？')) return;
+      if (patrolTimerInterval) { clearInterval(patrolTimerInterval); patrolTimerInterval = null; }
+      patrolState = null;
+    }
+
+    // route.stopsを現在のstoresマスタと結合してpatrolStateを復元
+    const reconstructed = route.stops
+      .slice()
+      .sort((a, b) => (Number(a.stop_order) || 0) - (Number(b.stop_order) || 0))
+      .map(rs => {
+        const base = stores.find(st => st.store_id === rs.store_id) || {};
+        return {
+          ...base,
+          store_id: rs.store_id,
+          name: base.name || rs.store_name || rs.store_id,
+          status: rs.status || 'planned',
+          arrivalTime: rs.arrival_time || null,
+          departureTime: rs.departure_time || null,
+          purchaseAmount: Number(rs.purchase_amount) || 0,
+          purchaseItems: Number(rs.purchase_items) || 0,
+        };
+      });
+
+    // 未訪問 or 訪問中の最初のstopを現在位置に。全て完了済みなら最後のstopを滞在中に戻す
+    let currentIdx = reconstructed.findIndex(s => s.status === 'visiting' || s.status === 'planned');
+    if (currentIdx < 0) {
+      currentIdx = reconstructed.length - 1;
+      reconstructed[currentIdx].status = 'visiting';
+    }
+
+    patrolState = {
+      routeId: route.route_id,
+      startTime: route.date ? new Date(route.date).getTime() : Date.now(),
+      stops: reconstructed,
+      currentIdx,
+    };
+    Storage.saveCurrentRoute(patrolState);
+    toast('巡回を再開しました');
+    Router.navigate('patrol');
   }
 
   // ---------- モーダル ----------
@@ -2479,6 +2590,11 @@ const App = (() => {
     // CSV取り込みボタン
     html += `<button class="btn btn-primary btn-block mt-12" id="btn-import-csv">アマサーチCSV取り込み</button>`;
 
+    // 巡回再開ボタン（停止した巡回をやり直せる）
+    if (route.stops && route.stops.length > 0) {
+      html += `<button class="btn btn-success btn-block mt-12" id="btn-resume-route">🔄 この巡回を再開</button>`;
+    }
+
     // 店舗を追加ボタン
     html += `<button class="btn btn-outline btn-block mt-12" id="btn-add-stop-history" style="border-style:dashed;color:var(--primary)">+ 店舗を追加</button>`;
 
@@ -2492,6 +2608,10 @@ const App = (() => {
 
     document.getElementById('btn-import-csv')?.addEventListener('click', () => {
       showCsvImportModal(route);
+    });
+
+    document.getElementById('btn-resume-route')?.addEventListener('click', () => {
+      resumePatrolFromHistory(route);
     });
 
     document.getElementById('btn-add-stop-history')?.addEventListener('click', () => {
