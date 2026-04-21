@@ -1512,337 +1512,6 @@ const App = (() => {
     });
   }
 
-  // ---------- CSVインポートモーダル ----------
-
-  function showCsvImportModal(route) {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML = `
-      <div class="modal" style="max-height:85vh;overflow-y:auto">
-        <div class="modal-title">アマサーチCSV取り込み</div>
-        <div class="form-group">
-          <label class="form-label">CSVファイルを選択</label>
-          <input type="file" accept=".csv" id="csv-file-input" class="form-input">
-        </div>
-        <div id="csv-preview" style="display:none">
-          <div id="csv-match-summary" class="text-sm mb-8"></div>
-          <div id="csv-items-list"></div>
-          <div class="btn-group mt-12">
-            <button class="btn btn-outline" style="flex:1" id="csv-cancel">キャンセル</button>
-            <button class="btn btn-primary" style="flex:1" id="csv-save">保存</button>
-          </div>
-        </div>
-        <button class="btn btn-outline btn-block mt-12" id="csv-close" style="display:block">閉じる</button>
-      </div>`;
-    document.body.appendChild(overlay);
-
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-    overlay.querySelector('#csv-close').addEventListener('click', () => overlay.remove());
-
-    const fileInput = overlay.querySelector('#csv-file-input');
-    fileInput.addEventListener('change', async () => {
-      const file = fileInput.files[0];
-      if (!file) return;
-
-      try {
-        const text = await readFileWithEncoding(file);
-        const items = parseCsvItems(text);
-        if (items.length === 0) {
-          toast('商品が見つかりません');
-          return;
-        }
-
-        // 店舗名のマッチング
-        const matched = matchItemsToStores(items, route, stores);
-
-        // プレビュー表示
-        renderCsvPreview(overlay, matched, route);
-      } catch (e) {
-        toast('CSV読み込みエラー: ' + e.message);
-      }
-    });
-  }
-
-  // CSVファイルをShift-JIS/UTF-8で読み込み
-  function readFileWithEncoding(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        // まずShift-JISで読んでみる
-        const decoder = new TextDecoder('shift_jis');
-        const bytes = new Uint8Array(reader.result);
-        const text = decoder.decode(bytes);
-        // 文字化けチェック（アマサーチはShift-JISが多い）
-        if (text.includes('ASIN') || text.includes('商品名')) {
-          resolve(text);
-        } else {
-          // UTF-8で再読み込み
-          const utf8 = new TextDecoder('utf-8').decode(bytes);
-          resolve(utf8);
-        }
-      };
-      reader.onerror = reject;
-      reader.readAsArrayBuffer(file);
-    });
-  }
-
-  // CSVパース（アマサーチ形式）
-  function parseCsvItems(text) {
-    const lines = text.split('\n').filter(l => l.trim());
-    if (lines.length < 2) return [];
-
-    const items = [];
-    for (let i = 1; i < lines.length; i++) {
-      const cols = parseCsvLine(lines[i]);
-      if (cols.length < 13) continue;
-
-      const asin = cols[0].trim();
-      const jan = cols[1].trim();
-      const productName = cols[2].trim();
-      const expectedSalePrice = parseNum(cols[3]);
-      const purchasePrice = parseNum(cols[4]);
-      const expectedProfit = parseNum(cols[5]);
-      const quantity = parseNum(cols[8]) || 1;
-      const condition = cols[9].trim();
-      const supplierName = cols[12].trim();
-
-      if (!asin && !jan) continue;
-
-      items.push({
-        asin, jan, productName, expectedSalePrice,
-        purchasePrice, expectedProfit, quantity,
-        condition, supplierName
-      });
-    }
-    return items;
-  }
-
-  // CSV行パース（ダブルクォート対応）
-  function parseCsvLine(line) {
-    const result = [];
-    let current = '';
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (inQuotes) {
-        if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
-        else if (ch === '"') { inQuotes = false; }
-        else { current += ch; }
-      } else {
-        if (ch === '"') { inQuotes = true; }
-        else if (ch === ',') { result.push(current); current = ''; }
-        else { current += ch; }
-      }
-    }
-    result.push(current);
-    return result;
-  }
-
-  function parseNum(s) {
-    if (!s) return 0;
-    return Number(String(s).replace(/[¥￥,、\s]/g, '')) || 0;
-  }
-
-  // CSV店舗名と巡回アプリ店舗のマッチング
-  function matchItemsToStores(items, route, allStores) {
-    // 巡回で訪問した店舗
-    const visitedStores = (route.stops || [])
-      .filter(s => s.status === 'visited')
-      .map(s => {
-        const storeObj = allStores.find(st => st.store_id === s.store_id);
-        return { store_id: s.store_id, name: storeObj ? storeObj.name : '', category: storeObj ? storeObj.category : '' };
-      });
-
-    return items.map(item => {
-      const matched = findMatchingStore(item.supplierName, visitedStores, allStores);
-      return { ...item, matchedStore: matched };
-    });
-  }
-
-  // あいまいマッチング
-  function findMatchingStore(supplierName, visitedStores, allStores) {
-    if (!supplierName) return null;
-    const name = supplierName.trim();
-
-    // チェーン名マッピング（CSV短縮名 → アプリの店名パターン）
-    const chainMap = {
-      'オートバックス': ['オートバックス', 'スーパーオートバックス'],
-      'イエローハット': ['イエローハット'],
-      'ケーズデンキ': ['ケーズデンキ'],
-      'ヤマダ電機': ['ヤマダデンキ', 'LABI', 'Tecc LIFE'],
-      'ヤマダデンキ': ['ヤマダデンキ', 'LABI', 'Tecc LIFE'],
-      'ビックカメラ': ['コジマ×ビックカメラ', 'ビックカメラ'],
-      'コジマ': ['コジマ×ビックカメラ', 'コジマ'],
-      'エディオン': ['エディオン'],
-      'ジョーシン': ['ジョーシン'],
-      'ドンキホーテ': ['ドン・キホーテ', 'MEGAドン・キホーテ', 'キラキラドンキ'],
-      'ドン・キホーテ': ['ドン・キホーテ', 'MEGAドン・キホーテ', 'キラキラドンキ'],
-      'セカンドストリート': ['セカンドストリート', 'スーパーセカンドストリート'],
-      'ブックオフ': ['BOOKOFF', 'ブックオフ'],
-      'トレファク': ['トレファク'],
-      'ビバホーム': ['ビバホーム', 'スーパービバホーム'],
-      'DCM': ['DCM'],
-      'カインズ': ['カインズ'],
-      'コーナン': ['コーナン'],
-      'ダイユーエイト': ['ダイユーエイト'],
-      'サンデー': ['サンデー'],
-      'コストコ': ['コストコ'],
-      'イオン': ['イオン'],
-      'ジェームス': ['ジェームス'],
-    };
-
-    // 1. 訪問店舗から探す（優先）
-    for (const vs of visitedStores) {
-      if (isStoreMatch(name, vs.name, chainMap)) return vs;
-    }
-
-    // 2. 全店舗から探す（訪問していない店でもCSVに入る場合）
-    for (const s of allStores) {
-      if (isStoreMatch(name, s.name, chainMap)) {
-        return { store_id: s.store_id, name: s.name, category: s.category };
-      }
-    }
-
-    return null;
-  }
-
-  function isStoreMatch(csvName, appStoreName, chainMap) {
-    if (!csvName || !appStoreName) return false;
-
-    // 完全一致
-    if (appStoreName.includes(csvName)) return true;
-
-    // チェーンマップで照合
-    for (const [key, patterns] of Object.entries(chainMap)) {
-      if (csvName.includes(key) || key.includes(csvName)) {
-        if (patterns.some(p => appStoreName.includes(p))) return true;
-      }
-    }
-    return false;
-  }
-
-  // CSVプレビューを描画
-  function renderCsvPreview(overlay, matchedItems, route) {
-    const preview = overlay.querySelector('#csv-preview');
-    const closeBtn = overlay.querySelector('#csv-close');
-    preview.style.display = 'block';
-    closeBtn.style.display = 'none';
-
-    const matched = matchedItems.filter(i => i.matchedStore);
-    const unmatched = matchedItems.filter(i => !i.matchedStore);
-
-    // サマリー
-    const summaryEl = overlay.querySelector('#csv-match-summary');
-    const totalProfit = matchedItems.reduce((s, i) => s + i.expectedProfit * i.quantity, 0);
-    summaryEl.innerHTML = `
-      <div class="card" style="background:var(--primary-light)">
-        <b>${matchedItems.length}商品</b> / 見込み利益合計: <b>${totalProfit.toLocaleString()}円</b><br>
-        <span style="color:var(--success)">自動マッチ: ${matched.length}件</span>
-        ${unmatched.length > 0 ? `<span style="color:var(--accent);margin-left:8px">未マッチ: ${unmatched.length}件</span>` : ''}
-      </div>`;
-
-    // 商品リスト
-    const listEl = overlay.querySelector('#csv-items-list');
-    // 店舗ごとにグループ化
-    const groups = {};
-    matchedItems.forEach((item, idx) => {
-      const key = item.matchedStore ? item.matchedStore.name : '未マッチ';
-      if (!groups[key]) groups[key] = [];
-      groups[key].push({ ...item, _idx: idx });
-    });
-
-    let html = '';
-    // 訪問した店舗の一覧（プルダウン用）
-    const visitedStores = (route.stops || [])
-      .filter(s => s.status === 'visited')
-      .map(s => {
-        const st = stores.find(x => x.store_id === s.store_id);
-        return { store_id: s.store_id, name: st ? st.name : s.store_id };
-      });
-
-    for (const [storeName, items] of Object.entries(groups)) {
-      const groupProfit = items.reduce((s, i) => s + i.expectedProfit * i.quantity, 0);
-      const isUnmatched = storeName === '未マッチ';
-      html += `<div class="card mt-8">
-        <div class="card-title" style="${isUnmatched ? 'color:var(--accent)' : ''}">${esc(storeName)}
-          <span class="badge ${isUnmatched ? 'badge-accent' : 'badge-success'}">${items.length}点</span>
-          <span class="text-sm" style="margin-left:8px">利益: ${groupProfit.toLocaleString()}円</span>
-        </div>`;
-
-      items.forEach(item => {
-        html += `<div class="text-sm" style="padding:4px 0;border-bottom:1px solid var(--border)">
-          <div class="flex-between">
-            <span>${esc(item.productName.substring(0, 30))}${item.productName.length > 30 ? '...' : ''}</span>
-            <span style="white-space:nowrap;margin-left:8px">${item.expectedProfit.toLocaleString()}円</span>
-          </div>
-          <div class="text-dim">仕入: ${item.purchasePrice.toLocaleString()}円 → 売予: ${item.expectedSalePrice.toLocaleString()}円 × ${item.quantity}個</div>
-          ${isUnmatched ? `<div style="margin-top:4px">
-            <select class="form-select" data-idx="${item._idx}" style="font-size:12px;padding:4px">
-              <option value="">店舗を選択</option>
-              ${visitedStores.map(s => `<option value="${s.store_id}">${esc(s.name)}</option>`).join('')}
-            </select>
-          </div>` : ''}
-        </div>`;
-      });
-      html += '</div>';
-    }
-    listEl.innerHTML = html;
-
-    // 未マッチ商品の手動選択イベント
-    listEl.querySelectorAll('select[data-idx]').forEach(sel => {
-      sel.addEventListener('change', () => {
-        const idx = Number(sel.dataset.idx);
-        const storeId = sel.value;
-        if (storeId) {
-          const st = stores.find(s => s.store_id === storeId);
-          matchedItems[idx].matchedStore = { store_id: storeId, name: st ? st.name : storeId };
-        } else {
-          matchedItems[idx].matchedStore = null;
-        }
-      });
-    });
-
-    // 保存ボタン
-    overlay.querySelector('#csv-save').addEventListener('click', async () => {
-      const toSave = matchedItems.filter(i => i.matchedStore);
-      if (toSave.length === 0) {
-        toast('保存する商品がありません');
-        return;
-      }
-
-      const apiItems = toSave.map(item => ({
-        date: route.date || today_(),
-        store_id: item.matchedStore.store_id,
-        route_id: route.route_id || '',
-        asin: item.asin,
-        jan: item.jan,
-        product_name: item.productName,
-        purchase_price: item.purchasePrice,
-        expected_sale_price: item.expectedSalePrice,
-        expected_profit: item.expectedProfit,
-        quantity: item.quantity,
-        condition: item.condition,
-        supplier_name: item.supplierName,
-      }));
-
-      overlay.querySelector('#csv-save').textContent = '保存中...';
-      overlay.querySelector('#csv-save').disabled = true;
-
-      try {
-        await API.addPurchaseItems({ items: apiItems });
-        toast(`${toSave.length}商品を保存しました`);
-        overlay.remove();
-        Router.navigate('history-detail', { route });
-      } catch (e) {
-        toast('保存エラー: ' + e.message);
-        overlay.querySelector('#csv-save').textContent = '保存';
-        overlay.querySelector('#csv-save').disabled = false;
-      }
-    });
-
-    overlay.querySelector('#csv-cancel').addEventListener('click', () => overlay.remove());
-  }
-
   function today_() {
     const d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -2542,6 +2211,174 @@ const App = (() => {
     });
   }
 
+  // 在庫管理シートの仕入れ品を取得し、巡回ルートの訪問店舗に紐付けて表示
+  async function loadInventoryForRoute(route) {
+    const section = document.getElementById('inventory-section');
+    if (!section) return;
+    const date = normalizeRouteDate_(route.date);
+    if (!date) return;
+
+    section.innerHTML = `
+      <div class="card-title mt-12">在庫管理からの仕入れ品</div>
+      <div class="card text-dim">読み込み中...</div>`;
+
+    let items;
+    try {
+      items = await API.getInventoryPurchases({ from: date, to: date });
+    } catch (e) {
+      section.innerHTML = `
+        <div class="card-title mt-12">在庫管理からの仕入れ品</div>
+        <div class="card text-dim">読み込み失敗: ${esc(e.message)}</div>`;
+      return;
+    }
+
+    // 訪問店舗（この巡回）
+    const visitedStops = (route.stops || []).filter(s => s.status === 'visited');
+    const visitedStores = visitedStops.map(s => {
+      const st = stores.find(x => x.store_id === s.store_id);
+      return {
+        store_id: s.store_id,
+        name: (st && st.name) || s.store_id,
+        chain: st ? getChain(st) : '',
+      };
+    });
+
+    // 在庫管理の各行をチェーンでマッチング
+    const chainToStores = {};
+    visitedStores.forEach(vs => {
+      if (!vs.chain) return;
+      (chainToStores[vs.chain] = chainToStores[vs.chain] || []).push(vs);
+    });
+
+    // 店舗別グルーピング + 曖昧/未マッチ
+    const byStore = {};   // store_id → items[]
+    const ambiguous = []; // 複数候補
+    const unrelated = []; // チェーン一致するstoreがこのルートに無い
+
+    (items || []).forEach(it => {
+      const supplier = it.supplier || it.alias || '';
+      const chain = supplier ? getChain({ name: supplier }) : '';
+      const candidates = chain ? (chainToStores[chain] || []) : [];
+      // 既に店名が書き込まれていてルート内の店と一致するならそこに紐付け
+      if (it.shop) {
+        const hit = visitedStores.find(vs => vs.name === it.shop);
+        if (hit) {
+          (byStore[hit.store_id] = byStore[hit.store_id] || []).push(it);
+          return;
+        }
+      }
+      if (candidates.length === 1) {
+        (byStore[candidates[0].store_id] = byStore[candidates[0].store_id] || []).push(it);
+      } else if (candidates.length > 1) {
+        ambiguous.push({ item: it, candidates });
+      } else {
+        unrelated.push(it);
+      }
+    });
+
+    // レンダリング
+    let html = '<div class="card-title mt-12">在庫管理からの仕入れ品</div>';
+    const totalRelated = Object.values(byStore).reduce((n, arr) => n + arr.length, 0) + ambiguous.length;
+    if (totalRelated === 0 && unrelated.length === 0) {
+      html += `<div class="card text-dim">この日の仕入れ品はありません</div>`;
+      section.innerHTML = html;
+      return;
+    }
+
+    // 訪問店舗別
+    visitedStores.forEach(vs => {
+      const arr = byStore[vs.store_id] || [];
+      if (arr.length === 0) return;
+      const sum = arr.reduce((n, x) => n + (Number(x.purchase_price) || 0), 0);
+      html += `
+        <div class="card mt-8">
+          <div class="flex-between">
+            <div><b>${esc(vs.name)}</b> <span class="badge badge-success">${arr.length}点</span></div>
+            <div class="text-sm">仕入 ${sum.toLocaleString()}円</div>
+          </div>`;
+      arr.forEach(it => {
+        html += inventoryItemLine_(it);
+      });
+      html += `</div>`;
+    });
+
+    // 曖昧（複数候補）
+    if (ambiguous.length > 0) {
+      html += `<div class="card mt-8" style="background:#fff7e6;border:1px solid #ffb74d">
+        <div class="card-title" style="color:var(--accent)">⚠️ 店舗未確定（${ambiguous.length}件）</div>
+        <div class="text-sm text-dim mb-8">同じ日に同チェーンの複数店舗を訪問しました。正しい店舗を選んでください。</div>`;
+      ambiguous.forEach((amb, idx) => {
+        const it = amb.item;
+        const options = ['<option value="">-- 選択 --</option>']
+          .concat(amb.candidates.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`))
+          .join('');
+        html += `
+          <div class="card" data-ambig-idx="${idx}">
+            <div class="text-sm text-dim">仕入先: ${esc(it.supplier || it.alias || '')}</div>
+            <div style="font-weight:600;margin:4px 0">${esc(it.product_name || '(商品名なし)')}</div>
+            <div class="text-sm text-dim">¥${Number(it.purchase_price || 0).toLocaleString()}</div>
+            <select class="form-select mt-8 js-ambig-sel" data-row="${it.row}">${options}</select>
+          </div>`;
+      });
+      html += `</div>`;
+    }
+
+    // ルート外（参考表示）
+    if (unrelated.length > 0) {
+      html += `<details class="card mt-8"><summary class="text-dim">ルート外の仕入れ（${unrelated.length}件）</summary>`;
+      unrelated.forEach(it => {
+        html += `<div class="text-sm" style="padding:4px 0;border-bottom:1px solid var(--border)">
+          <div>${esc(it.product_name || '')} <span class="text-dim">/ 仕入先: ${esc(it.supplier || it.alias || '')}</span></div>
+          <div class="text-dim">¥${Number(it.purchase_price || 0).toLocaleString()}</div>
+        </div>`;
+      });
+      html += `</details>`;
+    }
+
+    section.innerHTML = html;
+
+    // 曖昧選択のイベント
+    section.querySelectorAll('.js-ambig-sel').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        const row = Number(sel.dataset.row);
+        const shop = sel.value;
+        if (!row || !shop) return;
+        sel.disabled = true;
+        try {
+          await API.updateInventoryShop({ row, shop });
+          toast(`${shop} に確定しました`);
+          // 画面を再読み込みして反映
+          loadInventoryForRoute(route);
+        } catch (e) {
+          sel.disabled = false;
+          toast('保存失敗: ' + e.message);
+        }
+      });
+    });
+  }
+
+  function inventoryItemLine_(it) {
+    const name = it.product_name || '(商品名なし)';
+    const shortName = name.length > 40 ? name.substring(0, 40) + '...' : name;
+    return `<div class="text-sm" style="padding:4px 0;border-bottom:1px solid var(--border)">
+      <div class="flex-between">
+        <span>${esc(shortName)}</span>
+        <span style="white-space:nowrap;margin-left:8px">¥${Number(it.purchase_price || 0).toLocaleString()}</span>
+      </div>
+    </div>`;
+  }
+
+  function normalizeRouteDate_(d) {
+    if (!d) return '';
+    if (d instanceof Date) {
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    const s = String(d).trim();
+    const m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+    return s;
+  }
+
   function renderHistoryDetail(container, { route } = {}) {
     if (!route) { Router.navigate('history'); return; }
     setTitle('履歴詳細');
@@ -2587,8 +2424,8 @@ const App = (() => {
       html += `<div class="card"><div class="card-title">メモ</div><div>${esc(route.note)}</div></div>`;
     }
 
-    // CSV取り込みボタン
-    html += `<button class="btn btn-primary btn-block mt-12" id="btn-import-csv">アマサーチCSV取り込み</button>`;
+    // 在庫管理からの仕入れ品（非同期で読み込み）
+    html += `<div id="inventory-section"></div>`;
 
     // 巡回再開ボタン（停止した巡回をやり直せる）
     if (route.stops && route.stops.length > 0) {
@@ -2606,9 +2443,7 @@ const App = (() => {
 
     container.innerHTML = html;
 
-    document.getElementById('btn-import-csv')?.addEventListener('click', () => {
-      showCsvImportModal(route);
-    });
+    loadInventoryForRoute(route);
 
     document.getElementById('btn-resume-route')?.addEventListener('click', () => {
       resumePatrolFromHistory(route);
