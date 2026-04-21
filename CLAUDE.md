@@ -35,8 +35,8 @@ GitHub Pages (`daniel-dan-dan/sedori-route` → `https://daniel-dan-dan.github.i
 
 `api.js` が呼ぶアクション（GET/POSTで分かれる）:
 
-- **GET**: `getStores`, `getConfig`, `getRouteHistory`, `getPurchases`, `getMemos`, `getFinds`, `getPurchaseItems`
-- **POST**: `addStore`, `updateStore`, `deleteStore`, `startRoute`, `updateStop`, `endRoute`, `addStopToRoute`, `addPurchase`, `addPurchaseItems`, `updateConfig`, `deleteRoute`, `clearHistory`
+- **GET**: `getStores`, `getConfig`, `getRouteHistory`, `getPurchases`, `getMemos`, `getFinds`, `getInventoryPurchases`, `recalcPriorityScores`
+- **POST**: `addStore`, `updateStore`, `deleteStore`, `startRoute`, `updateStop`, `endRoute`, `addStopToRoute`, `addPurchase`, `updateInventoryShop`, `updateConfig`, `deleteRoute`, `clearHistory`
 
 POSTは `Content-Type: text/plain` + JSON body（GASのCORSプリフライト回避）。レスポンスがJSONでない場合も書き込み自体は成功していることが多く `{ _rawResponse: true }` を返す。
 

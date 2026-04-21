@@ -2129,26 +2129,11 @@ const App = (() => {
     container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-      const [routes, ambiguous] = await Promise.all([
-        API.getRouteHistory({ limit: 20, include_stops: 'true' }),
-        API.getAmbiguousPurchases({ limit: 200 }).catch(() => [])
-      ]);
+      const routes = await API.getRouteHistory({ limit: 20, include_stops: 'true' });
       if (Router.getCurrentView() !== 'history') return;
       historyCache = routes;
 
       let html = '';
-
-      // 要確認バナー（曖昧な仕入れ品がある場合のみ）
-      if (ambiguous && ambiguous.length > 0) {
-        html += `
-          <div class="card" id="ambiguous-banner" style="background:#fff7e6;border:1px solid #ffb74d;cursor:pointer">
-            <div class="flex-between">
-              <span>⚠️ 店舗未確定の仕入れ: <b>${ambiguous.length}件</b></span>
-              <span class="badge badge-primary">確認する</span>
-            </div>
-            <div class="text-sm text-dim mt-8">どの店舗で仕入れたか特定できていない商品があります。タップして確認してください。</div>
-          </div>`;
-      }
 
       if (routes.length === 0) {
         if (!html) html = '<div class="text-center text-dim mt-12">巡回履歴がありません</div>';
@@ -2172,10 +2157,6 @@ const App = (() => {
 
       container.innerHTML = html;
 
-      document.getElementById('ambiguous-banner')?.addEventListener('click', () => {
-        showAmbiguousListModal(ambiguous);
-      });
-
       container.querySelectorAll('.history-item').forEach(el => {
         el.addEventListener('click', () => {
           const idx = Number(el.dataset.idx);
@@ -2186,75 +2167,6 @@ const App = (() => {
       if (Router.getCurrentView() !== 'history') return;
       container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
     }
-  }
-
-  // 要確認リストのモーダル
-  function showAmbiguousListModal(items) {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    let body = '';
-    items.forEach((item, idx) => {
-      const dateStr = item.date ? new Date(item.date).toLocaleDateString('ja-JP') : '不明';
-      const candidates = item.candidate_stores || [];
-      const optionsHtml = ['<option value="">-- 選択 --</option>']
-        .concat(candidates.map(c => `<option value="${esc(c.store_id)}">${esc(c.name)}</option>`))
-        .concat(['<option value="__other__">その他の店舗を検索…</option>'])
-        .join('');
-      body += `
-        <div class="card" style="padding:12px" data-item-id="${esc(item.item_id)}">
-          <div class="text-sm text-dim">${dateStr} / 仕入先: ${esc(item.supplier_name || '')}</div>
-          <div style="font-weight:600;margin:4px 0">${esc(item.product_name || '(商品名なし)')}</div>
-          <div class="text-sm text-dim">¥${Number(item.purchase_price || 0).toLocaleString()} × ${item.quantity || 1}</div>
-          <select class="form-select mt-8 js-cand">${optionsHtml}</select>
-          <button class="btn btn-primary btn-block mt-8 js-confirm">この店舗で確定</button>
-        </div>`;
-    });
-
-    overlay.innerHTML = `
-      <div class="modal" style="max-height:85vh;overflow-y:auto">
-        <div class="modal-title">⚠️ 店舗未確定の仕入れ (${items.length}件)</div>
-        <div class="text-sm text-dim mb-12">候補から正しい店舗を選んでください。「その他の店舗を検索」で全店舗から選ぶこともできます。</div>
-        ${body || '<div class="text-center text-dim">確認が必要な仕入れはありません</div>'}
-        <button class="btn btn-outline btn-block mt-12" id="modal-close">閉じる</button>
-      </div>`;
-    document.body.appendChild(overlay);
-
-    overlay.querySelector('#modal-close').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-
-    overlay.querySelectorAll('[data-item-id]').forEach(card => {
-      const itemId = card.dataset.itemId;
-      const sel = card.querySelector('.js-cand');
-      sel.addEventListener('change', () => {
-        if (sel.value === '__other__') {
-          const existing = new Set();
-          showAddStopModal(existing, (store) => {
-            const opt = document.createElement('option');
-            opt.value = store.store_id;
-            opt.textContent = store.name;
-            opt.selected = true;
-            sel.insertBefore(opt, sel.querySelector('option[value="__other__"]'));
-            sel.value = store.store_id;
-          });
-        }
-      });
-      card.querySelector('.js-confirm').addEventListener('click', async () => {
-        const storeId = sel.value;
-        if (!storeId || storeId === '__other__') { toast('店舗を選んでください'); return; }
-        const btn = card.querySelector('.js-confirm');
-        btn.disabled = true;
-        btn.textContent = '保存中…';
-        try {
-          await API.updatePurchaseStore({ item_id: itemId, store_id: storeId });
-          card.style.opacity = '0.5';
-          btn.textContent = '✓ 確定済み';
-        } catch (e) {
-          btn.disabled = false;
-          btn.textContent = 'この店舗で確定';
-          toast('保存失敗: ' + e.message);
-        }
-      });
-    });
   }
 
   // 在庫管理シートの仕入れ品を取得し、巡回ルートの訪問店舗に紐付けて表示
