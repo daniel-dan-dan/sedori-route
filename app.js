@@ -2166,6 +2166,9 @@ const App = (() => {
     }
   }
 
+  // 日付単位の在庫仕入れ品キャッシュ（セッション中のみ。履歴再オープンで再フェッチしない）
+  const inventoryByDateCache = {};
+
   // 在庫管理シートの仕入れ品を取得し、巡回ルートの訪問店舗に紐付けて表示
   async function loadInventoryForRoute(route) {
     const section = document.getElementById('inventory-section');
@@ -2173,18 +2176,20 @@ const App = (() => {
     const date = normalizeRouteDate_(route.date);
     if (!date) return;
 
-    section.innerHTML = `
-      <div class="card-title mt-12">在庫管理からの仕入れ品</div>
-      <div class="card text-dim">読み込み中...</div>`;
-
-    let items;
-    try {
-      items = await API.getInventoryPurchases({ from: date, to: date });
-    } catch (e) {
+    let items = inventoryByDateCache[date];
+    if (!items) {
       section.innerHTML = `
         <div class="card-title mt-12">在庫管理からの仕入れ品</div>
-        <div class="card text-dim">読み込み失敗: ${esc(e.message)}</div>`;
-      return;
+        <div class="card text-dim">読み込み中...</div>`;
+      try {
+        items = await API.getInventoryPurchases({ from: date, to: date });
+        inventoryByDateCache[date] = items;
+      } catch (e) {
+        section.innerHTML = `
+          <div class="card-title mt-12">在庫管理からの仕入れ品</div>
+          <div class="card text-dim">読み込み失敗: ${esc(e.message)}</div>`;
+        return;
+      }
     }
 
     // 訪問店舗（この巡回）
