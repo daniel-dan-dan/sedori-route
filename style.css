@@ -78,6 +78,115 @@ body {
 .nav-item.active { color: var(--primary); font-weight: 700; }
 .nav-item .icon { font-size: 24px; }
 
+/* 5タブ時の横幅確保（iPhone SE 375px でも収まるように） */
+.bottom-nav .nav-item { min-width: 56px; padding: 8px 6px; }
+
+/* 廃盤タブのバッジ（今週の新着件数） */
+.nav-label-with-badge {
+  position: relative;
+  display: inline-block;
+}
+.nav-badge {
+  position: absolute;
+  top: -16px;
+  left: 100%;
+  transform: translateX(-40%);
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 16px;
+  padding: 3px 5px;
+  border-radius: 10px;
+  text-align: center;
+  pointer-events: none;
+}
+.nav-badge[hidden] { display: none; }
+
+/* 廃盤タブビュー */
+.haiban-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.haiban-toolbar .form-input { flex: 1 1 180px; }
+.haiban-toolbar select { flex: 0 1 auto; min-width: 130px; }
+.haiban-updated {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.haiban-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 10px;
+  box-shadow: var(--shadow);
+}
+.haiban-item .title {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.45;
+  margin-bottom: 6px;
+}
+.haiban-item .brand {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.haiban-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.score-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 10px;
+  letter-spacing: 0.4px;
+}
+.score-badge.pre-A { background: #ffedd5; color: #c2410c; }
+.score-badge.pre-B { background: #fef3c7; color: #a16207; }
+.score-badge.pre-C { background: #e5e7eb; color: #475569; }
+.score-badge.pre-D { background: #e5e7eb; color: #9ca3af; }
+.score-badge.pur-S { background: #dcfce7; color: #15803d; }
+.score-badge.pur-A { background: #d1fae5; color: #047857; }
+.score-badge.pur-B { background: #e0f2fe; color: #0369a1; }
+.score-badge.pur-C { background: #e5e7eb; color: #475569; }
+.haiban-item .meta {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.haiban-item .links {
+  display: flex;
+  gap: 8px;
+}
+.haiban-item .links a {
+  flex: 1;
+  text-align: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: var(--surface2);
+}
+.haiban-item .links a.amazon { background: #232f3e; color: #fff; border-color: #232f3e; }
+.haiban-item .links a.keepa { background: #ff6a00; color: #fff; border-color: #ff6a00; }
+.haiban-empty {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 32px 16px;
+}
+
 /* ---- Content ---- */
 #app {
   padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 100px;

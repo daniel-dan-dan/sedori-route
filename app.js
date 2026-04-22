@@ -332,8 +332,167 @@ const App = (() => {
     Router.register('history-detail', renderHistoryDetail);
     Router.register('settings', renderSettings);
     Router.register('analytics', renderAnalytics);
+    Router.register('haiban', renderHaiban);
     Router.register('patrol', renderPatrol);
     Router.register('summary', renderSummary);
+  }
+
+  // ---------- 廃盤タブ ----------
+  // 廃盤チェッカーWebApp（独立GAS）から高ホット商品を取得し表示する。
+  const HAIBAN_API_URL = 'https://script.google.com/macros/s/AKfycbwhJtRnWe_BBJmEfHv5sNzDyQq3HtxjgRhA6az_ieNplKyKRzsOh0x_32_F6kpIi0q4/exec';
+  let haibanCache = null; // { items, updatedAt, fetchedAt }
+  const HAIBAN_CACHE_TTL_MS = 30 * 60 * 1000;
+
+  async function fetchHaibanAllHotItems() {
+    const res = await fetch(HAIBAN_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'getAllHotItems' }),
+      redirect: 'follow',
+    });
+    const text = await res.text();
+    let parsed;
+    try { parsed = JSON.parse(text); }
+    catch { throw new Error('廃盤APIレスポンス不正'); }
+    if (parsed && parsed.ok === false) throw new Error(parsed.error || 'API error');
+    // getAllHotItems は { updatedAt, count, items } を返す
+    return parsed;
+  }
+
+  function haibanScoreRank(preScore, purScore) {
+    const preMap = { 'A': 4, 'B': 3, 'C': 2, 'D': 1 };
+    const purMap = { 'S': 5, 'A': 4, 'B': 3, 'C': 2 };
+    return (purMap[purScore] || 0) * 5 + (preMap[preScore] || 0) * 4;
+  }
+
+  async function renderHaiban(container) {
+    setTitle('廃盤リスト');
+    setNavActive('haiban');
+    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+    // キャッシュ活用（30分以内なら再フェッチしない）
+    const now = Date.now();
+    let data;
+    if (haibanCache && (now - haibanCache.fetchedAt) < HAIBAN_CACHE_TTL_MS) {
+      data = haibanCache;
+    } else {
+      try {
+        const resp = await fetchHaibanAllHotItems();
+        data = {
+          items: Array.isArray(resp.items) ? resp.items : [],
+          updatedAt: resp.updatedAt || '',
+          totalMatched: resp.totalMatched || 0,
+          fetchedAt: Date.now(),
+        };
+        haibanCache = data;
+      } catch (e) {
+        if (Router.getCurrentView() !== 'haiban') return;
+        container.innerHTML = `
+          <div class="card">
+            <div class="card-title">廃盤リスト取得失敗</div>
+            <div class="text-dim text-sm mb-8">${esc(e.message)}</div>
+            <button class="btn btn-outline btn-sm" id="btn-haiban-retry">再読み込み</button>
+          </div>`;
+        document.getElementById('btn-haiban-retry')?.addEventListener('click', () => {
+          haibanCache = null;
+          renderHaiban(container);
+        });
+        return;
+      }
+    }
+
+    if (Router.getCurrentView() !== 'haiban') return;
+
+    updateHaibanNavBadge(data.items.length);
+
+    // 廃盤タブUI
+    const html = `
+      <div class="haiban-toolbar">
+        <input type="text" class="form-input" id="haiban-search" placeholder="ブランド・商品名で検索" autocomplete="off">
+        <select class="form-input" id="haiban-sort">
+          <option value="score">総合ランク順</option>
+          <option value="pre">プレ値スコア順</option>
+          <option value="purchase">仕入れスコア順</option>
+          <option value="price-asc">最安値が安い順</option>
+          <option value="price-desc">最安値が高い順</option>
+        </select>
+      </div>
+      <div class="haiban-updated" id="haiban-updated"></div>
+      <div id="haiban-list"></div>`;
+
+    container.innerHTML = html;
+
+    const updEl = document.getElementById('haiban-updated');
+    updEl.textContent = `最終更新: ${data.updatedAt || '-'}（表示${data.items.length}件／該当${data.totalMatched}件）`;
+
+    const searchEl = document.getElementById('haiban-search');
+    const sortEl = document.getElementById('haiban-sort');
+    const listEl = document.getElementById('haiban-list');
+
+    function render() {
+      const q = String(searchEl.value || '').trim().toLowerCase();
+      const sortKey = sortEl.value;
+      let items = data.items.slice();
+      if (q) {
+        items = items.filter(it =>
+          String(it.ブランド名 || '').toLowerCase().includes(q) ||
+          String(it.商品名 || '').toLowerCase().includes(q)
+        );
+      }
+      items.sort((a, b) => {
+        if (sortKey === 'pre') {
+          return haibanScoreRank(b.プレ値スコア, 'C') - haibanScoreRank(a.プレ値スコア, 'C');
+        }
+        if (sortKey === 'purchase') {
+          return haibanScoreRank('D', b.仕入れスコア) - haibanScoreRank('D', a.仕入れスコア);
+        }
+        if (sortKey === 'price-asc') return (a.最安値 || 0) - (b.最安値 || 0);
+        if (sortKey === 'price-desc') return (b.最安値 || 0) - (a.最安値 || 0);
+        return haibanScoreRank(b.プレ値スコア, b.仕入れスコア) - haibanScoreRank(a.プレ値スコア, a.仕入れスコア);
+      });
+      if (items.length === 0) {
+        listEl.innerHTML = `<div class="haiban-empty">該当する商品がありません</div>`;
+        return;
+      }
+      listEl.innerHTML = items.map(it => {
+        const pre = String(it.プレ値スコア || '').trim();
+        const pur = String(it.仕入れスコア || '').trim();
+        const price = it.最安値 ? `¥${Number(it.最安値).toLocaleString()}` : '価格未取得';
+        const profit = it.月間期待利益 ? `月間利益 ¥${Number(it.月間期待利益).toLocaleString()}` : '';
+        const amazonUrl = it.AmazonURL || '';
+        const keepaUrl = it.KeepaURL || '';
+        return `
+          <div class="haiban-item">
+            <div class="haiban-badges">
+              ${pre ? `<span class="score-badge pre-${pre}">プレ値 ${pre}</span>` : ''}
+              ${pur ? `<span class="score-badge pur-${pur}">仕入 ${pur}</span>` : ''}
+            </div>
+            <div class="brand">${esc(it.ブランド名 || '')}</div>
+            <div class="title">${esc(it.商品名 || '')}</div>
+            <div class="meta">${price}${profit ? ' ・ ' + profit : ''}</div>
+            <div class="links">
+              ${amazonUrl ? `<a class="amazon" href="${esc(amazonUrl)}" target="_blank" rel="noopener">Amazonで見る</a>` : ''}
+              ${keepaUrl ? `<a class="keepa" href="${esc(keepaUrl)}" target="_blank" rel="noopener">Keepaで見る</a>` : ''}
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    searchEl.addEventListener('input', render);
+    sortEl.addEventListener('change', render);
+    render();
+  }
+
+  // 廃盤タブ横の新着件数バッジ更新
+  function updateHaibanNavBadge(count) {
+    const el = document.getElementById('haiban-nav-badge');
+    if (!el) return;
+    if (count > 0) {
+      el.textContent = count > 99 ? '99+' : String(count);
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
   }
 
   // ---------- 優先度スコア計算 ----------
