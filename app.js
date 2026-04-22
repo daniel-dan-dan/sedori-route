@@ -462,12 +462,19 @@ const App = (() => {
         const amazonUrl = it.AmazonURL || '';
         const keepaUrl = it.KeepaURL || '';
         const asin = String(it.ASIN || '').trim();
-        // ASINがあれば Amazon商品画像（世界共通CDN）と Keepa 90日価格推移グラフを表示
-        const imgHtml = asin
-          ? `<img class="haiban-thumb" src="https://images-na.ssl-images-amazon.com/images/P/${esc(asin)}.09._SL200_.jpg" alt="" loading="lazy" onerror="this.style.display='none'">`
+        const imageFile = String(it.画像ファイル || '').trim();
+        // 画像: Keepa提供のimagesCSVファイル名があれば正確なURLを優先、無ければASINベースにフォールバック
+        const imgSrc = imageFile
+          ? `https://m.media-amazon.com/images/I/${esc(imageFile)}`
+          : asin
+          ? `https://images-na.ssl-images-amazon.com/images/P/${esc(asin)}.09._SL200_.jpg`
           : '';
+        const imgHtml = imgSrc
+          ? `<img class="haiban-thumb" src="${imgSrc}" alt="" loading="lazy" onerror="this.style.display='none'">`
+          : '';
+        // Keepa 180日(6ヶ月)価格推移グラフ
         const graphHtml = asin
-          ? `<img class="haiban-keepa-graph" src="https://graph.keepa.com/pricehistory.png?asin=${esc(asin)}&domain=co.jp&range=90&width=320&height=120&salesrank=1&used=1&new=1&amazon=1" alt="Keepa価格推移" loading="lazy" onerror="this.style.display='none'">`
+          ? `<img class="haiban-keepa-graph" src="https://graph.keepa.com/pricehistory.png?asin=${esc(asin)}&domain=co.jp&range=180&width=320&height=120&salesrank=1&used=1&new=1&amazon=1" alt="Keepa価格推移" loading="lazy" onerror="this.style.display='none'">`
           : '';
         return `
           <div class="haiban-item">
