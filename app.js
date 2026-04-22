@@ -461,15 +461,29 @@ const App = (() => {
         const profit = it.月間期待利益 ? `月間利益 ¥${Number(it.月間期待利益).toLocaleString()}` : '';
         const amazonUrl = it.AmazonURL || '';
         const keepaUrl = it.KeepaURL || '';
+        const asin = String(it.ASIN || '').trim();
+        // ASINがあれば Amazon商品画像（世界共通CDN）と Keepa 90日価格推移グラフを表示
+        const imgHtml = asin
+          ? `<img class="haiban-thumb" src="https://images-na.ssl-images-amazon.com/images/P/${esc(asin)}.09._SL200_.jpg" alt="" loading="lazy" onerror="this.style.display='none'">`
+          : '';
+        const graphHtml = asin
+          ? `<img class="haiban-keepa-graph" src="https://graph.keepa.com/pricehistory.png?asin=${esc(asin)}&domain=co.jp&range=90&width=320&height=120&salesrank=1&used=1&new=1&amazon=1" alt="Keepa価格推移" loading="lazy" onerror="this.style.display='none'">`
+          : '';
         return `
           <div class="haiban-item">
             <div class="haiban-badges">
               ${pre ? `<span class="score-badge pre-${pre}">プレ値 ${pre}</span>` : ''}
               ${pur ? `<span class="score-badge pur-${pur}">仕入 ${pur}</span>` : ''}
             </div>
-            <div class="brand">${esc(it.ブランド名 || '')}</div>
-            <div class="title">${esc(it.商品名 || '')}</div>
-            <div class="meta">${price}${profit ? ' ・ ' + profit : ''}</div>
+            <div class="haiban-head">
+              ${imgHtml}
+              <div class="haiban-text">
+                <div class="brand">${esc(it.ブランド名 || '')}</div>
+                <div class="title">${esc(it.商品名 || '')}</div>
+                <div class="meta">${price}${profit ? ' ・ ' + profit : ''}</div>
+              </div>
+            </div>
+            ${graphHtml}
             <div class="links">
               ${amazonUrl ? `<a class="amazon" href="${esc(amazonUrl)}" target="_blank" rel="noopener">Amazonで見る</a>` : ''}
               ${keepaUrl ? `<a class="keepa" href="${esc(keepaUrl)}" target="_blank" rel="noopener">Keepaで見る</a>` : ''}
