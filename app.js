@@ -44,7 +44,6 @@ const App = (() => {
     'イエローハット': '#FFC107',
     'ジェームス': '#1E67B3',
     'イオン': '#B60081',
-    'コストコ': '#E60012',
     'トイザらス': '#E60012',
     'オフィスベンダー': '#6B7280',
     'TSUTAYA': '#1D3480',
@@ -139,7 +138,6 @@ const App = (() => {
     'イエローハット': 'icons/chains/yhat.png',
     'ジェームス': 'icons/chains/james.png',
     'イオン': 'icons/chains/aeon.png',
-    'コストコ': 'icons/chains/costco.png',
     'トイザらス': 'icons/chains/toysrus.png',
     'オフィスベンダー': 'icons/chains/ofv.png',
     'TSUTAYA': 'icons/chains/tsutaya.png',
@@ -222,7 +220,6 @@ const App = (() => {
     { re: /にりんかん/, chain: 'にりんかん' },
     // その他
     { re: /イオン/, chain: 'イオン' },
-    { re: /コストコ/, chain: 'コストコ' },
     { re: /トイザらス/, chain: 'トイザらス' },
     { re: /オフィスベンダー/, chain: 'オフィスベンダー' },
     { re: /TSUTAYA|蔦屋書店|ツタヤ/i, chain: 'TSUTAYA' },
