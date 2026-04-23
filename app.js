@@ -1858,21 +1858,33 @@ const App = (() => {
 
   // ---------- 分析画面 ----------
 
+  // 分析タブのセッションキャッシュ（TTL 5分、タブ切替では瞬時表示）
+  let analyticsCache = null;
+  const ANALYTICS_CACHE_TTL_MS = 5 * 60 * 1000;
+
   async function renderAnalytics(container) {
     setTitle('店舗分析');
     setNavActive('analytics');
     container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-      // 過去1年分の在庫管理データを取得（店舗資産化の中核データソース）
-      const d = new Date();
-      const toStr = d.toISOString().slice(0, 10);
-      const from = new Date(d.getFullYear() - 1, d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+      let inventoryItems, routes;
+      const now = Date.now();
+      if (analyticsCache && (now - analyticsCache.ts) < ANALYTICS_CACHE_TTL_MS) {
+        inventoryItems = analyticsCache.inventoryItems;
+        routes = analyticsCache.routes;
+      } else {
+        // 過去1年分の在庫管理データを取得（店舗資産化の中核データソース）
+        const d = new Date();
+        const toStr = d.toISOString().slice(0, 10);
+        const from = new Date(d.getFullYear() - 1, d.getMonth(), d.getDate()).toISOString().slice(0, 10);
 
-      const [inventoryItems, routes] = await Promise.all([
-        API.getInventoryPurchases({ from, to: toStr }),
-        API.getRouteHistory({ limit: 200, include_stops: 'true' }),
-      ]);
+        [inventoryItems, routes] = await Promise.all([
+          API.getInventoryPurchases({ from, to: toStr }),
+          API.getRouteHistory({ limit: 200, include_stops: 'true' }),
+        ]);
+        analyticsCache = { ts: now, inventoryItems, routes };
+      }
       if (Router.getCurrentView() !== 'analytics') return;
 
       if (!inventoryItems || inventoryItems.length === 0) {
@@ -2299,13 +2311,15 @@ const App = (() => {
   // ---------- 履歴・分析 ----------
 
   let historyCache = []; // renderHistoryDetail用に保持
+  const stopsCacheByRouteId = {}; // route_id → stops[]、セッションキャッシュ
 
   async function renderHistory(container) {
     setTitle('履歴・分析');
     container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-      const routes = await API.getRouteHistory({ limit: 20, include_stops: 'true' });
+      // 一覧表示には stops 不要（詳細画面に入った時に個別取得）
+      const routes = await API.getRouteHistory({ limit: 20, include_stops: 'false' });
       if (Router.getCurrentView() !== 'history') return;
       historyCache = routes;
 
@@ -2595,9 +2609,28 @@ const App = (() => {
     return s;
   }
 
-  function renderHistoryDetail(container, { route } = {}) {
+  async function renderHistoryDetail(container, { route } = {}) {
     if (!route) { Router.navigate('history'); return; }
     setTitle('履歴詳細');
+
+    // stops が無ければオンデマンドで取得（セッションキャッシュ）
+    if (!route.stops) {
+      const cached = stopsCacheByRouteId[route.route_id];
+      if (cached) {
+        route.stops = cached;
+      } else {
+        container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+        try {
+          const stops = await API.getRouteStops({ route_id: route.route_id });
+          if (Router.getCurrentView() !== 'history-detail') return;
+          stopsCacheByRouteId[route.route_id] = stops;
+          route.stops = stops;
+        } catch (e) {
+          container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
+          return;
+        }
+      }
+    }
 
     const dateStr = route.date ? new Date(route.date).toLocaleDateString('ja-JP') : '不明';
     let html = '';
