@@ -2516,6 +2516,14 @@ const App = (() => {
 
     section.innerHTML = html;
 
+    // キャッシュ内のitemのshopを即時更新（サーバ書き込み後の再レンダリングで最新状態に反映するため）
+    const updateCachedShop = (row, shop) => {
+      const cached = inventoryByDateCache[normalizeRouteDate_(route.date)];
+      if (!cached) return;
+      const hit = cached.find(x => Number(x.row) === Number(row));
+      if (hit) hit.shop = shop;
+    };
+
     // 曖昧選択のイベント
     section.querySelectorAll('.js-ambig-sel').forEach(sel => {
       sel.addEventListener('change', async () => {
@@ -2526,7 +2534,7 @@ const App = (() => {
         try {
           await API.updateInventoryShop({ row, shop });
           toast(`${shop} に確定しました`);
-          // 画面を再読み込みして反映
+          updateCachedShop(row, shop);
           loadInventoryForRoute(route);
         } catch (e) {
           sel.disabled = false;
@@ -2545,6 +2553,7 @@ const App = (() => {
         try {
           await API.updateInventoryShop({ row, shop });
           toast(`${shop} に紐付けました`);
+          updateCachedShop(row, shop);
           loadInventoryForRoute(route);
         } catch (e) {
           sel.disabled = false;
