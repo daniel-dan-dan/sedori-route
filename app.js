@@ -276,12 +276,11 @@ const App = (() => {
     setupNav();
     registerViews();
 
-    // 巡回中データがあれば復元
+    // 巡回中データがあれば復元（ホーム画面のマップ/リストが空にならないよう
+    // patrol状態にかかわらず stores は必ず読み込む）
     const saved = await Storage.getCurrentRoute();
     if (saved && saved.routeId) {
       patrolState = saved;
-      Router.navigate('patrol');
-      return;
     }
 
     await loadData();
@@ -294,7 +293,7 @@ const App = (() => {
       }
     } catch (e) { /* ignore */ }
 
-    Router.navigate('home');
+    Router.navigate(patrolState ? 'patrol' : 'home');
   }
 
   async function loadData() {
