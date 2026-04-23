@@ -2372,7 +2372,8 @@ const App = (() => {
     }
 
     // 訪問店舗（この巡回）
-    const visitedStops = (route.stops || []).filter(s => s.status === 'visited');
+    // status=visited に限らずスキップ以外は候補に含める（到着/出発を押さずに終えた場合もカバー）
+    const visitedStops = (route.stops || []).filter(s => s.status !== 'skipped');
     const visitedStores = visitedStops.map(s => {
       const st = stores.find(x => x.store_id === s.store_id);
       return {
@@ -2490,14 +2491,8 @@ const App = (() => {
     // ルート外（チェーン判定で一致する訪問店舗が無かった仕入れ）
     // → 訪問店舗を手動で選べるようにし、在庫管理シートのL列に書き戻す
     if (unrelated.length > 0) {
-      // 手動紐付け候補はスキップ以外の全ルート店舗（到着/出発を押さずに終わったケースもカバー）
-      const selectableStops = (route.stops || []).filter(s => s.status !== 'skipped');
-      const selectableStores = selectableStops.map(s => {
-        const st = stores.find(x => x.store_id === s.store_id);
-        return { name: (st && st.name) || s.store_id };
-      });
       const allStoreOptions = ['<option value="">-- 店舗を選択 --</option>']
-        .concat(selectableStores.map(vs => `<option value="${esc(vs.name)}">${esc(vs.name)}</option>`))
+        .concat(visitedStores.map(vs => `<option value="${esc(vs.name)}">${esc(vs.name)}</option>`))
         .join('');
       html += `<details class="card mt-8" open><summary class="text-dim">ルート外の仕入れ（${unrelated.length}件） — 手動で紐付け可能</summary>
         <div class="text-sm text-dim mb-8 mt-8">仕入先の表記でチェーン判定できなかった商品です。正しい訪問店舗を選ぶと在庫管理シートに店舗名が書き戻されます。</div>`;
