@@ -1574,6 +1574,7 @@ const App = (() => {
       Router.navigate('summary', { summary });
       // バックグラウンドでAPI同期 & データ再取得
       API.endRoute({ route_id: routeId }).catch(() => {});
+      invalidateHistoryApiCache();
       loadData();
     }
   }
@@ -2312,15 +2313,37 @@ const App = (() => {
 
   let historyCache = []; // renderHistoryDetail用に保持
   const stopsCacheByRouteId = {}; // route_id → stops[]、セッションキャッシュ
+  let historyApiCache = null;       // { ts, routes } — 履歴一覧の APIレスポンスキャッシュ
+  const HISTORY_CACHE_TTL_MS = 60 * 1000; // 60秒
+
+  function invalidateHistoryApiCache() {
+    historyApiCache = null;
+    analyticsCache = null; // 履歴更新は分析の集計にも影響するため一緒に無効化
+  }
 
   async function renderHistory(container) {
     setTitle('履歴・分析');
-    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+    // キャッシュヒット時は即描画（スピナーなし）
+    const now = Date.now();
+    const cached = historyApiCache && (now - historyApiCache.ts) < HISTORY_CACHE_TTL_MS
+      ? historyApiCache.routes
+      : null;
+
+    if (!cached) {
+      container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    }
 
     try {
-      // 一覧表示には stops 不要（詳細画面に入った時に個別取得）
-      const routes = await API.getRouteHistory({ limit: 20, include_stops: 'false' });
-      if (Router.getCurrentView() !== 'history') return;
+      let routes;
+      if (cached) {
+        routes = cached;
+      } else {
+        // 一覧表示には stops 不要（詳細画面に入った時に個別取得）
+        routes = await API.getRouteHistory({ limit: 20, include_stops: 'false' });
+        if (Router.getCurrentView() !== 'history') return;
+        historyApiCache = { ts: Date.now(), routes };
+      }
       historyCache = routes;
 
       let html = '';
@@ -2715,6 +2738,10 @@ const App = (() => {
         });
         route.store_count = route.stops.length;
         toast(`${store.name} を追加しました`);
+        // 該当ルートの stops キャッシュを最新に差し替え
+        stopsCacheByRouteId[route.route_id] = route.stops;
+        // 履歴一覧の店舗数も変わるのでキャッシュ無効化
+        invalidateHistoryApiCache();
         Router.navigate('history-detail', { route });
         // API同期
         API.addStopToRoute({
@@ -2734,6 +2761,7 @@ const App = (() => {
       Router.navigate('history');
       // バックグラウンドでAPI同期
       API.deleteRoute({ route_id: route.route_id }).catch(() => {});
+      invalidateHistoryApiCache();
       loadData();
     });
   }
@@ -2885,6 +2913,7 @@ const App = (() => {
       (async () => {
         try {
           await API.clearHistory();
+          invalidateHistoryApiCache();
           await loadData();
           toast('全履歴を消去しました');
         } catch (err) {
