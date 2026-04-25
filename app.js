@@ -2962,12 +2962,6 @@ const App = (() => {
     if (el) el.textContent = t;
   }
 
-  function setNavActive(view) {
-    document.querySelectorAll('.nav-item').forEach(b => {
-      b.classList.toggle('active', b.dataset.view === view);
-    });
-  }
-
   function toast(msg, duration = 2500) {
     const el = document.getElementById('toast');
     el.textContent = msg;
