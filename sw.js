@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sedori-route-v115';
+const CACHE_NAME = 'sedori-route-v116';
 const ASSETS = [
   './',
   './index.html',

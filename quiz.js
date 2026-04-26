@@ -11,7 +11,12 @@ const Quiz = (() => {
   const ITEMS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
   const META_CACHE_TTL_MS  = 24 * 60 * 60 * 1000; // 24h
   const DB_NAME = 'sedori-quiz-db';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
+  // 直近セッションのメーカー/ASINを記録して、出題を分散させるために参照する
+  const RECENT_SESSIONS_KEEP = 3; // 直近3セッション分を残す
+  const RECENT_MAKER_WEIGHT = 0.2; // 直近に出たメーカーの抽選ウェイトを下げる係数（0で完全除外、1で均等）
+  const LEARNED_RATIO_NORMAL = 0.3; // 「ふつう」既習比率（旧60%→30%に引き下げ）
+  const RECENT_HOURS_EXCLUDE = 24; // 直近この時間内に出題した商品は既習扱いから除外する
 
   const DEFAULT_SETTINGS = {
     range: 'mixed',
@@ -34,6 +39,10 @@ const Quiz = (() => {
         if (!d.objectStoreNames.contains('stats'))        d.createObjectStore('stats',        { keyPath: 'key' });
         if (!d.objectStoreNames.contains('reviewQueue'))  d.createObjectStore('reviewQueue',  { keyPath: 'asin' });
         if (!d.objectStoreNames.contains('cache'))        d.createObjectStore('cache',        { keyPath: 'key' });
+        // v2追加: 直近セッションでの出題ASIN/メーカーを保持して分散抽選に使う
+        if (!d.objectStoreNames.contains('recentSessions')) {
+          d.createObjectStore('recentSessions', { keyPath: 'id', autoIncrement: true });
+        }
       };
       req.onsuccess = (e) => { _db = e.target.result; resolve(_db); };
       req.onerror = (e) => reject(e.target.error);
@@ -145,10 +154,11 @@ const Quiz = (() => {
   // ---------- 履歴（asin単位） ----------
   async function recordAttempt(asin, isCorrect) {
     if (!asin) return;
-    const rec = (await dbGet('history', asin)) || { asin, attempts: 0, correct: 0, lastAttempted: null, lastResult: null };
+    const rec = (await dbGet('history', asin)) || { asin, attempts: 0, correct: 0, lastAttempted: null, lastResult: null, lastAttemptedAt: 0 };
     rec.attempts += 1;
     if (isCorrect) rec.correct += 1;
     rec.lastAttempted = todayString();
+    rec.lastAttemptedAt = Date.now(); // 24h除外判定用に記録
     rec.lastResult = isCorrect ? 'correct' : 'incorrect';
     await dbPut('history', rec);
 
@@ -330,44 +340,73 @@ const Quiz = (() => {
       }
     }
 
-    // 難易度フィルタ
-    if (settings.difficulty === 'easy') {
-      const easy = pool.filter(isEasyItem);
-      if (easy.length >= 3) pool = easy;
-    } else if (settings.difficulty === 'hard') {
-      // 未習＋スコアB/C中心
-      const stats = await loadStats();
-      const learned = new Set(stats.learnedAsins || []);
-      const unlearned = pool.filter(it => !learned.has(String(it.ASIN || '').trim()));
-      const hardCands = pool.filter(isHardCandidate);
-      // 未習 80% + 既習(間違い中心) 20%
-      const want = settings.questionCount === 'endless' ? 30 : settings.questionCount;
-      const unlearnedTarget = Math.ceil(want * 0.8);
-      const learnedHard = pool.filter(it => learned.has(String(it.ASIN || '').trim()) && isHardCandidate(it));
-      const part1 = pickRandom(unlearned.length ? unlearned : hardCands, unlearnedTarget);
-      const part2 = pickRandom(learnedHard.length ? learnedHard : pool, Math.max(0, want - part1.length));
-      const merged = shuffle([...part1, ...part2]);
-      if (merged.length >= 3) {
-        pool = merged;
-      }
-    } else {
-      // ふつう: 既習60% / 未習40%
-      const stats = await loadStats();
-      const learned = new Set(stats.learnedAsins || []);
-      const learnedItems = pool.filter(it => learned.has(String(it.ASIN || '').trim()));
-      const unlearned    = pool.filter(it => !learned.has(String(it.ASIN || '').trim()));
-      const want = settings.questionCount === 'endless' ? 30 : settings.questionCount;
-      if (learnedItems.length > 0 && unlearned.length > 0) {
-        const part1 = pickRandom(learnedItems, Math.ceil(want * 0.6));
-        const part2 = pickRandom(unlearned,    Math.max(0, want - part1.length));
-        const merged = shuffle([...part1, ...part2]);
-        if (merged.length >= 3) pool = merged;
-      }
+    // ── ここから出題分散ロジック ──
+    // 直近Nセッションで出題された商品(ASIN)とメーカー別出現回数を取得
+    const recentAsinSet = await getRecentAsinSet();
+    const recentMakerCounts = await getRecentMakerCounts();
+
+    // 復習モード/メーカー範囲限定モードでは「直近ASIN除外」を行わない（元々プールが狭いため）
+    const enableRecentAsinExclude = !(opts.shortcut === 'review') &&
+                                    !(settings.range === 'maker' && settings.rangeValue);
+
+    // 直近24時間以内に出題したASINも「既習扱いから除外」できるように、historyからAt時刻も取得
+    const allHistory = await dbGetAll('history');
+    const recentAttemptedAsins = new Set();
+    const cutoff = Date.now() - RECENT_HOURS_EXCLUDE * 60 * 60 * 1000;
+    for (const h of allHistory) {
+      if ((h.lastAttemptedAt || 0) >= cutoff) recentAttemptedAsins.add(h.asin);
     }
 
-    // 必要件数
-    const want = settings.questionCount === 'endless' ? Math.min(30, pool.length) : settings.questionCount;
-    return pickRandom(pool, want);
+    // 直近セッションで出たASINはプールから可能な限り除外（ただし除外しすぎてプールが小さくなりすぎたら戻す）
+    let workPool = pool;
+    if (enableRecentAsinExclude && recentAsinSet.size > 0) {
+      const filtered = pool.filter(it => !recentAsinSet.has(String(it.ASIN || '').trim()));
+      const minPool = Math.max(10, (settings.questionCount === 'endless' ? 30 : settings.questionCount) * 2);
+      if (filtered.length >= minPool) workPool = filtered;
+    }
+
+    // 難易度フィルタ
+    const want = settings.questionCount === 'endless' ? 30 : settings.questionCount;
+
+    if (settings.difficulty === 'easy') {
+      const easy = workPool.filter(isEasyItem);
+      if (easy.length >= 3) workPool = easy;
+    } else if (settings.difficulty === 'hard') {
+      // むずかしい: 未習中心 + スコアB/C中心
+      const stats = await loadStats();
+      // 24h以内に出題したASINは「未習側」に戻す（連続セッションでも新鮮味を保つ）
+      const learned = new Set((stats.learnedAsins || []).filter(a => !recentAttemptedAsins.has(a)));
+      const unlearned = workPool.filter(it => !learned.has(String(it.ASIN || '').trim()));
+      const hardCands = workPool.filter(isHardCandidate);
+      const unlearnedTarget = Math.ceil(want * 0.8);
+      const learnedHard = workPool.filter(it => learned.has(String(it.ASIN || '').trim()) && isHardCandidate(it));
+      const part1 = pickByMakerBalanced(unlearned.length ? unlearned : hardCands, unlearnedTarget, recentMakerCounts);
+      const part2 = pickByMakerBalanced(learnedHard.length ? learnedHard : workPool, Math.max(0, want - part1.length), recentMakerCounts);
+      const merged = shuffle([...part1, ...part2]);
+      if (merged.length >= 3) {
+        return merged.slice(0, want);
+      }
+      // フォールバック
+      return pickByMakerBalanced(workPool, want, recentMakerCounts);
+    } else {
+      // ふつう: 既習30% / 未習70% （旧60/40から変更、24h以内出題は未習扱いに戻す）
+      const stats = await loadStats();
+      const learned = new Set((stats.learnedAsins || []).filter(a => !recentAttemptedAsins.has(a)));
+      const learnedItems = workPool.filter(it => learned.has(String(it.ASIN || '').trim()));
+      const unlearned    = workPool.filter(it => !learned.has(String(it.ASIN || '').trim()));
+      if (learnedItems.length > 0 && unlearned.length > 0) {
+        const part1Need = Math.round(want * LEARNED_RATIO_NORMAL);
+        const part1 = pickByMakerBalanced(learnedItems, part1Need, recentMakerCounts);
+        const part2 = pickByMakerBalanced(unlearned, Math.max(0, want - part1.length), recentMakerCounts);
+        const merged = shuffle([...part1, ...part2]);
+        if (merged.length >= 3) return merged.slice(0, want);
+      }
+      // フォールバック: メーカー均等抽選
+      return pickByMakerBalanced(workPool, want, recentMakerCounts);
+    }
+
+    // easyや上記分岐でフォールバックされた場合
+    return pickByMakerBalanced(workPool, want, recentMakerCounts);
   }
 
   async function pickWeakMakers(n) {
@@ -400,9 +439,131 @@ const Quiz = (() => {
   function buildMakerChoices(item, allItems) {
     const correct = String(item['ブランド名'] || '').trim();
     const allMakers = Array.from(new Set(allItems.map(it => String(it['ブランド名'] || '').trim()).filter(Boolean)));
-    const others = allMakers.filter(m => m !== correct);
-    const decoys = pickRandom(others, 3);
+    // 同ジャンルから優先的に選びつつ、ジャンル混在を許容して候補を広く取る
+    const correctGenre = inferSimpleGenre(item);
+    const sameGenreMakers = Array.from(new Set(
+      allItems
+        .filter(it => inferSimpleGenre(it) === correctGenre)
+        .map(it => String(it['ブランド名'] || '').trim())
+        .filter(Boolean)
+    )).filter(m => m !== correct);
+    const otherGenreMakers = allMakers.filter(m => m !== correct && !sameGenreMakers.includes(m));
+
+    let decoys = pickRandom(sameGenreMakers, 3);
+    if (decoys.length < 3) {
+      // 不足分はジャンル外から補充
+      const need = 3 - decoys.length;
+      const extra = pickRandom(otherGenreMakers, need);
+      decoys = [...decoys, ...extra];
+    }
     return shuffle([correct, ...decoys]);
+  }
+
+  // ---------- 直近セッションの記録・参照 ----------
+  async function getRecentSessions() {
+    try {
+      const all = await dbGetAll('recentSessions');
+      // id降順（新しい順）
+      return all.sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, RECENT_SESSIONS_KEEP);
+    } catch (e) { return []; }
+  }
+
+  // 直近Nセッションで出題されたASIN集合
+  async function getRecentAsinSet() {
+    const sessions = await getRecentSessions();
+    const set = new Set();
+    for (const s of sessions) {
+      (s.asins || []).forEach(a => set.add(a));
+    }
+    return set;
+  }
+
+  // 直近Nセッションで出題されたメーカーごとの出現回数
+  async function getRecentMakerCounts() {
+    const sessions = await getRecentSessions();
+    const counts = new Map();
+    for (const s of sessions) {
+      (s.makers || []).forEach(m => counts.set(m, (counts.get(m) || 0) + 1));
+    }
+    return counts;
+  }
+
+  // セッション完了時に出題内容を保存（直近Nセッションだけ残す）
+  async function saveSessionRecord(items) {
+    try {
+      const asins = items.map(it => String(it.ASIN || '').trim()).filter(Boolean);
+      const makers = Array.from(new Set(items.map(it => String(it['ブランド名'] || '').trim()).filter(Boolean)));
+      await dbPut('recentSessions', {
+        playedAt: Date.now(),
+        asins,
+        makers,
+      });
+      // 古いものを削除（id昇順で取得し、上限を超えた分を削除）
+      const all = await dbGetAll('recentSessions');
+      const sorted = all.sort((a, b) => (b.id || 0) - (a.id || 0));
+      const keepIds = new Set(sorted.slice(0, RECENT_SESSIONS_KEEP).map(s => s.id));
+      for (const s of sorted) {
+        if (!keepIds.has(s.id)) {
+          try { await dbDelete('recentSessions', s.id); } catch (e) {}
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---------- メーカー均等化抽選 ----------
+  // メーカー単位でグルーピングし、直近頻出メーカーの重みを下げて抽選する
+  // pool: 抽選対象の商品配列
+  // n: 必要件数
+  // recentMakerCounts: Map<maker, 出現セッション数>
+  function pickByMakerBalanced(pool, n, recentMakerCounts) {
+    if (pool.length === 0 || n <= 0) return [];
+    if (pool.length <= n) return shuffle(pool);
+
+    // メーカー別グルーピング
+    const byMaker = new Map();
+    for (const it of pool) {
+      const m = String(it['ブランド名'] || '').trim() || '__unknown__';
+      if (!byMaker.has(m)) byMaker.set(m, []);
+      byMaker.get(m).push(it);
+    }
+    // 各メーカー内をシャッフル
+    for (const arr of byMaker.values()) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+    }
+
+    // メーカーリスト（直近多く出たメーカーは重みを下げる）
+    const makerEntries = Array.from(byMaker.keys()).map(m => {
+      const recent = recentMakerCounts.get(m) || 0;
+      // 直近Nセッション中、k回出ていれば weight = RECENT_MAKER_WEIGHT^k
+      // 例: 1回出 = 0.2、2回出 = 0.04、3回出 = 0.008 → ほぼ出ない
+      const weight = recent > 0 ? Math.pow(RECENT_MAKER_WEIGHT, recent) : 1;
+      return { maker: m, weight };
+    });
+
+    const out = [];
+    const usedAsin = new Set();
+    while (out.length < n) {
+      // 残っている商品のあるメーカーだけ対象
+      const candidates = makerEntries.filter(e => byMaker.get(e.maker).length > 0);
+      if (candidates.length === 0) break;
+      // 重み付き抽選
+      const totalW = candidates.reduce((s, e) => s + e.weight, 0);
+      let r = Math.random() * totalW;
+      let chosen = candidates[candidates.length - 1];
+      for (const e of candidates) {
+        r -= e.weight;
+        if (r <= 0) { chosen = e; break; }
+      }
+      const item = byMaker.get(chosen.maker).shift();
+      const asinKey = String(item.ASIN || '').trim() || `name:${String(item['商品名'] || '').trim()}`;
+      if (usedAsin.has(asinKey)) continue;
+      usedAsin.add(asinKey);
+      out.push(item);
+    }
+    return out;
   }
 
   function decideQuestionType(settings) {
@@ -549,7 +710,26 @@ const Quiz = (() => {
       <div class="quiz-current">
         現在の設定: ${escHtml(rangeLabel)} / ${escHtml(typeLabel)} / ${escHtml(diffLabel)} / ${escHtml(qcLabel)}
       </div>
+      <div class="quiz-debug" id="quiz-debug-info" style="margin-top:8px;font-size:11px;color:#888;text-align:center;line-height:1.6;"></div>
     `;
+
+    // デバッグ情報（プール件数・直近セッション情報）を非同期で表示
+    (async () => {
+      try {
+        const recentSessions = await getRecentSessions();
+        const recentMakerCounts = await getRecentMakerCounts();
+        const totalPool = items.length;
+        const withAsin = items.filter(it => String(it.ASIN || '').trim()).length;
+        const uniqueMakers = new Set(items.map(it => String(it['ブランド名'] || '').trim()).filter(Boolean)).size;
+        const debugEl = container.querySelector('#quiz-debug-info');
+        if (debugEl) {
+          const recentMakerStr = recentMakerCounts.size > 0
+            ? ` ／ 直近よく出たメーカー: ${Array.from(recentMakerCounts.keys()).slice(0,3).join(', ')}`
+            : '';
+          debugEl.textContent = `データ: 全${totalPool}件 (ASIN付${withAsin}件 / メーカー${uniqueMakers}社) ／ 直近${recentSessions.length}セッション記録${recentMakerStr}`;
+        }
+      } catch (e) { /* ignore */ }
+    })();
 
     // 軸ボタン
     container.querySelectorAll('.quiz-btn-row').forEach(row => {
@@ -868,6 +1048,12 @@ const Quiz = (() => {
     const total = session.results.length;
     const correct = session.results.filter(r => r.isCorrect).length;
     const rate = total > 0 ? Math.round((correct / total) * 100) : 0;
+
+    // 出題分散用：このセッションで出題した商品/メーカーを記録
+    // 1問でも出題されていれば記録する（途中離脱でも次セッションに反映）
+    if (session.questions && session.questions.length > 0) {
+      saveSessionRecord(session.questions).catch(() => {});
+    }
 
     const lines = session.results.map((r, i) => {
       const mark = r.isCorrect ? '&#x2b55;' : '&#x274c;';
