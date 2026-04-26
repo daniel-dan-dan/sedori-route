@@ -2,8 +2,10 @@
 // 廃盤クイズ — 朝5分の学習教材（独立モジュール）
 // ============================================================
 // IndexedDB(sedori-quiz-db) に設定・履歴・統計・復習リストを保存。
-// 廃盤チェッカーWebApp(getAllHotItems / getMakerList / getGenreList) を
+// 廃盤チェッカーWebApp(getQuizPool / getMakerList / getGenreList) を
 // データソースとし、4択メーカー当て / プレ値推測スライダーで出題する。
+// ※ クイズ専用の広いプール(getQuizPool)を使用。仕入れ判断用の廃盤タブは
+//   従来通り getAllHotItems を使用するため、キャッシュキーは別管理(quizPool)。
 
 const Quiz = (() => {
   // ---------- 定数 ----------
@@ -206,14 +208,37 @@ const Quiz = (() => {
     return value;
   }
 
-  async function fetchAllItems(force = false) {
+  // クイズ専用の広いプール(getQuizPool)を取得。
+  // - getAllHotItems と互換のshape: { ok, count, totalAll, makerCount, items[] }
+  // - 必須フィルタは「商品名+メーカー+redFlag無し」のみで、スコア無し商品も含む
+  // - キャッシュキーは 'quizPool' で、廃盤タブ(getAllHotItems)と分離
+  async function fetchQuizPool(force = false) {
     if (force) {
-      try { await dbDelete('cache', 'allItems'); } catch (e) {}
+      try { await dbDelete('cache', 'quizPool'); } catch (e) {}
     }
-    return getCachedOrFetch('allItems', ITEMS_CACHE_TTL_MS, async () => {
-      const resp = await postHaiban('getAllHotItems');
-      return Array.isArray(resp.items) ? resp.items : [];
+    return getCachedOrFetch('quizPool', ITEMS_CACHE_TTL_MS, async () => {
+      const resp = await postHaiban('getQuizPool');
+      const items = Array.isArray(resp?.items) ? resp.items : [];
+      // メタ情報(totalAll/makerCount)を items に乗せて持ち回す
+      // (キャッシュ層は単一値を保存するため、配列にプロパティを生やす)
+      try {
+        Object.defineProperty(items, '__quizMeta', {
+          value: {
+            count: Number(resp?.count || items.length),
+            totalAll: Number(resp?.totalAll || 0),
+            makerCount: Number(resp?.makerCount || 0),
+          },
+          enumerable: false,
+        });
+      } catch (e) { /* ignore */ }
+      return items;
     });
+  }
+
+  // 後方互換用: 内部の他関数(pickWeakMakers等)から fetchAllItems を呼んでいた箇所は
+  // クイズ用プールに統一する(クイズの文脈では getQuizPool が正解)。
+  async function fetchAllItems(force = false) {
+    return fetchQuizPool(force);
   }
 
   async function fetchMakerList() {
@@ -318,6 +343,14 @@ const Quiz = (() => {
       pool = pool.filter(it => String(it['ブランド名'] || '').trim() === settings.rangeValue);
     } else if (settings.range === 'genre' && settings.rangeValue) {
       pool = pool.filter(it => inferSimpleGenre(it) === settings.rangeValue);
+    }
+
+    // 問題タイプが「プレ値推測」専用のときは、最安値が取れている商品のみを対象にする。
+    // (getQuizPool はスコアnull商品も含むため、最安値が0/未取得の商品が混ざる可能性がある)
+    if (settings.type === 'price_quiz') {
+      const priced = pool.filter(it => Number(it['最安値'] || 0) > 0);
+      // 件数が極端に減った場合のセーフティ: 3件以上残ったときだけ絞り込みを採用
+      if (priced.length >= 3) pool = priced;
     }
 
     // 復習モード
@@ -607,7 +640,7 @@ const Quiz = (() => {
     let items, makers, genres, settings, stats;
     try {
       [items, makers, genres, settings, stats] = await Promise.all([
-        fetchAllItems(),
+        fetchQuizPool(),  // クイズ専用の広いプール(最大1,000件・49社)
         fetchMakerList(),
         fetchGenreList(),
         loadSettings(),
@@ -721,12 +754,21 @@ const Quiz = (() => {
         const totalPool = items.length;
         const withAsin = items.filter(it => String(it.ASIN || '').trim()).length;
         const uniqueMakers = new Set(items.map(it => String(it['ブランド名'] || '').trim()).filter(Boolean)).size;
+        // getQuizPool 由来のメタ情報があればそれを優先（totalAll = 全監視商品数）
+        const meta = items.__quizMeta || {};
+        const totalAll = Number(meta.totalAll || 0);
+        const makerCountApi = Number(meta.makerCount || 0);
         const debugEl = container.querySelector('#quiz-debug-info');
         if (debugEl) {
           const recentMakerStr = recentMakerCounts.size > 0
             ? ` ／ 直近よく出たメーカー: ${Array.from(recentMakerCounts.keys()).slice(0,3).join(', ')}`
             : '';
-          debugEl.textContent = `データ: 全${totalPool}件 (ASIN付${withAsin}件 / メーカー${uniqueMakers}社) ／ 直近${recentSessions.length}セッション記録${recentMakerStr}`;
+          // 例: 「データ: 全950件 / ASIN付930件 / メーカー42社 / 全監視5,028件中」
+          const totalAllStr = totalAll > 0
+            ? ` / 全監視${totalAll.toLocaleString()}件中`
+            : '';
+          const makerCountDisplay = makerCountApi > 0 ? makerCountApi : uniqueMakers;
+          debugEl.textContent = `データ: 全${totalPool}件 / ASIN付${withAsin}件 / メーカー${makerCountDisplay}社${totalAllStr} ／ 直近${recentSessions.length}セッション記録${recentMakerStr}`;
         }
       } catch (e) { /* ignore */ }
     })();
@@ -1136,6 +1178,9 @@ const Quiz = (() => {
         }
       };
       tryUpdate();
+      // 旧クイズ用キャッシュキー(allItems)が残っていればお掃除
+      // (v117 から quizPool に切り替えたため、古いプールを使い続けないように)
+      try { await dbDelete('cache', 'allItems'); } catch (e) { /* ignore */ }
     } catch (e) { /* ignore */ }
   })();
 
