@@ -332,6 +332,13 @@ const App = (() => {
     Router.register('settings', renderSettings);
     Router.register('analytics', renderAnalytics);
     Router.register('haiban', renderHaiban);
+    Router.register('quiz', (container) => {
+      if (typeof Quiz !== 'undefined' && Quiz.renderQuiz) {
+        Quiz.renderQuiz(container);
+      } else {
+        container.innerHTML = '<div class="card"><div class="card-title">クイズ機能を読み込めませんでした</div></div>';
+      }
+    });
     Router.register('patrol', renderPatrol);
     Router.register('summary', renderSummary);
   }
