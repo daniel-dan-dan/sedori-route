@@ -2477,7 +2477,8 @@ const App = (() => {
         <div class="card text-dim">読み込み中...</div>`;
       try {
         items = await API.getInventoryPurchases({ from: date, to: date });
-        inventoryByDateCache[date] = items;
+        // 仕入れが0件の場合はキャッシュしない（後で入力された場合に再取得できるよう）
+        if (items && items.length > 0) inventoryByDateCache[date] = items;
       } catch (e) {
         section.innerHTML = `
           <div class="card-title mt-12">在庫管理からの仕入れ品</div>
@@ -2775,7 +2776,8 @@ const App = (() => {
     }
 
     // 在庫管理からの仕入れ品（非同期で読み込み）
-    html += `<div id="inventory-section"></div>`;
+    html += `<div id="inventory-section"></div>
+    <button class="btn btn-sm btn-outline mt-4" id="btn-reload-inventory" style="width:100%;color:var(--text-dim);border-color:var(--border)">在庫管理を再読み込み</button>`;
 
     // 巡回再開ボタン（停止した巡回をやり直せる）
     if (route.stops && route.stops.length > 0) {
@@ -2794,6 +2796,13 @@ const App = (() => {
     container.innerHTML = html;
 
     loadInventoryForRoute(route);
+
+    document.getElementById('btn-reload-inventory')?.addEventListener('click', () => {
+      // キャッシュを削除して強制再取得
+      const d = normalizeRouteDate_(route.date);
+      if (d) delete inventoryByDateCache[d];
+      loadInventoryForRoute(route);
+    });
 
     document.getElementById('btn-resume-route')?.addEventListener('click', () => {
       resumePatrolFromHistory(route);
