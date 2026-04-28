@@ -1281,6 +1281,51 @@ body {
   overflow: hidden;
   box-shadow: var(--shadow);
   background: var(--surface2);
+  position: relative;
+}
+
+/* ---- 現在地ボタン（地図右下に固定） ---- */
+.btn-map-current {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  z-index: 1000;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  font-size: 22px;
+  line-height: 44px;
+  text-align: center;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #2563EB;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn-map-current:active {
+  background: #EFF6FF;
+  transform: scale(0.94);
+}
+
+/* ---- 現在地マーカー（青い丸） ---- */
+.map-current-location {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2563EB;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(37,99,235,0.5);
+  animation: pulse-current 2s infinite;
+}
+@keyframes pulse-current {
+  0%   { box-shadow: 0 0 0 0 rgba(37,99,235,0.45); }
+  70%  { box-shadow: 0 0 0 10px rgba(37,99,235,0); }
+  100% { box-shadow: 0 0 0 0 rgba(37,99,235,0); }
 }
 .map-bottom-bar {
   padding: 10px 12px;

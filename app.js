@@ -18,6 +18,8 @@ const App = (() => {
   let mapMarkers = new Map(); // store_id → L.marker（差分更新用）
   let mapChainFilter = 'all';
   let pendingInertia = null; // ピンチズーム慣性の次フレーム予約
+  let currentLocationMarker = null; // 現在地マーカー
+  let currentLocationCircle = null; // 現在地精度サークル
 
   // チェーン別ブランドカラー（ピン・チップの色分け）
   const CHAIN_COLORS = {
@@ -893,7 +895,9 @@ const App = (() => {
         <button class="view-btn" data-view="list">&#x1f4cb; リスト</button>
       </div>
       ${chipHtml}
-      <div id="map-view"></div>
+      <div id="map-view">
+        <button class="btn-map-current" id="btn-map-current" title="現在地">&#x1f4cd;</button>
+      </div>
       <div class="map-bottom-bar">
         <div class="flex-between mb-8">
           <span class="text-sm text-dim"><span id="map-sel-count">${selectedStoreIds.length}</span>店舗 選択中</span>
@@ -946,6 +950,10 @@ const App = (() => {
       updateMapBottomBar();
     });
     document.getElementById('btn-map-optimize').addEventListener('click', doOptimize);
+
+    // 現在地ボタン（Leaflet初期化後に押せるようにrAF後ではなく直後に登録）
+    const btnCurrent = document.getElementById('btn-map-current');
+    if (btnCurrent) btnCurrent.addEventListener('click', moveToCurrent);
   }
 
   // 初期中心は常に仙台駅固定
@@ -1023,6 +1031,69 @@ const App = (() => {
       installPinchZoomInertia(mapEl);
       mapEl._pinchInertiaInstalled = true;
     }
+
+    // 現在地の取得と表示（初回。以降はupdateCurrentLocation()で差分更新）
+    updateCurrentLocation();
+  }
+
+  // 現在地マーカーを取得・更新する
+  function updateCurrentLocation() {
+    if (!mapInstance) return;
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(pos => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const accuracy = pos.coords.accuracy;
+
+      // 既存マーカーを削除してから再作成（差分更新）
+      if (currentLocationMarker) {
+        mapInstance.removeLayer(currentLocationMarker);
+        currentLocationMarker = null;
+      }
+      if (currentLocationCircle) {
+        mapInstance.removeLayer(currentLocationCircle);
+        currentLocationCircle = null;
+      }
+
+      // 精度サークル（薄い青）
+      currentLocationCircle = L.circle([lat, lng], {
+        radius: accuracy,
+        color: '#2563EB',
+        fillColor: '#3B82F6',
+        fillOpacity: 0.12,
+        weight: 1,
+      }).addTo(mapInstance);
+
+      // 現在地マーカー（青い丸）
+      const currentIcon = L.divIcon({
+        className: '',
+        html: '<div class="map-current-location"></div>',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+      });
+      currentLocationMarker = L.marker([lat, lng], {
+        icon: currentIcon,
+        zIndexOffset: 1000,
+        interactive: false,
+      }).addTo(mapInstance);
+    }, null, { enableHighAccuracy: true, timeout: 10000 });
+  }
+
+  // 現在地にマップ中心を移動する
+  function moveToCurrent() {
+    if (!mapInstance) return;
+    if (!navigator.geolocation) {
+      showToast('位置情報が使えません');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(pos => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      mapInstance.setView([lat, lng], 14, { animate: true });
+      updateCurrentLocation();
+    }, () => {
+      showToast('現在地を取得できませんでした');
+    }, { enableHighAccuracy: true, timeout: 10000 });
   }
 
   function applyInertiaIfPending() {
