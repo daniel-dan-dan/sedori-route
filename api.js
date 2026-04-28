@@ -66,6 +66,7 @@ const API = (() => {
     addStopToRoute:  (b)         => post('addStopToRoute', b),
     addPurchase:     (b)         => post('addPurchase', b),
     getInventoryPurchases:(p={}) => get('getInventoryPurchases', p),
+    recalcRoutePurchases:(p={})  => get('recalcRoutePurchases', p),
     updateInventoryShop:(b)      => post('updateInventoryShop', b),
     updateConfig:    (entries)   => post('updateConfig', { entries }),
     deleteRoute:     (b)         => post('deleteRoute', b),

@@ -56,7 +56,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v92';
+  const ASSET_VER = 'v93';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -2895,6 +2895,11 @@ const App = (() => {
         <div id="store-list"></div>
       </div>
       <div class="card">
+        <div class="card-title">仕入れ集計を修正</div>
+        <div class="text-sm text-dim mb-8">履歴の仕入れ金額・点数が0になっている場合、在庫管理シートから再集計して修正します。</div>
+        <button class="btn btn-sm btn-primary" id="btn-recalc-purchases">仕入れ集計を再計算</button>
+      </div>
+      <div class="card">
         <div class="card-title">履歴消去</div>
         <div class="text-sm text-dim mb-8">全ての巡回履歴・仕入れ記録を削除します。この操作は取り消せません。</div>
         <button class="btn btn-sm btn-accent" id="btn-clear-history">全履歴を消去</button>
@@ -2983,6 +2988,23 @@ const App = (() => {
       toast('データ再取得中...');
       await loadData();
       toast(`${stores.length}店舗のデータを更新しました`);
+    });
+
+    document.getElementById('btn-recalc-purchases')?.addEventListener('click', () => {
+      (async () => {
+        const btn = document.getElementById('btn-recalc-purchases');
+        if (btn) btn.disabled = true;
+        toast('在庫管理シートから再集計中...');
+        try {
+          const result = await API.recalcRoutePurchases();
+          invalidateHistoryApiCache();
+          toast(`${result.updated || 0}件の履歴を修正しました`);
+        } catch (err) {
+          toast('再計算に失敗: ' + err.message);
+        } finally {
+          if (btn) btn.disabled = false;
+        }
+      })();
     });
 
     document.getElementById('btn-clear-history')?.addEventListener('click', () => {
