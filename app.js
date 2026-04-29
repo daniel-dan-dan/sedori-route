@@ -1068,8 +1068,8 @@ const App = (() => {
       const currentIcon = L.divIcon({
         className: '',
         html: '<div class="map-current-location"></div>',
-        iconSize: [20, 20],
-        iconAnchor: [10, 10],
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
       });
       currentLocationMarker = L.marker([lat, lng], {
         icon: currentIcon,
@@ -2441,6 +2441,10 @@ const App = (() => {
                 距離: ${r.total_distance_km || 0}km |
                 仕入れ: ${Number(r.total_purchase || 0).toLocaleString()}円 (${r.total_items || 0}点)
               </div>
+              ${Number(r.expected_profit || 0) > 0
+                ? `<div class="history-profit">見込み利益: ${Number(r.expected_profit).toLocaleString()}円</div>`
+                : ''
+              }
               ${r.note ? `<div class="text-sm mt-8">${esc(r.note)}</div>` : ''}
             </div>`;
         });

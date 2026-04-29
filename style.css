@@ -1188,6 +1188,7 @@ body {
 }
 .history-date { font-size: 13px; font-weight: 600; }
 .history-meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.history-profit { font-size: 12px; color: #2e7d32; font-weight: 600; margin-top: 4px; }
 
 /* ---- Badges ---- */
 .badge {
@@ -1314,8 +1315,8 @@ body {
 
 /* ---- 現在地マーカー（青い丸） ---- */
 .map-current-location {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: #2563EB;
   border: 3px solid #fff;
