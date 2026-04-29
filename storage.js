@@ -4,7 +4,7 @@
 
 const Storage = (() => {
   const DB_NAME = 'sedori-route';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   let db = null;
 
   function open() {
@@ -21,6 +21,9 @@ const Storage = (() => {
           d.createObjectStore('pendingActions', { autoIncrement: true });
         if (!d.objectStoreNames.contains('currentRoute'))
           d.createObjectStore('currentRoute', { keyPath: 'id' });
+        // v2: タブ表示データの永続キャッシュ（起動直後から即表示するため）
+        if (!d.objectStoreNames.contains('viewCache'))
+          d.createObjectStore('viewCache', { keyPath: 'id' });
       };
       req.onsuccess = e => { db = e.target.result; resolve(db); };
       req.onerror = e => reject(e.target.error);
@@ -169,6 +172,18 @@ const Storage = (() => {
     return del('currentRoute', 'planned');
   }
 
+  // タブ表示データの永続キャッシュ（起動直後から即表示するため）
+  async function saveViewCache(id, data) {
+    return put('viewCache', { id, data, savedAt: Date.now() });
+  }
+  async function getViewCache(id) {
+    const rec = await get('viewCache', id);
+    return rec ? rec : null;
+  }
+  async function clearViewCache(id) {
+    return del('viewCache', id);
+  }
+
   // online復帰時の自動同期
   window.addEventListener('online', async () => {
     const n = await syncPending();
@@ -180,6 +195,7 @@ const Storage = (() => {
     cacheStores, getCachedStores,
     cacheConfig, getCachedConfig,
     saveCurrentRoute, getCurrentRoute, clearCurrentRoute,
-    savePlannedRoute, getPlannedRoute, clearPlannedRoute
+    savePlannedRoute, getPlannedRoute, clearPlannedRoute,
+    saveViewCache, getViewCache, clearViewCache,
   };
 })();

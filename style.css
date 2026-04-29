@@ -1475,3 +1475,53 @@ body {
   transition: transform 0.48s cubic-bezier(0.25, 1, 0.5, 1) !important;
   -webkit-transition: -webkit-transform 0.48s cubic-bezier(0.25, 1, 0.5, 1) !important;
 }
+
+/* ---- スケルトンUI（分析タブのロード中骨格表示） ---- */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton-line,
+.skeleton-box,
+.skeleton-tab {
+  background: linear-gradient(90deg, #e8e8e8 25%, #f5f5f5 50%, #e8e8e8 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s infinite;
+  border-radius: 4px;
+}
+.skeleton-card {
+  pointer-events: none;
+}
+.skeleton-line {
+  height: 14px;
+  margin-bottom: 10px;
+  width: 100%;
+}
+.skeleton-line.skeleton-title {
+  height: 18px;
+  width: 60%;
+  margin-bottom: 16px;
+}
+.skeleton-line.skeleton-short {
+  width: 55%;
+}
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+.skeleton-box {
+  height: 52px;
+  border-radius: 8px;
+}
+.skeleton-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 8px;
+}
+.skeleton-tab {
+  height: 32px;
+  border-radius: 6px;
+  flex: 1;
+}

@@ -1941,91 +1941,143 @@ const App = (() => {
   let analyticsCache = null;
   const ANALYTICS_CACHE_TTL_MS = 5 * 60 * 1000;
 
+  // スケルトンUIを描画する（ロード中の骨格表示）
+  function renderAnalyticsSkeleton(container) {
+    container.innerHTML = `
+      <div class="card skeleton-card">
+        <div class="skeleton-line skeleton-title"></div>
+        <div class="skeleton-grid">
+          <div class="skeleton-box"></div>
+          <div class="skeleton-box"></div>
+          <div class="skeleton-box"></div>
+          <div class="skeleton-box"></div>
+        </div>
+      </div>
+      <div class="skeleton-tabs">
+        <div class="skeleton-tab"></div>
+        <div class="skeleton-tab"></div>
+        <div class="skeleton-tab"></div>
+      </div>
+      <div class="card skeleton-card">
+        <div class="skeleton-line"></div>
+        <div class="skeleton-line skeleton-short"></div>
+        <div class="skeleton-line"></div>
+        <div class="skeleton-line skeleton-short"></div>
+        <div class="skeleton-line"></div>
+      </div>`;
+  }
+
+  // 分析データからHTMLを構築して container に描画する（キャッシュ・API共通）
+  function renderAnalyticsContent(container, inventoryItems, routes) {
+    if (!inventoryItems || inventoryItems.length === 0) {
+      container.innerHTML = `
+        <div class="text-center mt-12">
+          <div class="text-dim">まだデータがありません</div>
+          <div class="text-sm text-dim mt-8">在庫管理シートに仕入れ品が登録されるとここに分析結果が表示されます</div>
+        </div>`;
+      return;
+    }
+
+    // 店舗ごとの集計（在庫管理ベース）
+    const storeStats = buildStoreStats(inventoryItems, routes, stores);
+    const sortedStats = Object.values(storeStats).sort((a, b) => b.totalExpectedProfit - a.totalExpectedProfit);
+
+    let html = '';
+
+    // 全体サマリー
+    const totalProfit = sortedStats.reduce((s, st) => s + st.totalExpectedProfit, 0);
+    const totalPurchase = sortedStats.reduce((s, st) => s + st.totalPurchaseAmount, 0);
+    const totalVisits = sortedStats.reduce((s, st) => s + st.visitCount, 0);
+    const totalItems = sortedStats.reduce((s, st) => s + st.itemCount, 0);
+    const profitColorAll = totalProfit >= 0 ? 'var(--success)' : 'var(--accent)';
+
+    html += `
+      <div class="card">
+        <div class="card-title">全体サマリー（過去1年）</div>
+        <div class="summary-grid">
+          <div class="summary-item"><div class="value" style="color:${profitColorAll}">${totalProfit.toLocaleString()}円</div><div class="label">見込み利益合計</div></div>
+          <div class="summary-item"><div class="value">${totalPurchase.toLocaleString()}円</div><div class="label">仕入れ合計</div></div>
+          <div class="summary-item"><div class="value">${totalVisits}</div><div class="label">総訪問回数</div></div>
+          <div class="summary-item"><div class="value">${totalItems}</div><div class="label">総仕入れ点数</div></div>
+        </div>
+      </div>`;
+
+    // タブ切り替え
+    html += `
+      <div class="flex gap-8 mt-12 mb-8">
+        <button class="btn btn-sm analytics-tab active" data-tab="ranking">利益ランキング</button>
+        <button class="btn btn-sm btn-outline analytics-tab" data-tab="efficiency">効率分析</button>
+        <button class="btn btn-sm btn-outline analytics-tab" data-tab="genre">ジャンル傾向</button>
+      </div>
+      <div id="analytics-content"></div>`;
+
+    container.innerHTML = html;
+
+    // タブイベント
+    const tabs = container.querySelectorAll('.analytics-tab');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        tabs.forEach(t => { t.classList.remove('active'); t.classList.add('btn-outline'); });
+        tab.classList.add('active');
+        tab.classList.remove('btn-outline');
+        renderAnalyticsTab(container.querySelector('#analytics-content'), tab.dataset.tab, sortedStats);
+      });
+    });
+
+    // 初期表示
+    renderAnalyticsTab(container.querySelector('#analytics-content'), 'ranking', sortedStats);
+  }
+
   async function renderAnalytics(container) {
     setTitle('店舗分析');
     setNavActive('analytics');
-    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
+    const now = Date.now();
+
+    // セッションキャッシュがTTL内 → 即表示して終わり
+    if (analyticsCache && (now - analyticsCache.ts) < ANALYTICS_CACHE_TTL_MS) {
+      renderAnalyticsContent(container, analyticsCache.inventoryItems, analyticsCache.routes);
+      return;
+    }
+
+    // IndexedDB の前回データがあれば即表示（スピナーなし）、なければスケルトン表示
+    let dbCache = null;
     try {
-      let inventoryItems, routes;
-      const now = Date.now();
-      if (analyticsCache && (now - analyticsCache.ts) < ANALYTICS_CACHE_TTL_MS) {
-        inventoryItems = analyticsCache.inventoryItems;
-        routes = analyticsCache.routes;
-      } else {
-        // 過去1年分の在庫管理データを取得（店舗資産化の中核データソース）
-        const d = new Date();
-        const toStr = d.toISOString().slice(0, 10);
-        const from = new Date(d.getFullYear() - 1, d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+      dbCache = await Storage.getViewCache('analytics');
+    } catch (e) { /* ignore */ }
 
-        [inventoryItems, routes] = await Promise.all([
-          API.getInventoryPurchases({ from, to: toStr }),
-          API.getRouteHistory({ limit: 200, include_stops: 'true' }),
-        ]);
-        analyticsCache = { ts: now, inventoryItems, routes };
-      }
+    if (dbCache && dbCache.data) {
+      renderAnalyticsContent(container, dbCache.data.inventoryItems, dbCache.data.routes);
+      // セッションキャッシュにも復元（同一セッション内の再訪でAPI不要にする）
+      analyticsCache = { ts: dbCache.savedAt || 0, inventoryItems: dbCache.data.inventoryItems, routes: dbCache.data.routes };
+    } else {
+      renderAnalyticsSkeleton(container);
+    }
+
+    // バックグラウンドでAPIを取得して差し替え
+    try {
+      const d = new Date();
+      const toStr = d.toISOString().slice(0, 10);
+      const from = new Date(d.getFullYear() - 1, d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+
+      const [inventoryItems, routes] = await Promise.all([
+        API.getInventoryPurchases({ from, to: toStr }),
+        API.getRouteHistory({ limit: 200, include_stops: 'true' }),
+      ]);
+
+      analyticsCache = { ts: Date.now(), inventoryItems, routes };
+      // IndexedDB に永続化（次回起動時の即表示に使う）
+      Storage.saveViewCache('analytics', { inventoryItems, routes }).catch(() => {});
+
       if (Router.getCurrentView() !== 'analytics') return;
-
-      if (!inventoryItems || inventoryItems.length === 0) {
-        container.innerHTML = `
-          <div class="text-center mt-12">
-            <div class="text-dim">まだデータがありません</div>
-            <div class="text-sm text-dim mt-8">在庫管理シートに仕入れ品が登録されるとここに分析結果が表示されます</div>
-          </div>`;
-        return;
-      }
-
-      // 店舗ごとの集計（在庫管理ベース）
-      const storeStats = buildStoreStats(inventoryItems, routes, stores);
-      const sortedStats = Object.values(storeStats).sort((a, b) => b.totalExpectedProfit - a.totalExpectedProfit);
-
-      let html = '';
-
-      // 全体サマリー
-      const totalProfit = sortedStats.reduce((s, st) => s + st.totalExpectedProfit, 0);
-      const totalPurchase = sortedStats.reduce((s, st) => s + st.totalPurchaseAmount, 0);
-      const totalVisits = sortedStats.reduce((s, st) => s + st.visitCount, 0);
-      const totalItems = sortedStats.reduce((s, st) => s + st.itemCount, 0);
-      const profitColorAll = totalProfit >= 0 ? 'var(--success)' : 'var(--accent)';
-
-      html += `
-        <div class="card">
-          <div class="card-title">全体サマリー（過去1年）</div>
-          <div class="summary-grid">
-            <div class="summary-item"><div class="value" style="color:${profitColorAll}">${totalProfit.toLocaleString()}円</div><div class="label">見込み利益合計</div></div>
-            <div class="summary-item"><div class="value">${totalPurchase.toLocaleString()}円</div><div class="label">仕入れ合計</div></div>
-            <div class="summary-item"><div class="value">${totalVisits}</div><div class="label">総訪問回数</div></div>
-            <div class="summary-item"><div class="value">${totalItems}</div><div class="label">総仕入れ点数</div></div>
-          </div>
-        </div>`;
-
-      // タブ切り替え
-      html += `
-        <div class="flex gap-8 mt-12 mb-8">
-          <button class="btn btn-sm analytics-tab active" data-tab="ranking">利益ランキング</button>
-          <button class="btn btn-sm btn-outline analytics-tab" data-tab="efficiency">効率分析</button>
-          <button class="btn btn-sm btn-outline analytics-tab" data-tab="genre">ジャンル傾向</button>
-        </div>
-        <div id="analytics-content"></div>`;
-
-      container.innerHTML = html;
-
-      // タブイベント
-      const tabs = container.querySelectorAll('.analytics-tab');
-      tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-          tabs.forEach(t => { t.classList.remove('active'); t.classList.add('btn-outline'); });
-          tab.classList.add('active');
-          tab.classList.remove('btn-outline');
-          renderAnalyticsTab(container.querySelector('#analytics-content'), tab.dataset.tab, sortedStats);
-        });
-      });
-
-      // 初期表示
-      renderAnalyticsTab(container.querySelector('#analytics-content'), 'ranking', sortedStats);
+      // APIで取得した最新データで画面を差し替え
+      renderAnalyticsContent(container, inventoryItems, routes);
 
     } catch (e) {
-      container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
+      // 前回キャッシュが表示できていればエラー上書きしない（既存画面を維持）
+      if (!analyticsCache) {
+        container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
+      }
     }
   }
 
@@ -2392,75 +2444,92 @@ const App = (() => {
   let historyCache = []; // renderHistoryDetail用に保持
   const stopsCacheByRouteId = {}; // route_id → stops[]、セッションキャッシュ
   let historyApiCache = null;       // { ts, routes } — 履歴一覧の APIレスポンスキャッシュ
-  const HISTORY_CACHE_TTL_MS = 60 * 1000; // 60秒
+  const HISTORY_CACHE_TTL_MS = 5 * 60 * 1000; // 5分
 
   function invalidateHistoryApiCache() {
     historyApiCache = null;
     analyticsCache = null; // 履歴更新は分析の集計にも影響するため一緒に無効化
+    // IndexedDB キャッシュも無効化
+    Storage.clearViewCache('history').catch(() => {});
+    Storage.clearViewCache('analytics').catch(() => {});
+  }
+
+  // 履歴一覧をルートの配列から描画して container に書き込む
+  function renderHistoryContent(container, routes) {
+    let html = '';
+    if (routes.length === 0) {
+      html = '<div class="text-center text-dim mt-12">巡回履歴がありません</div>';
+    } else {
+      routes.forEach((r, idx) => {
+        const dateStr = r.date ? new Date(r.date).toLocaleDateString('ja-JP') : '不明';
+        html += `
+          <div class="history-item" data-idx="${idx}" style="cursor:pointer">
+            <div class="flex-between">
+              <span class="history-date">${dateStr}</span>
+              <span class="badge badge-primary">${r.store_count || 0}店舗</span>
+            </div>
+            <div class="history-meta">
+              距離: ${r.total_distance_km || 0}km |
+              仕入れ: ${Number(r.total_purchase || 0).toLocaleString()}円 (${r.total_items || 0}点)
+            </div>
+            ${Number(r.expected_profit || 0) > 0
+              ? `<div class="history-profit">見込み利益: ${Number(r.expected_profit).toLocaleString()}円</div>`
+              : ''
+            }
+            ${r.note ? `<div class="text-sm mt-8">${esc(r.note)}</div>` : ''}
+          </div>`;
+      });
+    }
+    container.innerHTML = html;
+    container.querySelectorAll('.history-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const idx = Number(el.dataset.idx);
+        Router.navigate('history-detail', { route: historyCache[idx] });
+      });
+    });
   }
 
   async function renderHistory(container) {
     setTitle('履歴・分析');
 
-    // キャッシュヒット時は即描画（スピナーなし）
     const now = Date.now();
-    const cached = historyApiCache && (now - historyApiCache.ts) < HISTORY_CACHE_TTL_MS
-      ? historyApiCache.routes
-      : null;
 
-    if (!cached) {
+    // セッションキャッシュがTTL内 → 即描画
+    if (historyApiCache && (now - historyApiCache.ts) < HISTORY_CACHE_TTL_MS) {
+      historyCache = historyApiCache.routes;
+      renderHistoryContent(container, historyApiCache.routes);
+      return;
+    }
+
+    // IndexedDB の前回データがあれば即表示（スピナーなし）
+    let dbCache = null;
+    try {
+      dbCache = await Storage.getViewCache('history');
+    } catch (e) { /* ignore */ }
+
+    if (dbCache && dbCache.data) {
+      historyCache = dbCache.data;
+      renderHistoryContent(container, dbCache.data);
+    } else {
       container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
     }
 
+    // バックグラウンドでAPIを取得して差し替え
     try {
-      let routes;
-      if (cached) {
-        routes = cached;
-      } else {
-        // 一覧表示には stops 不要（詳細画面に入った時に個別取得）
-        routes = await API.getRouteHistory({ limit: 20, include_stops: 'false' });
-        if (Router.getCurrentView() !== 'history') return;
-        historyApiCache = { ts: Date.now(), routes };
-      }
+      // 一覧表示には stops 不要（詳細画面に入った時に個別取得）
+      const routes = await API.getRouteHistory({ limit: 20, include_stops: 'false' });
+      if (Router.getCurrentView() !== 'history') return;
+      historyApiCache = { ts: Date.now(), routes };
       historyCache = routes;
-
-      let html = '';
-
-      if (routes.length === 0) {
-        if (!html) html = '<div class="text-center text-dim mt-12">巡回履歴がありません</div>';
-      } else {
-        routes.forEach((r, idx) => {
-          const dateStr = r.date ? new Date(r.date).toLocaleDateString('ja-JP') : '不明';
-          html += `
-            <div class="history-item" data-idx="${idx}" style="cursor:pointer">
-              <div class="flex-between">
-                <span class="history-date">${dateStr}</span>
-                <span class="badge badge-primary">${r.store_count || 0}店舗</span>
-              </div>
-              <div class="history-meta">
-                距離: ${r.total_distance_km || 0}km |
-                仕入れ: ${Number(r.total_purchase || 0).toLocaleString()}円 (${r.total_items || 0}点)
-              </div>
-              ${Number(r.expected_profit || 0) > 0
-                ? `<div class="history-profit">見込み利益: ${Number(r.expected_profit).toLocaleString()}円</div>`
-                : ''
-              }
-              ${r.note ? `<div class="text-sm mt-8">${esc(r.note)}</div>` : ''}
-            </div>`;
-        });
-      }
-
-      container.innerHTML = html;
-
-      container.querySelectorAll('.history-item').forEach(el => {
-        el.addEventListener('click', () => {
-          const idx = Number(el.dataset.idx);
-          Router.navigate('history-detail', { route: historyCache[idx] });
-        });
-      });
+      // IndexedDB に永続化
+      Storage.saveViewCache('history', routes).catch(() => {});
+      renderHistoryContent(container, routes);
     } catch (e) {
       if (Router.getCurrentView() !== 'history') return;
-      container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
+      // 前回キャッシュ表示中であればエラー上書きしない
+      if (!dbCache) {
+        container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
+      }
     }
   }
 
