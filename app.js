@@ -343,6 +343,7 @@ const App = (() => {
     });
     Router.register('patrol', renderPatrol);
     Router.register('summary', renderSummary);
+    Router.register('compose', renderCompose);
   }
 
   // ---------- 廃盤タブ ----------
@@ -3112,6 +3113,201 @@ const App = (() => {
         if (store) showEditStoreModal(store);
       });
     });
+  }
+
+  // ---------- 画像合成 ----------
+
+  function renderCompose(container) {
+    setTitle('画像合成');
+    setNavActive('compose');
+
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-title">画像合成</div>
+        <p class="text-sm text-dim mb-8">2枚（左右並べ）または4枚（2×2グリッド）の写真を1枚にまとめます。</p>
+
+        <div class="compose-mode-row">
+          <button class="btn compose-mode-btn active" id="compose-mode-2">2枚</button>
+          <button class="btn compose-mode-btn" id="compose-mode-4">4枚</button>
+        </div>
+
+        <div id="compose-slots" class="compose-slots compose-slots-2"></div>
+
+        <button class="btn btn-primary mt-8" id="btn-compose-run" disabled>合成する</button>
+      </div>
+
+      <div class="card" id="compose-result-card" style="display:none">
+        <div class="card-title">合成結果</div>
+        <canvas id="compose-canvas" class="compose-canvas"></canvas>
+        <div class="btn-group mt-8">
+          <button class="btn btn-primary" id="btn-compose-download">保存する</button>
+          <button class="btn btn-outline" id="btn-compose-share" id="btn-compose-share">共有する</button>
+        </div>
+      </div>`;
+
+    let mode = 2; // 2 or 4
+    let slotFiles = [null, null, null, null]; // 最大4スロット
+
+    function buildSlots() {
+      const slotsEl = document.getElementById('compose-slots');
+      slotsEl.className = `compose-slots compose-slots-${mode}`;
+      let html = '';
+      for (let i = 0; i < mode; i++) {
+        const hasFile = slotFiles[i] !== null;
+        html += `
+          <label class="compose-slot ${hasFile ? 'compose-slot-filled' : ''}" data-slot="${i}">
+            ${hasFile
+              ? `<img class="compose-slot-img" id="compose-slot-img-${i}" alt="写真${i + 1}">`
+              : `<span class="compose-slot-placeholder">写真${i + 1}<br><span class="text-dim" style="font-size:11px">タップして選択</span></span>`
+            }
+            <input type="file" accept="image/*" class="compose-file-input" data-slot="${i}" style="display:none">
+          </label>`;
+      }
+      slotsEl.innerHTML = html;
+
+      // ファイル選択済みスロットにサムネイルを描画
+      for (let i = 0; i < mode; i++) {
+        if (slotFiles[i]) {
+          const img = document.getElementById(`compose-slot-img-${i}`);
+          if (img) img.src = URL.createObjectURL(slotFiles[i]);
+        }
+      }
+
+      // ファイル選択イベント
+      slotsEl.querySelectorAll('.compose-slot').forEach(lbl => {
+        lbl.addEventListener('click', () => {
+          const idx = Number(lbl.dataset.slot);
+          lbl.querySelector('.compose-file-input').click();
+        });
+        const input = lbl.querySelector('.compose-file-input');
+        input.addEventListener('change', () => {
+          const idx = Number(input.dataset.slot);
+          if (input.files[0]) {
+            slotFiles[idx] = input.files[0];
+          }
+          buildSlots();
+          updateRunBtn();
+        });
+      });
+    }
+
+    function updateRunBtn() {
+      const filled = slotFiles.slice(0, mode).every(f => f !== null);
+      const btn = document.getElementById('btn-compose-run');
+      if (btn) btn.disabled = !filled;
+    }
+
+    // モード切替
+    document.getElementById('compose-mode-2').addEventListener('click', () => {
+      mode = 2;
+      slotFiles = [slotFiles[0], slotFiles[1], null, null];
+      document.getElementById('compose-mode-2').classList.add('active');
+      document.getElementById('compose-mode-4').classList.remove('active');
+      buildSlots();
+      updateRunBtn();
+      document.getElementById('compose-result-card').style.display = 'none';
+    });
+    document.getElementById('compose-mode-4').addEventListener('click', () => {
+      mode = 4;
+      document.getElementById('compose-mode-4').classList.add('active');
+      document.getElementById('compose-mode-2').classList.remove('active');
+      buildSlots();
+      updateRunBtn();
+      document.getElementById('compose-result-card').style.display = 'none';
+    });
+
+    // 合成実行
+    document.getElementById('btn-compose-run').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-compose-run');
+      btn.disabled = true;
+      btn.textContent = '合成中...';
+
+      try {
+        const files = slotFiles.slice(0, mode);
+        const imgs = await Promise.all(files.map(f => new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = URL.createObjectURL(f);
+        })));
+
+        const UNIT = 1080; // 各セルの基準サイズ（px）
+        const canvas = document.getElementById('compose-canvas');
+        const ctx = canvas.getContext('2d');
+
+        if (mode === 2) {
+          // 左右横並び → 幅 2160 × 高さ 1080
+          canvas.width = UNIT * 2;
+          canvas.height = UNIT;
+          imgs.forEach((img, i) => {
+            // オブジェクトフィット: cover（中央クロップ）
+            const dw = UNIT, dh = UNIT;
+            const scale = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
+            const sw = dw / scale, sh = dh / scale;
+            const sx = (img.naturalWidth - sw) / 2, sy = (img.naturalHeight - sh) / 2;
+            ctx.drawImage(img, sx, sy, sw, sh, i * UNIT, 0, dw, dh);
+          });
+        } else {
+          // 2×2グリッド → 幅 2160 × 高さ 2160
+          canvas.width = UNIT * 2;
+          canvas.height = UNIT * 2;
+          imgs.forEach((img, i) => {
+            const col = i % 2, row = Math.floor(i / 2);
+            const dw = UNIT, dh = UNIT;
+            const scale = Math.max(dw / img.naturalWidth, dh / img.naturalHeight);
+            const sw = dw / scale, sh = dh / scale;
+            const sx = (img.naturalWidth - sw) / 2, sy = (img.naturalHeight - sh) / 2;
+            ctx.drawImage(img, sx, sy, sw, sh, col * UNIT, row * UNIT, dw, dh);
+          });
+        }
+
+        document.getElementById('compose-result-card').style.display = '';
+        toast('合成完了！');
+      } catch (e) {
+        toast('合成に失敗しました: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '合成する';
+      }
+    });
+
+    // 保存（ダウンロード）
+    document.getElementById('btn-compose-download').addEventListener('click', () => {
+      const canvas = document.getElementById('compose-canvas');
+      const ts = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
+      const a = document.createElement('a');
+      a.download = `composed_${ts}.jpg`;
+      canvas.toBlob(blob => {
+        a.href = URL.createObjectURL(blob);
+        a.click();
+      }, 'image/jpeg', 0.92);
+    });
+
+    // 共有（Web Share API）
+    document.getElementById('btn-compose-share').addEventListener('click', async () => {
+      const canvas = document.getElementById('compose-canvas');
+      canvas.toBlob(async blob => {
+        const ts = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
+        const file = new File([blob], `composed_${ts}.jpg`, { type: 'image/jpeg' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({ files: [file], title: '合成画像' });
+          } catch (e) {
+            if (e.name !== 'AbortError') toast('共有に失敗しました');
+          }
+        } else {
+          // Web Share API 非対応の場合はダウンロードにフォールバック
+          const a = document.createElement('a');
+          a.download = file.name;
+          a.href = URL.createObjectURL(blob);
+          a.click();
+          toast('この端末では共有できないため保存しました');
+        }
+      }, 'image/jpeg', 0.92);
+    });
+
+    // 初期描画
+    buildSlots();
   }
 
   // ---------- ユーティリティ ----------

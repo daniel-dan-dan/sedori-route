@@ -78,9 +78,9 @@ body {
 .nav-item.active { color: var(--primary); font-weight: 700; }
 .nav-item .icon { font-size: 24px; }
 
-/* 6タブ時の横幅確保（iPhone SE 375px でも収まるように） */
-.bottom-nav .nav-item { min-width: 48px; padding: 8px 4px; font-size: 11px; }
-.bottom-nav .nav-item .icon { font-size: 22px; }
+/* 7タブ時の横幅確保（iPhone SE 375px でも収まるように） */
+.bottom-nav .nav-item { min-width: 44px; padding: 8px 2px; font-size: 10px; }
+.bottom-nav .nav-item .icon { font-size: 20px; }
 
 /* 廃盤タブのバッジ（今週の新着件数） */
 .nav-label-with-badge {
@@ -1565,4 +1565,77 @@ body {
   height: 32px;
   border-radius: 6px;
   flex: 1;
+}
+
+/* ---- 画像合成タブ ---- */
+.compose-mode-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.compose-mode-btn {
+  flex: 1;
+  padding: 10px;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  border-radius: var(--radius);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.compose-mode-btn.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+.compose-slots {
+  display: grid;
+  gap: 8px;
+}
+.compose-slots-2 {
+  grid-template-columns: 1fr 1fr;
+}
+.compose-slots-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto;
+}
+.compose-slot {
+  aspect-ratio: 1 / 1;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+  background: var(--surface2);
+  transition: border-color 0.15s;
+  position: relative;
+}
+.compose-slot:active { opacity: 0.75; }
+.compose-slot-filled {
+  border-style: solid;
+  border-color: var(--primary);
+}
+.compose-slot-placeholder {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-align: center;
+  line-height: 1.6;
+  user-select: none;
+}
+.compose-slot-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.compose-canvas {
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+  display: block;
+  background: #000;
 }
