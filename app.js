@@ -478,7 +478,7 @@ const App = (() => {
           ? `https://images-na.ssl-images-amazon.com/images/P/${esc(asin)}.09._SL200_.jpg`
           : '';
         const imgHtml = imgSrc
-          ? `<img class="haiban-thumb" src="${imgSrc}" alt="" loading="lazy" onerror="this.style.display='none'">`
+          ? `<div class="haiban-thumb-wrap"><img class="haiban-thumb" src="${imgSrc}" alt="" loading="lazy" onerror="this.closest('.haiban-thumb-wrap').style.display='none'"></div>`
           : '';
         // Keepa 180日(6ヶ月)価格推移グラフ
         const graphHtml = asin
