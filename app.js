@@ -2449,7 +2449,7 @@ const App = (() => {
       html += '<div class="text-center text-dim mt-12">巡回履歴がありません</div>';
     } else {
       routes.forEach((r, idx) => {
-        const dateStr = r.date ? new Date(r.date).toLocaleDateString('ja-JP') : '不明';
+        const dateStr = formatRouteDate_(r.date);
         html += `
           <div class="history-item" data-idx="${idx}" style="cursor:pointer">
             <div class="flex-between">
@@ -2786,6 +2786,14 @@ const App = (() => {
     return s;
   }
 
+  // Date オブジェクト生成を避け、タイムゾーン依存なしで日本語表示
+  function formatRouteDate_(d) {
+    const s = normalizeRouteDate_(d); // "YYYY-MM-DD"
+    if (!s) return '不明';
+    const [y, mo, day] = s.split('-');
+    return `${y}/${Number(mo)}/${Number(day)}`;
+  }
+
   async function renderHistoryDetail(container, { route } = {}) {
     if (!route) { Router.navigate('history'); return; }
     setTitle('履歴詳細');
@@ -2809,7 +2817,7 @@ const App = (() => {
       }
     }
 
-    const dateStr = route.date ? new Date(route.date).toLocaleDateString('ja-JP') : '不明';
+    const dateStr = formatRouteDate_(route.date);
     let html = '';
 
     // 基本情報
