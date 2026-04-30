@@ -1501,21 +1501,16 @@ const App = (() => {
     // 現在の店舗
     html += `
       <div class="patrol-current">
-        <div class="current-label">${current.status === 'planned' ? '次の店舗' : '滞在中'}</div>
+        <div class="current-label">現在地</div>
         <div class="current-name">${renderStopIconHtml(current)}${esc(current.name)}</div>
         <div class="current-meta">${esc(current.category)} | ${formatTime(current.open_time)}-${formatTime(current.close_time)}</div>
       </div>`;
 
-    if (current.status === 'planned') {
-      html += `<button class="btn btn-primary btn-block" id="btn-arrive">到着</button>`;
-    } else {
-      // 滞在中アクション
-      html += `
-        <div class="patrol-actions">
-          <button class="btn btn-warning" id="btn-purchase">仕入れ記録</button>
-          <button class="btn btn-success" id="btn-depart">出発</button>
-        </div>`;
-    }
+    html += `
+      <div class="patrol-actions">
+        <button class="btn btn-warning btn-block" id="btn-purchase">＋ 仕入れを記録する</button>
+        <button class="btn btn-success btn-block mt-8" id="btn-depart">次の店舗へ（完了）→</button>
+      </div>`;
 
     // スキップ
     html += `<div class="mt-12"><button class="btn btn-sm btn-outline btn-block" id="btn-skip">スキップ</button></div>`;
@@ -1546,28 +1541,13 @@ const App = (() => {
     startPatrolTimer();
 
     // イベント（UIを即更新、API同期はバックグラウンド）
-    document.getElementById('btn-arrive')?.addEventListener('click', () => {
-      current.status = 'visiting';
-      current.arrivalTime = new Date().toISOString();
-      Router.navigate('patrol');
-      // バックグラウンドでAPI同期
-      API.updateStop({
-        route_id: patrolState.routeId,
-        store_id: current.store_id,
-        status: 'visiting',
-        arrival_time: current.arrivalTime
-      }).catch(() => {});
-      Storage.saveCurrentRoute(patrolState);
-    });
-
     document.getElementById('btn-depart')?.addEventListener('click', () => {
       current.status = 'visited';
-      current.departureTime = new Date().toISOString();
       // バックグラウンドでAPI同期
       API.updateStop({
         route_id: patrolState.routeId,
         store_id: current.store_id,
-        departure_time: current.departureTime,
+        status: 'visited',
         purchase_amount: current.purchaseAmount,
         purchase_items: current.purchaseItems
       }).catch(() => {});
@@ -2456,9 +2436,15 @@ const App = (() => {
 
   // 履歴一覧をルートの配列から描画して container に書き込む
   function renderHistoryContent(container, routes) {
-    let html = '';
+    let html = `
+      <div class="card mb-12" style="background:var(--bg-card);padding:12px 16px;">
+        <div class="flex-between" style="align-items:center">
+          <span class="text-sm" style="color:var(--text-dim)">利益データ（毎朝6時に自動更新）</span>
+          <button class="btn btn-sm btn-outline" id="btn-import-profit">今すぐ更新</button>
+        </div>
+      </div>`;
     if (routes.length === 0) {
-      html = '<div class="text-center text-dim mt-12">巡回履歴がありません</div>';
+      html += '<div class="text-center text-dim mt-12">巡回履歴がありません</div>';
     } else {
       routes.forEach((r, idx) => {
         const dateStr = r.date ? new Date(r.date).toLocaleDateString('ja-JP') : '不明';
@@ -2486,6 +2472,20 @@ const App = (() => {
         const idx = Number(el.dataset.idx);
         Router.navigate('history-detail', { route: historyCache[idx] });
       });
+    });
+
+    document.getElementById('btn-import-profit')?.addEventListener('click', async () => {
+      const btn = document.getElementById('btn-import-profit');
+      if (btn) { btn.textContent = '更新中...'; btn.disabled = true; }
+      try {
+        await API.get('importRouteProfit');
+        invalidateHistoryCache();
+        toast('利益データを更新しました');
+      } catch (e) {
+        toast('更新に失敗しました');
+      } finally {
+        if (btn) { btn.textContent = '今すぐ更新'; btn.disabled = false; }
+      }
     });
   }
 
