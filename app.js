@@ -2436,6 +2436,8 @@ const App = (() => {
 
   // 履歴一覧をルートの配列から描画して container に書き込む
   function renderHistoryContent(container, routes) {
+    // キャッシュ経由でも必ず日付降順（直近が上）
+    routes = [...routes].sort((a, b) => String(b.date).localeCompare(String(a.date)));
     let html = `
       <div class="card mb-12" style="background:var(--bg-card);padding:12px 16px;">
         <div class="flex-between" style="align-items:center">
