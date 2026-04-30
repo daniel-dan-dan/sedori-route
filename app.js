@@ -2038,7 +2038,7 @@ const App = (() => {
     try {
       const d = new Date();
       const toStr = d.toISOString().slice(0, 10);
-      const from = new Date(d.getFullYear() - 1, d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+      const from = '2026-04-21'; // アプリで店舗記録を開始した日
 
       const [inventoryItems, routes] = await Promise.all([
         API.getInventoryPurchases({ from, to: toStr }),
