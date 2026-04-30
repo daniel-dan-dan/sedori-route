@@ -2600,6 +2600,11 @@ const App = (() => {
       }
       if (candidates.length === 1) {
         (byStore[candidates[0].store_id] = byStore[candidates[0].store_id] || []).push(it);
+        // L列が空の場合はGASに自動書き戻し（分析タブで店舗未確定になるのを防ぐ）
+        if (!it.shop && it.row) {
+          it.shop = candidates[0].name;
+          API.updateInventoryShop({ row: it.row, shop: candidates[0].name }).catch(() => {});
+        }
       } else if (candidates.length > 1) {
         ambiguous.push({ item: it, candidates });
       } else {

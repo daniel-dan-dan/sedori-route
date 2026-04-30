@@ -32,14 +32,15 @@ const API = (() => {
       });
       // GAS POST は302リダイレクト後にHTMLを返すことがある
       const text = await res.text();
+      let data;
       try {
-        const data = JSON.parse(text);
-        if (!data.success) throw new Error(data.error || 'API error');
-        return data.data;
+        data = JSON.parse(text);
       } catch {
-        // レスポンスがJSONでなくても、書き込みは成功している場合がある
+        // レスポンスがJSONでない（HTML等）→ 書き込み自体は成功していることが多い
         return { _rawResponse: true };
       }
+      if (!data.success) throw new Error(data.error || 'API error');
+      return data.data;
     } catch (err) {
       // オフライン時はキューに追加
       if (!navigator.onLine) {
