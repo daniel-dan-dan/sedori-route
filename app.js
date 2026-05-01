@@ -1932,7 +1932,7 @@ const App = (() => {
 
   // 分析タブのセッションキャッシュ（TTL 5分、タブ切替では瞬時表示）
   let analyticsCache = null;
-  const ANALYTICS_CACHE_TTL_MS = 15 * 60 * 1000; // 15分（タブ切替の都度API呼び出しを抑制）
+  const ANALYTICS_CACHE_TTL_MS = 60 * 60 * 1000; // 60分
 
   // スケルトンUIを描画する（ロード中の骨格表示）
   function renderAnalyticsSkeleton(container) {
@@ -2437,7 +2437,7 @@ const App = (() => {
   let historyCache = []; // renderHistoryDetail用に保持
   const stopsCacheByRouteId = {}; // route_id → stops[]、セッションキャッシュ
   let historyApiCache = null;       // { ts, routes } — 履歴一覧の APIレスポンスキャッシュ
-  const HISTORY_CACHE_TTL_MS = 10 * 60 * 1000; // 10分（タブ切替の都度API呼び出しを抑制）
+  const HISTORY_CACHE_TTL_MS = 60 * 60 * 1000; // 60分
 
   function invalidateHistoryApiCache() {
     historyApiCache = null;
