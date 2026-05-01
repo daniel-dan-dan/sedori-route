@@ -2520,6 +2520,54 @@ const App = (() => {
         if (btn) { btn.textContent = '今すぐ更新'; btn.disabled = false; }
       }
     });
+
+    // 一覧表示後にバックグラウンドで詳細データを先読み（タップ時のロード消去）
+    prefetchHistoryDetails_(routes);
+  }
+
+  // 履歴詳細用の stops・在庫を裏で先読みして IDB/セッションに蓄積する
+  async function prefetchHistoryDetails_(routes) {
+    const recent = routes.slice(0, 5);
+
+    // Phase1: IDB → セッションキャッシュ（GAS不要、高速）
+    await Promise.all(recent.map(async route => {
+      if (!stopsCacheByRouteId[route.route_id]) {
+        try {
+          const rec = await Storage.getViewCache('stops_' + route.route_id);
+          if (rec && rec.data) stopsCacheByRouteId[route.route_id] = rec.data;
+        } catch (e) {}
+      }
+      const date = normalizeRouteDate_(route.date);
+      if (date && !inventoryByDateCache[date]) {
+        try {
+          const rec = await Storage.getViewCache('inventory_' + date);
+          if (rec && rec.data && rec.data.length > 0) inventoryByDateCache[date] = rec.data;
+        } catch (e) {}
+      }
+    }));
+
+    // Phase2: IDB にない分だけ GAS から順次取得（スロットル300ms）
+    for (const route of recent) {
+      if (!stopsCacheByRouteId[route.route_id]) {
+        try {
+          const stops = await API.getRouteStops({ route_id: route.route_id });
+          stopsCacheByRouteId[route.route_id] = stops;
+          Storage.saveViewCache('stops_' + route.route_id, { data: stops }).catch(() => {});
+        } catch (e) {}
+        await new Promise(r => setTimeout(r, 300));
+      }
+      const date = normalizeRouteDate_(route.date);
+      if (date && !inventoryByDateCache[date]) {
+        try {
+          const items = await API.getInventoryPurchases({ from: date, to: date });
+          if (items && items.length > 0) {
+            inventoryByDateCache[date] = items;
+            Storage.saveViewCache('inventory_' + date, { data: items }).catch(() => {});
+          }
+        } catch (e) {}
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
   }
 
   async function renderHistory(container) {
