@@ -200,7 +200,14 @@ const Quiz = (() => {
   async function getCachedOrFetch(cacheKey, ttl, fetcher) {
     const rec = await dbGet('cache', cacheKey);
     const now = Date.now();
-    if (rec && rec.value && (now - (rec.fetchedAt || 0)) < ttl) {
+    if (rec && rec.value) {
+      const expired = (now - (rec.fetchedAt || 0)) >= ttl;
+      if (expired) {
+        // stale-while-revalidate: 古くても即返し、裏で更新
+        fetcher().then(value => {
+          dbPut('cache', { key: cacheKey, value, fetchedAt: Date.now() });
+        }).catch(() => {});
+      }
       return rec.value;
     }
     const value = await fetcher();

@@ -389,25 +389,41 @@ const App = (() => {
   async function renderHaiban(container) {
     setTitle('廃盤リスト');
     setNavActive('haiban');
-    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
-    // キャッシュ活用（30分以内なら再フェッチしない）
     const now = Date.now();
-    let data;
+
+    // セッションキャッシュがTTL内 → 即表示して終わり
     if (haibanCache && (now - haibanCache.fetchedAt) < HAIBAN_CACHE_TTL_MS) {
-      data = haibanCache;
+      renderHaibanContent_(container, haibanCache);
+      return;
+    }
+
+    // IDBキャッシュがあれば即表示（スピナーなし）
+    let dbCache = null;
+    try { dbCache = await Storage.getViewCache('haiban'); } catch (e) {}
+
+    if (dbCache && dbCache.data) {
+      haibanCache = { ...dbCache.data, fetchedAt: dbCache.savedAt || 0 };
+      renderHaibanContent_(container, haibanCache);
     } else {
-      try {
-        const resp = await fetchHaibanAllHotItems();
-        data = {
-          items: Array.isArray(resp.items) ? resp.items : [],
-          updatedAt: resp.updatedAt || '',
-          totalMatched: resp.totalMatched || 0,
-          fetchedAt: Date.now(),
-        };
-        haibanCache = data;
-      } catch (e) {
-        if (Router.getCurrentView() !== 'haiban') return;
+      container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    }
+
+    // バックグラウンドで最新データ取得・IDB更新
+    try {
+      const resp = await fetchHaibanAllHotItems();
+      const data = {
+        items: Array.isArray(resp.items) ? resp.items : [],
+        updatedAt: resp.updatedAt || '',
+        totalMatched: resp.totalMatched || 0,
+        fetchedAt: Date.now(),
+      };
+      haibanCache = data;
+      Storage.saveViewCache('haiban', { items: data.items, updatedAt: data.updatedAt, totalMatched: data.totalMatched }).catch(() => {});
+      renderHaibanContent_(container, data);
+    } catch (e) {
+      if (Router.getCurrentView() !== 'haiban') return;
+      if (!haibanCache) {
         container.innerHTML = `
           <div class="card">
             <div class="card-title">廃盤リスト取得失敗</div>
@@ -416,12 +432,14 @@ const App = (() => {
           </div>`;
         document.getElementById('btn-haiban-retry')?.addEventListener('click', () => {
           haibanCache = null;
+          Storage.clearViewCache('haiban').catch(() => {});
           renderHaiban(container);
         });
-        return;
       }
     }
+  }
 
+  function renderHaibanContent_(container, data) {
     if (Router.getCurrentView() !== 'haiban') return;
 
     updateHaibanNavBadge(data.items.length);
@@ -2560,13 +2578,26 @@ const App = (() => {
 
     let items = inventoryByDateCache[date];
     if (!items) {
+      // IDB から試みる
+      try {
+        const idbRec = await Storage.getViewCache('inventory_' + date);
+        if (idbRec && idbRec.data && idbRec.data.length > 0) {
+          items = idbRec.data;
+          inventoryByDateCache[date] = items;
+        }
+      } catch (e) {}
+    }
+    if (!items) {
       section.innerHTML = `
         <div class="card-title mt-12">在庫管理からの仕入れ品</div>
         <div class="card text-dim">読み込み中...</div>`;
       try {
         items = await API.getInventoryPurchases({ from: date, to: date });
         // 仕入れが0件の場合はキャッシュしない（後で入力された場合に再取得できるよう）
-        if (items && items.length > 0) inventoryByDateCache[date] = items;
+        if (items && items.length > 0) {
+          inventoryByDateCache[date] = items;
+          Storage.saveViewCache('inventory_' + date, { data: items }).catch(() => {});
+        }
       } catch (e) {
         section.innerHTML = `
           <div class="card-title mt-12">在庫管理からの仕入れ品</div>
@@ -2727,10 +2758,14 @@ const App = (() => {
 
     // キャッシュ内のitemのshopを即時更新（サーバ書き込み後の再レンダリングで最新状態に反映するため）
     const updateCachedShop = (row, shop) => {
-      const cached = inventoryByDateCache[normalizeRouteDate_(route.date)];
+      const date = normalizeRouteDate_(route.date);
+      const cached = inventoryByDateCache[date];
       if (!cached) return;
       const hit = cached.find(x => Number(x.row) === Number(row));
-      if (hit) hit.shop = shop;
+      if (hit) {
+        hit.shop = shop;
+        Storage.saveViewCache('inventory_' + date, { data: cached }).catch(() => {});
+      }
     };
 
     // 曖昧選択のイベント
@@ -2816,21 +2851,40 @@ const App = (() => {
     if (!route) { Router.navigate('history'); return; }
     setTitle('履歴詳細');
 
-    // stops が無ければオンデマンドで取得（セッションキャッシュ）
+    // stops が無ければオンデマンドで取得（セッション → IDB → API の順）
     if (!route.stops) {
       const cached = stopsCacheByRouteId[route.route_id];
       if (cached) {
         route.stops = cached;
       } else {
-        container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+        // IDB から試みる（即座に表示できるならスピナー不要）
+        let idbHit = false;
         try {
-          const stops = await API.getRouteStops({ route_id: route.route_id });
-          if (Router.getCurrentView() !== 'history-detail') return;
-          stopsCacheByRouteId[route.route_id] = stops;
-          route.stops = stops;
-        } catch (e) {
-          container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
-          return;
+          const idbRec = await Storage.getViewCache('stops_' + route.route_id);
+          if (idbRec && idbRec.data && idbRec.data.length > 0) {
+            stopsCacheByRouteId[route.route_id] = idbRec.data;
+            route.stops = idbRec.data;
+            idbHit = true;
+          }
+        } catch (e) {}
+        if (!idbHit) {
+          container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+          try {
+            const stops = await API.getRouteStops({ route_id: route.route_id });
+            if (Router.getCurrentView() !== 'history-detail') return;
+            stopsCacheByRouteId[route.route_id] = stops;
+            route.stops = stops;
+            Storage.saveViewCache('stops_' + route.route_id, { data: stops }).catch(() => {});
+          } catch (e) {
+            container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
+            return;
+          }
+        } else {
+          // IDB ヒット後もバックグラウンドで最新化
+          API.getRouteStops({ route_id: route.route_id }).then(stops => {
+            stopsCacheByRouteId[route.route_id] = stops;
+            Storage.saveViewCache('stops_' + route.route_id, { data: stops }).catch(() => {});
+          }).catch(() => {});
         }
       }
     }
