@@ -309,6 +309,11 @@ const App = (() => {
       await loadDataPromise;
       Router.navigate(patrolState ? 'patrol' : 'home');
     }
+
+    // GASコールドスタート防止: 15分おきにpingを送ってウォームアップ維持
+    setInterval(() => {
+      API.get('ping').catch(() => {});
+    }, 15 * 60 * 1000);
   }
 
   async function loadData() {
@@ -2529,14 +2534,16 @@ const App = (() => {
   async function prefetchHistoryDetails_(routes) {
     const recent = routes.slice(0, 5);
 
-    // Phase1: IDB → セッションキャッシュ（GAS不要、高速）
-    await Promise.all(recent.map(async route => {
-      if (!stopsCacheByRouteId[route.route_id]) {
-        try {
-          const rec = await Storage.getViewCache('stops_' + route.route_id);
-          if (rec && rec.data) stopsCacheByRouteId[route.route_id] = rec.data;
-        } catch (e) {}
+    // stops は getRouteHistory の include_stops:true で既に埋め込み済み → セッションキャッシュへ転写
+    recent.forEach(route => {
+      if (route.stops && !stopsCacheByRouteId[route.route_id]) {
+        stopsCacheByRouteId[route.route_id] = route.stops;
+        Storage.saveViewCache('stops_' + route.route_id, { data: route.stops }).catch(() => {});
       }
+    });
+
+    // Phase1: 在庫データを IDB → セッションキャッシュへ一括ロード（GAS不要）
+    await Promise.all(recent.map(async route => {
       const date = normalizeRouteDate_(route.date);
       if (date && !inventoryByDateCache[date]) {
         try {
@@ -2546,28 +2553,18 @@ const App = (() => {
       }
     }));
 
-    // Phase2: IDB にない分だけ GAS から順次取得（スロットル300ms）
-    for (const route of recent) {
-      if (!stopsCacheByRouteId[route.route_id]) {
-        try {
-          const stops = await API.getRouteStops({ route_id: route.route_id });
-          stopsCacheByRouteId[route.route_id] = stops;
-          Storage.saveViewCache('stops_' + route.route_id, { data: stops }).catch(() => {});
-        } catch (e) {}
-        await new Promise(r => setTimeout(r, 300));
-      }
+    // Phase2: IDB ミス分の在庫を GAS から並列取得（stops は不要になったので在庫のみ）
+    await Promise.all(recent.map(async route => {
       const date = normalizeRouteDate_(route.date);
-      if (date && !inventoryByDateCache[date]) {
-        try {
-          const items = await API.getInventoryPurchases({ from: date, to: date });
-          if (items && items.length > 0) {
-            inventoryByDateCache[date] = items;
-            Storage.saveViewCache('inventory_' + date, { data: items }).catch(() => {});
-          }
-        } catch (e) {}
-        await new Promise(r => setTimeout(r, 300));
-      }
-    }
+      if (!date || inventoryByDateCache[date]) return;
+      try {
+        const items = await API.getInventoryPurchases({ from: date, to: date });
+        if (items && items.length > 0) {
+          inventoryByDateCache[date] = items;
+          Storage.saveViewCache('inventory_' + date, { data: items }).catch(() => {});
+        }
+      } catch (e) {}
+    }));
   }
 
   async function renderHistory(container) {
@@ -2598,7 +2595,7 @@ const App = (() => {
     // バックグラウンドでAPIを取得して差し替え
     try {
       // 一覧表示には stops 不要（詳細画面に入った時に個別取得）
-      const routes = await API.getRouteHistory({ limit: 20, include_stops: 'false' });
+      const routes = await API.getRouteHistory({ limit: 20, include_stops: 'true' });
       if (Router.getCurrentView() !== 'history') return;
       historyApiCache = { ts: Date.now(), routes };
       historyCache = routes;
