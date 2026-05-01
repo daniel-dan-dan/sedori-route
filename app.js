@@ -278,16 +278,15 @@ const App = (() => {
     setupNav();
     registerViews();
 
-    // 巡回中データがあれば復元（ホーム画面のマップ/リストが空にならないよう
-    // patrol状態にかかわらず stores は必ず読み込む）
+    // GASウォームアップ & データ更新を最速で並行スタート（await しない）
+    // IDB読み込みと並行してGASが起動するためコールドスタートを実質ゼロにする
+    const loadDataPromise = loadData();
+
+    // 巡回中データ・予定ルートをIDBから復元
     const saved = await Storage.getCurrentRoute();
     if (saved && saved.routeId) {
       patrolState = saved;
     }
-
-    await loadData();
-
-    // 予定ルートを復元
     try {
       const planned = await Storage.getPlannedRoute();
       if (planned && planned.orderedStores && planned.orderedStores.length) {
@@ -295,7 +294,21 @@ const App = (() => {
       }
     } catch (e) { /* ignore */ }
 
-    Router.navigate(patrolState ? 'patrol' : 'home');
+    // IDBキャッシュから即ロード（ローカル読み込みなので高速）
+    const cachedStores = await Storage.getCachedStores();
+    stores = cachedStores.filter(s => s && s.name && String(s.name).trim());
+    config = await Storage.getCachedConfig();
+
+    if (stores.length > 0) {
+      // 2回目以降：キャッシュで即ナビゲート（体感0秒）
+      Router.navigate(patrolState ? 'patrol' : 'home');
+      // バックグラウンドでstores/configを最新に更新
+      loadDataPromise.catch(e => console.warn('background refresh failed:', e));
+    } else {
+      // 初回起動のみAPIを待つ（キャッシュがない場合）
+      await loadDataPromise;
+      Router.navigate(patrolState ? 'patrol' : 'home');
+    }
   }
 
   async function loadData() {
@@ -1919,7 +1932,7 @@ const App = (() => {
 
   // 分析タブのセッションキャッシュ（TTL 5分、タブ切替では瞬時表示）
   let analyticsCache = null;
-  const ANALYTICS_CACHE_TTL_MS = 5 * 60 * 1000;
+  const ANALYTICS_CACHE_TTL_MS = 15 * 60 * 1000; // 15分（タブ切替の都度API呼び出しを抑制）
 
   // スケルトンUIを描画する（ロード中の骨格表示）
   function renderAnalyticsSkeleton(container) {
@@ -2042,7 +2055,7 @@ const App = (() => {
 
       const [inventoryItems, routes] = await Promise.all([
         API.getInventoryPurchases({ from, to: toStr }),
-        API.getRouteHistory({ limit: 200, include_stops: 'true' }),
+        API.getRouteHistory({ limit: 100, include_stops: 'true' }),
       ]);
 
       analyticsCache = { ts: Date.now(), inventoryItems, routes };
@@ -2424,7 +2437,7 @@ const App = (() => {
   let historyCache = []; // renderHistoryDetail用に保持
   const stopsCacheByRouteId = {}; // route_id → stops[]、セッションキャッシュ
   let historyApiCache = null;       // { ts, routes } — 履歴一覧の APIレスポンスキャッシュ
-  const HISTORY_CACHE_TTL_MS = 5 * 60 * 1000; // 5分
+  const HISTORY_CACHE_TTL_MS = 10 * 60 * 1000; // 10分（タブ切替の都度API呼び出しを抑制）
 
   function invalidateHistoryApiCache() {
     historyApiCache = null;
