@@ -1556,10 +1556,21 @@ const App = (() => {
       html += '<div class="mt-12 text-sm text-dim">残りの店舗</div>';
       for (let i = currentIdx + 1; i < stops.length; i++) {
         const s = stops[i];
+        const mapsHref = s.address
+          ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(s.address)}`
+          : (s.lat && s.lng ? `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}` : '');
+        const addressHtml = s.address
+          ? (mapsHref
+              ? `<a class="stop-address" href="${mapsHref}" target="_blank" rel="noopener">📍 ${esc(s.address)}</a>`
+              : `<div class="stop-address">📍 ${esc(s.address)}</div>`)
+          : '';
         html += `
-          <div class="route-stop">
+          <div class="route-stop route-stop-multi">
             <div class="stop-num" style="background:var(--border);color:var(--text-dim)">${i + 1}</div>
-            <span class="stop-name">${renderStopIconHtml(s)}${esc(s.name)}</span>
+            <div class="stop-info">
+              <div class="stop-name">${renderStopIconHtml(s)}${esc(s.name)}</div>
+              ${addressHtml}
+            </div>
             <span class="badge ${s.status === 'visited' ? 'badge-success' : ''}">${s.status === 'visited' ? '訪問済' : ''}</span>
           </div>`;
       }

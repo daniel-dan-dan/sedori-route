@@ -1032,6 +1032,25 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.route-stop.route-stop-multi { align-items: flex-start; padding: 10px 0; }
+.route-stop.route-stop-multi .stop-num { margin-top: 2px; }
+.route-stop .stop-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.route-stop .stop-info .stop-name { flex: initial; }
+.route-stop .stop-address {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  white-space: normal;
+  text-decoration: none;
+  display: block;
+}
+a.stop-address:active { color: var(--primary); }
 .stop-icon-logo {
   width: 26px;
   height: 26px;
