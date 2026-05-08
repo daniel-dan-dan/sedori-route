@@ -117,6 +117,31 @@ body {
   pointer-events: none;
 }
 .nav-badge[hidden] { display: none; }
+.nav-alert-badge {
+  top: -18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: auto;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #ecfeff;
+  color: #0e7490;
+  border: 1px solid #a5f3fc;
+  box-shadow: 0 4px 10px rgba(14, 116, 144, 0.14);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.nav-alert-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #06b6d4;
+  box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.15);
+}
 .nav-streak-badge {
   top: -18px;
   display: inline-flex;
