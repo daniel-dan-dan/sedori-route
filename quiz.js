@@ -1165,9 +1165,12 @@ const Quiz = (() => {
     const el = document.getElementById('quiz-nav-badge');
     if (!el) return;
     if (streak > 0) {
-      el.textContent = `\u{1f525}${streak}`;
+      const shown = streak > 99 ? '99+' : String(streak);
+      el.innerHTML = `<span class="nav-streak-flame" aria-hidden="true"></span><span class="nav-streak-num">${shown}</span>`;
+      el.setAttribute('aria-label', `${streak}日連続`);
       el.hidden = false;
     } else {
+      el.removeAttribute('aria-label');
       el.hidden = true;
     }
   }
