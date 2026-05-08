@@ -76,7 +76,23 @@ body {
   min-width: 64px;
 }
 .nav-item.active { color: var(--primary); font-weight: 700; }
-.nav-item .icon { font-size: 24px; }
+.nav-item .icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+.nav-icon {
+  width: 23px;
+  height: 23px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 /* 廃盤タブのバッジ（今週の新着件数） */
 .nav-label-with-badge {

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="theme-color" content="#2E7D4F">
+  <meta name="theme-color" content="#087f8c">
   <title>巡回ルート</title>
   <link rel="preconnect" href="https://script.google.com">
   <link rel="dns-prefetch" href="https://script.google.com">
@@ -23,24 +23,36 @@
 
   <nav class="bottom-nav" id="bottom-nav">
     <button class="nav-item active" data-view="home">
-      <span class="icon">&#x1f3e0;</span>ルート
+      <span class="icon" aria-hidden="true">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 21s7-4.4 7-11a7 7 0 1 0-14 0c0 6.6 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/></svg>
+      </span>ルート
     </button>
     <button class="nav-item" data-view="history">
-      <span class="icon">&#x1f4ca;</span>履歴
+      <span class="icon" aria-hidden="true">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-7"/></svg>
+      </span>履歴
     </button>
     <button class="nav-item" data-view="analytics">
-      <span class="icon">&#x1f4b0;</span>分析
+      <span class="icon" aria-hidden="true">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 17.5 9 12l4 3 7-8"/><path d="M15 7h5v5"/></svg>
+      </span>分析
     </button>
     <button class="nav-item" data-view="haiban">
-      <span class="icon">&#x1f525;</span>
+      <span class="icon" aria-hidden="true">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M7 7.5h8.5a2.5 2.5 0 0 1 0 5H9"/><path d="M17 16.5H8.5a2.5 2.5 0 0 1 0-5H15"/></svg>
+      </span>
       <span class="nav-label-with-badge">廃盤<span class="nav-badge" id="haiban-nav-badge" hidden></span></span>
     </button>
     <button class="nav-item" data-view="quiz">
-      <span class="icon">&#x1f4da;</span>
+      <span class="icon" aria-hidden="true">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M4.5 5.5A2.5 2.5 0 0 1 7 3h13v17H7a2.5 2.5 0 0 0-2.5 2V5.5Z"/><path d="M8 7h8"/><path d="M8 11h6"/></svg>
+      </span>
       <span class="nav-label-with-badge">クイズ<span class="nav-badge" id="quiz-nav-badge" hidden></span></span>
     </button>
     <button class="nav-item" data-view="settings">
-      <span class="icon">&#x2699;&#xfe0f;</span>設定
+      <span class="icon" aria-hidden="true">
+        <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3-.2-.1a1.8 1.8 0 0 0-1.9-.2 1.8 1.8 0 0 0-1 1.5V21h-5v-.2a1.8 1.8 0 0 0-1-1.5 1.8 1.8 0 0 0-1.9.2l-.2.1-2-3 .1-.1A1.7 1.7 0 0 0 4.6 15a1.8 1.8 0 0 0-1.5-1H3v-4h.1a1.8 1.8 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-3 .2.1a1.8 1.8 0 0 0 1.9.2 1.8 1.8 0 0 0 1-1.5V3h5v.2a1.8 1.8 0 0 0 1 1.5 1.8 1.8 0 0 0 1.9-.2l.2-.1 2 3-.1.1A1.7 1.7 0 0 0 19.4 9a1.8 1.8 0 0 0 1.5 1h.1v4h-.1a1.8 1.8 0 0 0-1.5 1Z"/></svg>
+      </span>設定
     </button>
   </nav>
 
