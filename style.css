@@ -46,6 +46,22 @@ body {
 .header h1 { font-size: 18px; font-weight: 700; }
 .header-actions { display: flex; gap: 8px; }
 
+.app-version-badge {
+  position: fixed;
+  right: 10px;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  z-index: 90;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .9);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 800;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
 /* ---- Navigation ---- */
 .bottom-nav {
   position: fixed;
