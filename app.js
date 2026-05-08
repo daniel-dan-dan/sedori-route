@@ -2137,27 +2137,9 @@ const App = (() => {
 
     let html = '';
 
-    // 全体サマリー
-    const totalProfit = sortedStats.reduce((s, st) => s + st.totalExpectedProfit, 0);
-    const totalPurchase = sortedStats.reduce((s, st) => s + st.totalPurchaseAmount, 0);
-    const totalVisits = sortedStats.reduce((s, st) => s + st.visitCount, 0);
-    const totalItems = sortedStats.reduce((s, st) => s + st.itemCount, 0);
-    const profitColorAll = totalProfit >= 0 ? 'var(--success)' : 'var(--accent)';
-
-    html += `
-      <div class="card">
-        <div class="card-title">全体サマリー（過去1年）</div>
-        <div class="summary-grid">
-          <div class="summary-item"><div class="value" style="color:${profitColorAll}">${totalProfit.toLocaleString()}円</div><div class="label">見込み利益合計</div></div>
-          <div class="summary-item"><div class="value">${totalPurchase.toLocaleString()}円</div><div class="label">仕入れ合計</div></div>
-          <div class="summary-item"><div class="value">${totalVisits}</div><div class="label">総訪問回数</div></div>
-          <div class="summary-item"><div class="value">${totalItems}</div><div class="label">総仕入れ点数</div></div>
-        </div>
-      </div>`;
-
     // タブ切り替え
     html += `
-      <div class="flex gap-8 mt-12 mb-8">
+      <div class="flex gap-8 mb-8">
         <button class="btn btn-sm analytics-tab active" data-tab="ranking">利益ランキング</button>
         <button class="btn btn-sm btn-outline analytics-tab" data-tab="efficiency">効率分析</button>
         <button class="btn btn-sm btn-outline analytics-tab" data-tab="genre">ジャンル傾向</button>
