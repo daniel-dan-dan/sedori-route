@@ -1483,6 +1483,123 @@ const App = (() => {
 
   // ---------- 巡回モード ----------
 
+  function getStoreMapsUrl(store) {
+    if (!store) return '';
+    if (store.address) {
+      return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(store.address)}`;
+    }
+    if (store.lat && store.lng) {
+      return `https://www.google.com/maps/dir/?api=1&destination=${store.lat},${store.lng}`;
+    }
+    return '';
+  }
+
+  function renderPatrolInsightSkeleton(store) {
+    const visits = Number(store.visit_count) || 0;
+    const totalPurchase = Number(store.total_purchase) || 0;
+    const totalItems = Number(store.total_items) || 0;
+    const avgStay = Number(store.avg_stay_min) || 30;
+    const purchaseLabel = totalPurchase >= 10000
+      ? `${(totalPurchase / 10000).toFixed(totalPurchase >= 100000 ? 0 : 1)}万`
+      : (totalPurchase ? totalPurchase.toLocaleString() : '-');
+    return `
+      <div class="patrol-insight-grid">
+        <div class="patrol-insight"><div class="value">${visits}</div><div class="label">訪問</div></div>
+        <div class="patrol-insight"><div class="value">${purchaseLabel}</div><div class="label">累計仕入</div></div>
+        <div class="patrol-insight"><div class="value">${totalItems || '-'}</div><div class="label">点数</div></div>
+        <div class="patrol-insight"><div class="value">${avgStay}</div><div class="label">目安分</div></div>
+      </div>`;
+  }
+
+  function renderStoreContextPanel(store) {
+    return `
+      <div class="patrol-store-context card">
+        <div class="flex-between mb-8">
+          <div class="card-title">店舗メモ</div>
+          <button class="btn btn-sm btn-outline" id="btn-add-memo">メモ追加</button>
+        </div>
+        ${renderPatrolInsightSkeleton(store)}
+        <div id="store-context-body" class="store-context-body">
+          <div class="text-sm text-dim">過去メモを読み込み中...</div>
+        </div>
+      </div>`;
+  }
+
+  function renderMemoList(memos, finds) {
+    const memoHtml = (memos || []).slice(0, 3).map(m => `
+      <div class="memo-row">
+        <div class="memo-type">${esc(m.type || 'メモ')}</div>
+        <div class="memo-content">${esc(m.content || '')}</div>
+        <div class="memo-date">${esc(m.date || '')}</div>
+      </div>
+    `).join('');
+
+    const findHtml = (finds || []).slice(0, 2).map(f => `
+      <div class="memo-row">
+        <div class="memo-type">${esc(f.action || '発見')}</div>
+        <div class="memo-content">${esc(f.product_name || f.note || '')}</div>
+        <div class="memo-date">${esc(f.date || '')}</div>
+      </div>
+    `).join('');
+
+    if (!memoHtml && !findHtml) {
+      return '<div class="store-context-empty">この店舗のメモはまだありません。</div>';
+    }
+    return `
+      ${memoHtml ? `<div class="memo-section-title">過去メモ</div>${memoHtml}` : ''}
+      ${findHtml ? `<div class="memo-section-title mt-8">過去の発見</div>${findHtml}` : ''}
+    `;
+  }
+
+  async function loadPatrolStoreContext(store) {
+    const el = document.getElementById('store-context-body');
+    if (!el || !store?.store_id || !API.getUrl()) return;
+    try {
+      const [memos, finds] = await Promise.all([
+        API.getMemos({ store_id: store.store_id, limit: 3 }),
+        API.getFinds({ store_id: store.store_id, limit: 2 })
+      ]);
+      const currentEl = document.getElementById('store-context-body');
+      if (currentEl) currentEl.innerHTML = renderMemoList(memos, finds);
+    } catch (e) {
+      const currentEl = document.getElementById('store-context-body');
+      if (currentEl) currentEl.innerHTML = '<div class="store-context-empty">メモを取得できませんでした。</div>';
+    }
+  }
+
+  function showStoreMemoModal(store) {
+    const body = `
+      <div class="form-group">
+        <label class="form-label">種類</label>
+        <select class="form-select" id="memo-type">
+          <option>見る棚</option>
+          <option>強いジャンル</option>
+          <option>前回メモ</option>
+          <option>注意点</option>
+          <option>その他</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">内容</label>
+        <textarea class="form-textarea" id="memo-content" placeholder="例: ワゴンと季節家電を先に見る"></textarea>
+      </div>`;
+    showModal('店舗メモを追加', body, (el) => {
+      const type = el.querySelector('#memo-type').value;
+      const content = el.querySelector('#memo-content').value.trim();
+      if (!content) {
+        toast('メモ内容を入力してください');
+        return;
+      }
+      toast('メモを保存しました');
+      API.addMemo({
+        store_id: store.store_id,
+        type,
+        content,
+        date: today_()
+      }).then(() => loadPatrolStoreContext(store)).catch(() => {});
+    });
+  }
+
   function startPatrol() {
     if (!optimizedRoute) return;
     const storeIds = optimizedRoute.orderedStores.map(s => s.store_id);
@@ -1525,44 +1642,49 @@ const App = (() => {
     const { stops, currentIdx } = patrolState;
     const current = stops[currentIdx];
     if (!current) { endPatrol(); return; }
+    const mapsUrl = getStoreMapsUrl(current);
+    const remainingCount = Math.max(0, stops.length - currentIdx - 1);
+    const doneCount = stops.filter(s => s.status === 'visited').length;
 
     let html = '';
 
-    // 経過時間タイマー
-    html += `<div class="patrol-timer" id="patrol-timer">00:00:00</div>`;
-
-    // 進捗
-    html += `<div class="text-sm text-dim text-center mb-8">${currentIdx + 1} / ${stops.length} 店舗</div>`;
-
-    // 現在の店舗
+    // 次の店舗
     html += `
       <div class="patrol-current">
-        <div class="current-label">現在地</div>
+        <div class="patrol-topline">
+          <div>
+            <div class="current-label">次の店舗</div>
+            <div class="current-progress">${currentIdx + 1} / ${stops.length} 店舗・残り${remainingCount}店舗</div>
+          </div>
+          <div class="patrol-timer" id="patrol-timer">00:00:00</div>
+        </div>
         <div class="current-name">${renderStopIconHtml(current)}${esc(current.name)}</div>
         <div class="current-meta">${esc(current.category)} | ${formatTime(current.open_time)}-${formatTime(current.close_time)}</div>
+        ${current.address ? `<a class="current-address" href="${mapsUrl}" target="_blank" rel="noopener">${esc(current.address)}</a>` : ''}
+        ${mapsUrl ? `<a class="btn btn-primary btn-block patrol-nav-button" href="${mapsUrl}" target="_blank" rel="noopener">ナビ開始</a>` : ''}
       </div>`;
 
     html += `
       <div class="patrol-actions">
         <button class="btn btn-warning btn-block" id="btn-purchase">＋ 仕入れを記録する</button>
-        <button class="btn btn-success btn-block mt-8" id="btn-depart">次の店舗へ（完了）→</button>
+        <button class="btn btn-success btn-block" id="btn-depart">完了して次へ</button>
       </div>`;
+
+    html += renderStoreContextPanel(current);
 
     // スキップ
     html += `<div class="mt-12"><button class="btn btn-sm btn-outline btn-block" id="btn-skip">スキップ</button></div>`;
 
     // 残りの店舗
     if (currentIdx < stops.length - 1) {
-      html += '<div class="mt-12 text-sm text-dim">残りの店舗</div>';
+      html += `<div class="route-next-title">このあと行く店舗 <span>${doneCount}件完了</span></div>`;
       for (let i = currentIdx + 1; i < stops.length; i++) {
         const s = stops[i];
-        const mapsHref = s.address
-          ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(s.address)}`
-          : (s.lat && s.lng ? `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}` : '');
+        const mapsHref = getStoreMapsUrl(s);
         const addressHtml = s.address
           ? (mapsHref
-              ? `<a class="stop-address" href="${mapsHref}" target="_blank" rel="noopener">📍 ${esc(s.address)}</a>`
-              : `<div class="stop-address">📍 ${esc(s.address)}</div>`)
+              ? `<a class="stop-address" href="${mapsHref}" target="_blank" rel="noopener">${esc(s.address)}</a>`
+              : `<div class="stop-address">${esc(s.address)}</div>`)
           : '';
         html += `
           <div class="route-stop route-stop-multi">
@@ -1586,6 +1708,7 @@ const App = (() => {
 
     // タイマー開始
     startPatrolTimer();
+    loadPatrolStoreContext(current);
 
     // イベント（UIを即更新、API同期はバックグラウンド）
     document.getElementById('btn-depart')?.addEventListener('click', () => {
@@ -1651,6 +1774,7 @@ const App = (() => {
     });
 
     document.getElementById('btn-purchase')?.addEventListener('click', () => showPurchaseModal(current));
+    document.getElementById('btn-add-memo')?.addEventListener('click', () => showStoreMemoModal(current));
   }
 
   function startPatrolTimer() {
