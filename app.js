@@ -585,8 +585,8 @@ const App = (() => {
     const prMins = (pr.estimatedMinutes || 0) % 60;
     const savedStr = pr.savedAt ? new Date(pr.savedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
     let html = `
-      <div class="route-result" style="border:2px solid var(--primary);">
-        <div class="card-title">&#x1F4C5; 予定ルート${savedStr ? `<span class="text-dim text-sm" style="font-weight:normal;margin-left:8px;">(${esc(savedStr)} 保存)</span>` : ''}</div>
+      <div class="route-result planned-route-card">
+        <div class="card-title">予定ルート${savedStr ? `<span class="text-dim text-sm" style="font-weight:normal;margin-left:8px;">(${esc(savedStr)} 保存)</span>` : ''}</div>
         <div class="route-stats">
           <div class="route-stat"><div class="value">${pr.totalDistanceKm}</div><div class="label">km</div></div>
           <div class="route-stat"><div class="value">${prHours}h${prMins}m</div><div class="label">推定時間</div></div>
@@ -602,8 +602,8 @@ const App = (() => {
     });
     html += `
         <div class="btn-group mt-8">
-          <button class="btn btn-outline" id="btn-planned-delete" style="flex:0 0 auto;">削除</button>
-          <button class="btn btn-success" id="btn-planned-start" style="flex:1;">この予定で巡回開始</button>
+          <button class="btn btn-outline btn-compact" id="btn-planned-delete">削除</button>
+          <button class="btn btn-success" id="btn-planned-start">この予定で巡回開始</button>
         </div>
       </div>`;
     return html;
@@ -635,12 +635,12 @@ const App = (() => {
     const visited = stops.filter(s => s.status === 'visited').length;
     const currentName = current ? current.name : '';
     return `
-      <div class="card planned-route-banner" id="patrol-banner" style="border-color:#22c55e;background:#f0fdf4">
+      <div class="card patrol-banner" id="patrol-banner">
         <div class="flex-between mb-8">
-          <span style="font-weight:600;color:#166534">🚗 巡回中 (${visited}/${total})</span>
-          <span class="badge" style="background:#22c55e;color:white">${current ? (currentIdx + 1) + '店舗目' : '完了'}</span>
+          <span class="patrol-banner-title">巡回中 (${visited}/${total})</span>
+          <span class="badge badge-success">${current ? (currentIdx + 1) + '店舗目' : '完了'}</span>
         </div>
-        ${current ? `<div class="text-sm" style="color:#166534">現在: ${esc(currentName)}</div>` : ''}
+        ${current ? `<div class="text-sm patrol-banner-current">現在: ${esc(currentName)}</div>` : ''}
         <button class="btn btn-success btn-block mt-8" id="btn-patrol-return">巡回画面に戻る</button>
       </div>`;
   }
@@ -671,8 +671,8 @@ const App = (() => {
 
     // 表示切替（マップ / リスト）
     html += `<div class="view-toggle">
-      <button class="view-btn" data-view="map">&#x1f5fa;&#xfe0f; マップ</button>
-      <button class="view-btn active" data-view="list">&#x1f4cb; リスト</button>
+      <button class="view-btn" data-view="map">マップ</button>
+      <button class="view-btn active" data-view="list">リスト</button>
     </div>`;
 
     // モード切替（エリア / ジャンル / チェーン）
@@ -927,12 +927,14 @@ const App = (() => {
       ${buildPatrolBanner()}
       ${buildPlannedRouteBanner()}
       <div class="view-toggle">
-        <button class="view-btn active" data-view="map">&#x1f5fa;&#xfe0f; マップ</button>
-        <button class="view-btn" data-view="list">&#x1f4cb; リスト</button>
+        <button class="view-btn active" data-view="map">マップ</button>
+        <button class="view-btn" data-view="list">リスト</button>
       </div>
       ${chipHtml}
       <div id="map-view">
-        <button class="btn-map-current" id="btn-map-current" title="現在地">&#x1f4cd;</button>
+        <button class="btn-map-current" id="btn-map-current" title="現在地" aria-label="現在地">
+          <svg class="map-current-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-4.4 7-11a7 7 0 1 0-14 0c0 6.6 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/></svg>
+        </button>
       </div>
       <div class="map-bottom-bar">
         <div class="flex-between mb-8">
@@ -1351,8 +1353,8 @@ const App = (() => {
 
     html += `
       <div class="btn-group">
-        <a href="${mapsUrl}" target="_blank" class="btn btn-outline" style="flex:1;text-decoration:none;" id="btn-maps-link">Google Maps</a>
-        <button class="btn btn-success" style="flex:1;" id="btn-start-patrol">巡回開始</button>
+        <a href="${mapsUrl}" target="_blank" class="btn btn-outline" id="btn-maps-link">Google Maps</a>
+        <button class="btn btn-success" id="btn-start-patrol">巡回開始</button>
       </div>`;
     html += '</div>';
 
@@ -1397,7 +1399,7 @@ const App = (() => {
       <div class="route-select-card selected" data-route="optimized">
         <div class="route-select-header">
           <div class="route-select-title">
-            <span class="route-select-icon">&#x26A1;</span>最適化ルート
+            <span class="route-select-icon">最短</span>最適化ルート
           </div>
           <div class="route-select-badge badge badge-primary">おすすめ</div>
         </div>
@@ -1414,7 +1416,7 @@ const App = (() => {
       <div class="route-select-card" data-route="selection">
         <div class="route-select-header">
           <div class="route-select-title">
-            <span class="route-select-icon">&#x1F4CB;</span>選択順ルート
+            <span class="route-select-icon">順番</span>選択順ルート
           </div>
           ${diffKm > 0 ? `<div class="text-sm text-dim">+${diffKm}km / +${diffMin}分</div>` : ''}
         </div>
@@ -1428,7 +1430,7 @@ const App = (() => {
 
     // アクションボタン
     html += `
-      <div style="position:sticky;bottom:60px;padding:8px 0;background:var(--bg);">
+      <div class="route-confirm-actions">
         <button class="btn btn-success btn-block" id="btn-confirm-route">今すぐ巡回開始</button>
         <button class="btn btn-primary btn-block mt-8" id="btn-save-planned">予定として保存（後で開始）</button>
         <button class="btn btn-outline btn-block mt-8" id="btn-back-select">戻る</button>
