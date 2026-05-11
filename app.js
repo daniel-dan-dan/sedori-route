@@ -1244,7 +1244,15 @@ const App = (() => {
 
     const positions = new Map();
     groups.forEach(group => {
-      group.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ja'));
+      group.sort((a, b) => {
+        const rank = store => {
+          const name = String(store.name || '');
+          if (name.includes('トレファクスタイル イオンモール仙台上杉店')) return 0;
+          if (name.includes('コジマ×ビックカメラ イオンモール仙台上杉店')) return 1;
+          return 2;
+        };
+        return rank(a) - rank(b) || String(a.name || '').localeCompare(String(b.name || ''), 'ja');
+      });
       if (group.length === 1) {
         const s = group[0];
         positions.set(s.store_id, [Number(s.lat), Number(s.lng)]);
