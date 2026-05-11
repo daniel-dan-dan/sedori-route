@@ -1226,6 +1226,43 @@ const App = (() => {
         </div>`;
   }
 
+  function getLatLngKey(store) {
+    const lat = Number(store.lat);
+    const lng = Number(store.lng);
+    if (!lat || !lng) return '';
+    return `${lat.toFixed(6)},${lng.toFixed(6)}`;
+  }
+
+  function buildMarkerPositions(visibleStores) {
+    const groups = new Map();
+    visibleStores.forEach(store => {
+      const key = getLatLngKey(store);
+      if (!key) return;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(store);
+    });
+
+    const positions = new Map();
+    groups.forEach(group => {
+      group.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ja'));
+      if (group.length === 1) {
+        const s = group[0];
+        positions.set(s.store_id, [Number(s.lat), Number(s.lng)]);
+        return;
+      }
+
+      const radius = 0.00012; // 約10m。建物内の重複ピンを見分けるための表示専用オフセット
+      group.forEach((s, idx) => {
+        const angle = (Math.PI * 2 * idx) / group.length - Math.PI / 2;
+        positions.set(s.store_id, [
+          Number(s.lat) + Math.sin(angle) * radius,
+          Number(s.lng) + Math.cos(angle) * radius,
+        ]);
+      });
+    });
+    return positions;
+  }
+
   function refreshMapMarkers() {
     if (!mapInstance || !mapCluster) return;
 
@@ -1243,6 +1280,8 @@ const App = (() => {
       wanted.set(s.store_id, s);
     });
 
+    const markerPositions = buildMarkerPositions([...wanted.values()]);
+
     mapMarkers.forEach((marker, sid) => {
       if (!wanted.has(sid)) {
         mapCluster.removeLayer(marker);
@@ -1257,11 +1296,13 @@ const App = (() => {
       const patrolIdx = patrolIds.indexOf(sid);
       const selIdx = patrolIdx >= 0 ? patrolIdx : selectedStoreIds.indexOf(sid);
       const existing = mapMarkers.get(sid);
+      const markerLatLng = markerPositions.get(sid) || [lat, lng];
       if (existing) {
+        existing.setLatLng(markerLatLng);
         existing.setIcon(buildPinIcon(s, selIdx));
         existing.setPopupContent(buildMapPopupHtml(s, selIdx));
       } else {
-        const marker = L.marker([lat, lng], { icon: buildPinIcon(s, selIdx) });
+        const marker = L.marker(markerLatLng, { icon: buildPinIcon(s, selIdx) });
         marker.bindPopup(buildMapPopupHtml(s, selIdx));
         mapCluster.addLayer(marker);
         mapMarkers.set(sid, marker);
