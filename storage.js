@@ -41,6 +41,18 @@ const Storage = (() => {
     });
   }
 
+  async function replaceAll(storeName, items) {
+    const d = await open();
+    const tx = d.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    store.clear();
+    items.forEach(item => store.put(item));
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = e => reject(e.target.error);
+    });
+  }
+
   async function getAll(storeName) {
     const d = await open();
     const tx = d.transaction(storeName, 'readonly');
@@ -135,7 +147,7 @@ const Storage = (() => {
   }
 
   // 店舗キャッシュ
-  async function cacheStores(stores) { return putAll('stores', stores); }
+  async function cacheStores(stores) { return replaceAll('stores', stores); }
   async function getCachedStores() { return getAll('stores'); }
 
   // 設定キャッシュ

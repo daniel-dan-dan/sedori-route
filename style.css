@@ -1544,6 +1544,7 @@ a.stop-address:active { color: var(--primary); }
   z-index: 300;
   opacity: 0;
   transition: opacity .3s;
+  pointer-events: none;
 }
 .toast.show { opacity: 1; }
 

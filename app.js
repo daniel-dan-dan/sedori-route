@@ -20,6 +20,7 @@ const App = (() => {
   let pendingInertia = null; // ピンチズーム慣性の次フレーム予約
   let currentLocationMarker = null; // 現在地マーカー
   let currentLocationCircle = null; // 現在地精度サークル
+  const HIDDEN_STORE_IDS = new Set(['s20260411082838460']);
 
   // チェーン別ブランドカラー（ピン・チップの色分け）
   const CHAIN_COLORS = {
@@ -56,7 +57,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v93';
+  const ASSET_VER = 'v94';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -264,6 +265,15 @@ const App = (() => {
     return AREA_DISPLAY_ORDER[0];
   }
 
+  function normalizeStores(list) {
+    return (list || []).filter(s =>
+      s &&
+      s.name &&
+      String(s.name).trim() &&
+      !HIDDEN_STORE_IDS.has(String(s.store_id || ''))
+    );
+  }
+
   // ---------- 初期化 ----------
 
   async function init() {
@@ -296,7 +306,7 @@ const App = (() => {
 
     // IDBキャッシュから即ロード（ローカル読み込みなので高速）
     const cachedStores = await Storage.getCachedStores();
-    stores = cachedStores.filter(s => s && s.name && String(s.name).trim());
+    stores = normalizeStores(cachedStores);
     config = await Storage.getCachedConfig();
 
     if (stores.length > 0) {
@@ -319,13 +329,13 @@ const App = (() => {
   async function loadData() {
     try {
       [stores, config] = await Promise.all([API.getStores(), API.getConfig()]);
-      stores = stores.filter(s => s && s.name && String(s.name).trim());
+      stores = normalizeStores(stores);
       await Storage.cacheStores(stores);
       await Storage.cacheConfig(config);
     } catch (e) {
       console.warn('API fetch failed, using cache:', e);
       stores = await Storage.getCachedStores();
-      stores = stores.filter(s => s && s.name && String(s.name).trim());
+      stores = normalizeStores(stores);
       config = await Storage.getCachedConfig();
       if (stores.length === 0) {
         toast('データ取得に失敗しました');
@@ -581,15 +591,12 @@ const App = (() => {
   function buildPlannedRouteBanner() {
     if (!plannedRoute || !plannedRoute.orderedStores || !plannedRoute.orderedStores.length) return '';
     const pr = plannedRoute;
-    const prHours = Math.floor((pr.estimatedMinutes || 0) / 60);
-    const prMins = (pr.estimatedMinutes || 0) % 60;
     const savedStr = pr.savedAt ? new Date(pr.savedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
     let html = `
       <div class="route-result planned-route-card">
         <div class="card-title">予定ルート${savedStr ? `<span class="text-dim text-sm" style="font-weight:normal;margin-left:8px;">(${esc(savedStr)} 保存)</span>` : ''}</div>
         <div class="route-stats">
           <div class="route-stat"><div class="value">${pr.totalDistanceKm}</div><div class="label">km</div></div>
-          <div class="route-stat"><div class="value">${prHours}h${prMins}m</div><div class="label">推定時間</div></div>
           <div class="route-stat"><div class="value">${pr.orderedStores.length}</div><div class="label">店舗</div></div>
         </div>`;
     pr.orderedStores.forEach((s, i) => {
@@ -767,21 +774,21 @@ const App = (() => {
       const selected = selectedStoreIds.map(id => stores.find(s => s.store_id === id)).filter(Boolean);
       const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
       const speed = Number(config.avg_speed_kmh) || 30;
-      let etaHtml = '';
+      let distanceHtml = '';
       if (home.lat && home.lng && selected.length >= 1) {
         const est = RouteOptimizer.calcSelectionOrder(home, selected, speed);
-        etaHtml = `<span class="fab-eta">約 ${est.totalDistanceKm}km / ${est.estimatedMinutes}分</span>`;
+        distanceHtml = `<span class="fab-eta">約 ${est.totalDistanceKm}km</span>`;
       }
       html += `
         <div class="floating-action-bar">
           <div class="floating-action-bar-inner">
             <div class="fab-summary">
               <span class="fab-count">${selectedStoreIds.length}店舗 選択中</span>
-              ${etaHtml}
+              ${distanceHtml}
               <button class="fab-clear" id="btn-clear">クリア</button>
             </div>
             <button class="btn btn-primary btn-block" id="btn-optimize">
-              ルート最適化
+              ルート作成
             </button>
           </div>
         </div>`;
@@ -866,9 +873,8 @@ const App = (() => {
     const selected = selectedStoreIds.map(id => stores.find(s => s.store_id === id)).filter(Boolean);
     const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
     const speed = Number(config.avg_speed_kmh) || 30;
-    const optRoute = RouteOptimizer.optimize(home, selected, speed);
     const selRoute = RouteOptimizer.calcSelectionOrder(home, selected, speed);
-    Router.navigate('route-select', { optRoute, selRoute });
+    Router.navigate('route-select', { selRoute });
   }
 
   // ---------- マップビュー ----------
@@ -942,7 +948,7 @@ const App = (() => {
           <button class="btn btn-sm btn-outline" id="btn-map-clear">クリア</button>
         </div>
         <button class="btn btn-primary btn-block" id="btn-map-optimize" ${selectedStoreIds.length < 1 ? 'disabled' : ''}>
-          ルート最適化
+          ルート作成
         </button>
       </div>
     `;
@@ -1380,14 +1386,11 @@ const App = (() => {
     const r = optimizedRoute;
     // Google Maps URLは後からGPS現在地で差し替え
     let mapsUrl = RouteOptimizer.generateMapsUrl({ lat: Number(config.home_lat), lng: Number(config.home_lng) }, r.orderedStores);
-    const hours = Math.floor(r.estimatedMinutes / 60);
-    const mins = r.estimatedMinutes % 60;
 
     let html = '<div class="route-result">';
-    html += '<div class="card-title">最適化ルート</div>';
+    html += '<div class="card-title">巡回ルート</div>';
     html += '<div class="route-stats">';
     html += `<div class="route-stat"><div class="value">${r.totalDistanceKm}</div><div class="label">km</div></div>`;
-    html += `<div class="route-stat"><div class="value">${hours}h${mins}m</div><div class="label">推定時間</div></div>`;
     html += `<div class="route-stat"><div class="value">${r.orderedStores.length}</div><div class="label">店舗</div></div>`;
     html += '</div>';
 
@@ -1414,19 +1417,9 @@ const App = (() => {
 
   // ---------- ルート選択画面 ----------
 
-  function renderRouteSelect(container, { optRoute, selRoute } = {}) {
-    if (!optRoute || !selRoute) { Router.navigate('home'); return; }
-    setTitle('ルート選択');
-
-    // 距離の差分を計算
-    const diffKm = Math.round((selRoute.totalDistanceKm - optRoute.totalDistanceKm) * 10) / 10;
-    const diffMin = selRoute.estimatedMinutes - optRoute.estimatedMinutes;
-
-    function formatEstimate(r) {
-      const h = Math.floor(r.estimatedMinutes / 60);
-      const m = r.estimatedMinutes % 60;
-      return h > 0 ? `${h}h${m}m` : `${m}m`;
-    }
+  function renderRouteSelect(container, { selRoute } = {}) {
+    if (!selRoute) { Router.navigate('home'); return; }
+    setTitle('ルート確認');
 
     function buildStopList(orderedStores) {
       let html = '';
@@ -1441,37 +1434,18 @@ const App = (() => {
       return html;
     }
 
-    let html = '<div class="text-sm text-dim text-center mb-8">巡回ルートを選択してください</div>';
-
-    // 最適化ルートカード
-    html += `
-      <div class="route-select-card selected" data-route="optimized">
-        <div class="route-select-header">
-          <div class="route-select-title">
-            <span class="route-select-icon">最短</span>最適化ルート
-          </div>
-          <div class="route-select-badge badge badge-primary">おすすめ</div>
-        </div>
-        <div class="route-stats">
-          <div class="route-stat"><div class="value">${optRoute.totalDistanceKm}</div><div class="label">km</div></div>
-          <div class="route-stat"><div class="value">${formatEstimate(optRoute)}</div><div class="label">推定時間</div></div>
-          <div class="route-stat"><div class="value">${optRoute.orderedStores.length}</div><div class="label">店舗</div></div>
-        </div>
-        ${buildStopList(optRoute.orderedStores)}
-      </div>`;
+    let html = '<div class="text-sm text-dim text-center mb-8">この順番で巡回します</div>';
 
     // 選択順ルートカード
     html += `
-      <div class="route-select-card" data-route="selection">
+      <div class="route-select-card selected" data-route="selection">
         <div class="route-select-header">
           <div class="route-select-title">
             <span class="route-select-icon">順番</span>選択順ルート
           </div>
-          ${diffKm > 0 ? `<div class="text-sm text-dim">+${diffKm}km / +${diffMin}分</div>` : ''}
         </div>
         <div class="route-stats">
           <div class="route-stat"><div class="value">${selRoute.totalDistanceKm}</div><div class="label">km</div></div>
-          <div class="route-stat"><div class="value">${formatEstimate(selRoute)}</div><div class="label">推定時間</div></div>
           <div class="route-stat"><div class="value">${selRoute.orderedStores.length}</div><div class="label">店舗</div></div>
         </div>
         ${buildStopList(selRoute.orderedStores)}
@@ -1487,19 +1461,8 @@ const App = (() => {
 
     container.innerHTML = html;
 
-    // 選択状態管理
-    let selectedRoute = 'optimized';
-
-    container.querySelectorAll('.route-select-card').forEach(card => {
-      card.addEventListener('click', () => {
-        container.querySelectorAll('.route-select-card').forEach(c => c.classList.remove('selected'));
-        card.classList.add('selected');
-        selectedRoute = card.dataset.route;
-      });
-    });
-
     function pickRoute() {
-      const chosen = selectedRoute === 'optimized' ? optRoute : selRoute;
+      const chosen = selRoute;
       const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
       chosen._mapsUrl = RouteOptimizer.generateMapsUrl(home, chosen.orderedStores);
       return chosen;
