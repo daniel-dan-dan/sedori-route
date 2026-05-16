@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sedori-route-v148';
+const CACHE_NAME = 'sedori-route-v149';
 const ASSETS = [
   './',
   './index.html',
@@ -23,6 +23,9 @@ self.addEventListener('install', e => {
 
 self.addEventListener('message', e => {
   if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
+  if (e.data && e.data.type === 'GET_VERSION' && e.source) {
+    e.source.postMessage({ type: 'SW_VERSION', cacheName: CACHE_NAME });
+  }
 });
 
 self.addEventListener('activate', e => {

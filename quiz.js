@@ -686,11 +686,12 @@ const Quiz = (() => {
     const diffLabel = settings.difficulty === 'easy' ? 'かんたん'
                     : settings.difficulty === 'hard' ? 'むずかしい' : 'ふつう';
     const qcLabel = settings.questionCount === 'endless' ? 'エンドレス' : `${settings.questionCount}問`;
+    const showQuizDebug = localStorage.getItem('quiz_debug') === '1';
 
     container.innerHTML = `
       <div class="quiz-stats">
         <div class="quiz-stat-row">
-          <div class="quiz-stat-pill"><span class="quiz-stat-icon">&#x1f525;</span><span class="quiz-stat-num">${stats.streak || 0}</span><span class="quiz-stat-label">日連続</span></div>
+          <div class="quiz-stat-pill quiz-streak-pill"><span class="quiz-stat-kicker">連続</span><span class="quiz-stat-num">${stats.streak || 0}</span><span class="quiz-stat-label">日</span></div>
           <div class="quiz-stat-pill"><span class="quiz-stat-num">${accRate}%</span><span class="quiz-stat-label">正解率</span></div>
           <div class="quiz-stat-pill"><span class="quiz-stat-num">${learnedCount}</span><span class="quiz-stat-label">/${totalCount} 既習</span></div>
         </div>
@@ -742,19 +743,20 @@ const Quiz = (() => {
 
       <div class="quiz-shortcut-section">
         <div class="quiz-label">ワンタップで始める</div>
-        <button class="quiz-shortcut" id="sc-today">&#x1f4c5; 今日のおすすめ</button>
-        <button class="quiz-shortcut" id="sc-review">&#x1f504; 復習モード（前日間違えた問題）</button>
-        <button class="quiz-shortcut" id="sc-weak">&#x1f31f; 苦手モード（正解率の低い3社）</button>
+        <button class="quiz-shortcut" id="sc-today"><span class="quiz-shortcut-tag">今日</span><span>今日のおすすめ</span></button>
+        <button class="quiz-shortcut" id="sc-review"><span class="quiz-shortcut-tag">復習</span><span>復習モード（前日間違えた問題）</span></button>
+        <button class="quiz-shortcut" id="sc-weak"><span class="quiz-shortcut-tag">苦手</span><span>苦手モード（正解率の低い3社）</span></button>
       </div>
 
       <div class="quiz-current">
         現在の設定: ${escHtml(rangeLabel)} / ${escHtml(typeLabel)} / ${escHtml(diffLabel)} / ${escHtml(qcLabel)}
       </div>
-      <div class="quiz-debug" id="quiz-debug-info" style="margin-top:8px;font-size:11px;color:#888;text-align:center;line-height:1.6;"></div>
+      ${showQuizDebug ? '<div class="quiz-debug" id="quiz-debug-info" style="margin-top:8px;font-size:11px;color:#888;text-align:center;line-height:1.6;"></div>' : ''}
     `;
 
     // デバッグ情報（プール件数・直近セッション情報）を非同期で表示
     (async () => {
+      if (!showQuizDebug) return;
       try {
         const recentSessions = await getRecentSessions();
         const recentMakerCounts = await getRecentMakerCounts();
