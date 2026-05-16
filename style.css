@@ -1883,3 +1883,351 @@ a.stop-address:active { color: var(--primary); }
   border-radius: 6px;
   flex: 1;
 }
+
+/* ============================================================
+   v150 Visual Refresh — 操作は変えず、判断しやすい見た目へ整理
+   ============================================================ */
+
+:root {
+  --bg: #f4f8f9;
+  --surface2: #eef6f7;
+  --primary: #07818b;
+  --primary-dark: #056871;
+  --primary-light: #e4f7f8;
+  --primary-rgb: 7, 129, 139;
+  --accent: #e46f45;
+  --success: #14845f;
+  --warning: #c77805;
+  --danger: #cf3f39;
+  --text: #13262d;
+  --text-dim: #647884;
+  --border: #d5e4e8;
+  --radius: 8px;
+  --shadow: 0 1px 2px rgba(6, 24, 31, .06), 0 10px 24px rgba(6, 24, 31, .06);
+}
+
+body {
+  background:
+    linear-gradient(180deg, #f8fbfc 0%, #eef6f7 100%);
+}
+
+.header {
+  background: rgba(255, 255, 255, .96);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.header h1 {
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.bottom-nav {
+  padding-top: 7px;
+  box-shadow: 0 -12px 28px rgba(6, 24, 31, .09);
+}
+
+.nav-item {
+  position: relative;
+  gap: 2px;
+  min-width: 56px;
+  padding: 6px 4px 7px;
+  font-size: 11px;
+}
+
+.nav-item::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  width: 28px;
+  height: 3px;
+  border-radius: 999px;
+  transform: translateX(-50%) scaleX(0);
+  background: var(--primary);
+  transition: transform .16s ease;
+}
+
+.nav-item.active::before {
+  transform: translateX(-50%) scaleX(1);
+}
+
+.nav-item .icon {
+  width: 27px;
+  height: 27px;
+  border-radius: 8px;
+}
+
+.nav-item.active .icon {
+  background: var(--primary-light);
+  color: var(--primary-dark);
+}
+
+.nav-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.nav-alert-badge,
+.nav-streak-badge {
+  top: -22px;
+  transform: translateX(-48%);
+  border-width: 1px;
+}
+
+.app-version-badge {
+  background: rgba(255, 255, 255, .94);
+}
+
+.card,
+.store-item,
+.haiban-item,
+.route-select-card,
+.planned-route-card,
+.history-item,
+.map-bottom-bar {
+  border-radius: 8px;
+  border-color: rgba(110, 138, 148, .28);
+}
+
+.card-title {
+  color: #143840;
+  font-weight: 800;
+}
+
+.btn {
+  border-radius: 8px;
+  letter-spacing: 0;
+}
+
+.btn-primary {
+  background: linear-gradient(180deg, #07909a 0%, var(--primary) 100%);
+  border-color: #067985;
+  box-shadow: 0 8px 18px rgba(var(--primary-rgb), .22);
+}
+
+.btn-primary:active {
+  box-shadow: 0 4px 10px rgba(var(--primary-rgb), .18);
+}
+
+.btn-outline {
+  background: #fff;
+  border-color: #d6e6ea;
+  color: #244550;
+}
+
+.view-toggle,
+.mode-toggle {
+  background: #edf6f7;
+  border-color: #d5e7ea;
+  border-radius: 10px;
+}
+
+.view-btn,
+.mode-btn {
+  border-radius: 8px;
+}
+
+.view-btn.active,
+.mode-btn.active {
+  background: #fff;
+  color: var(--primary-dark);
+  box-shadow: 0 2px 8px rgba(6, 24, 31, .08);
+}
+
+.view-btn.active {
+  background: linear-gradient(180deg, #09939d 0%, var(--primary) 100%);
+  color: #fff;
+}
+
+.filter-tab,
+.chain-chip {
+  border-radius: 999px;
+  background: #fff;
+  border-color: #d7e8eb;
+}
+
+.filter-tab.active,
+.chain-chip.active {
+  box-shadow: 0 6px 14px rgba(6, 24, 31, .1);
+}
+
+#map-view {
+  min-height: 360px;
+  border: 1px solid #d5e4e8;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.7), var(--shadow);
+}
+
+.map-bottom-bar {
+  position: sticky;
+  bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  z-index: 80;
+  margin-top: -2px;
+  background: rgba(255, 255, 255, .96);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.map-bottom-bar .text-sm {
+  font-size: 13px;
+}
+
+.map-bottom-bar #map-sel-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  margin-right: 4px;
+  border-radius: 999px;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-size: 15px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.store-item {
+  padding: 12px 11px;
+}
+
+.store-item.selected {
+  background: linear-gradient(180deg, #f3fcfd 0%, #e7f8f9 100%);
+}
+
+.store-item .store-name {
+  font-weight: 700;
+  color: #142c34;
+}
+
+.store-item .store-score {
+  display: inline-flex;
+  margin-top: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #edf6f7;
+}
+
+.history-item {
+  background: #fff;
+}
+
+.history-date {
+  color: #143840;
+}
+
+.history-profit {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e7f8ef;
+  color: var(--success);
+}
+
+.analytics-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 2px 0 10px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #edf6f7;
+  border: 1px solid #d5e7ea;
+}
+
+.analytics-tabs .analytics-tab {
+  min-height: 36px;
+  padding: 7px 6px;
+  border-radius: 8px;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.analytics-tab.active {
+  background: #fff;
+  color: var(--primary-dark);
+  border-color: #fff;
+  box-shadow: 0 2px 8px rgba(6, 24, 31, .08);
+}
+
+#analytics-content .card {
+  margin-bottom: 8px;
+}
+
+#analytics-content .card .flex-between {
+  gap: 10px;
+}
+
+#analytics-content .card .flex-between > span:last-child {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.haiban-item {
+  padding: 10px;
+}
+
+.haiban-head {
+  gap: 10px;
+}
+
+.haiban-thumb-wrap {
+  border-radius: 8px;
+  background: #f4f8f9;
+}
+
+.score-badge {
+  border-radius: 999px;
+}
+
+.quiz-stats {
+  border-radius: 10px;
+  background: linear-gradient(180deg, #07818b 0%, #056871 100%);
+  box-shadow: 0 10px 22px rgba(var(--primary-rgb), .18);
+}
+
+.quiz-start-btn,
+.quiz-pick-btn {
+  border-radius: 8px;
+}
+
+.settings-section-title {
+  margin: 18px 2px 8px;
+  color: var(--primary-dark);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+
+.settings-section-title:first-child {
+  margin-top: 2px;
+}
+
+.settings-card {
+  margin-bottom: 8px;
+}
+
+.settings-danger-title {
+  color: var(--danger);
+}
+
+.settings-danger-card {
+  border-color: #f3c5c1;
+  background: #fffafa;
+}
+
+.settings-danger-card .card-title {
+  color: var(--danger);
+}
+
+@media (max-width: 380px) {
+  .nav-item {
+    min-width: 50px;
+    font-size: 10px;
+  }
+  .analytics-tabs .analytics-tab {
+    font-size: 11px;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+}

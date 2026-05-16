@@ -57,7 +57,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v94';
+  const ASSET_VER = 'v95';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -2151,7 +2151,7 @@ const App = (() => {
 
     // タブ切り替え
     html += `
-      <div class="flex gap-8 mb-8">
+      <div class="analytics-tabs">
         <button class="btn btn-sm analytics-tab active" data-tab="ranking">利益ランキング</button>
         <button class="btn btn-sm btn-outline analytics-tab" data-tab="efficiency">効率分析</button>
         <button class="btn btn-sm btn-outline analytics-tab" data-tab="genre">ジャンル傾向</button>
@@ -3070,7 +3070,8 @@ const App = (() => {
 
     // 基本情報
     html += `
-      <div class="card">
+      <div class="settings-section-title">基本情報</div>
+      <div class="card settings-card">
         <div class="card-title">${dateStr} の巡回</div>
         <div class="summary-grid">
           <div class="summary-item"><div class="value">${route.store_count || 0}</div><div class="label">店舗数</div></div>
@@ -3190,14 +3191,15 @@ const App = (() => {
     setTitle('設定');
     const url = API.getUrl();
     let html = `
-      <div class="card">
+      <div class="settings-section-title">基本設定</div>
+      <div class="card settings-card">
         <div class="card-title">API URL</div>
         <div class="form-group">
           <input type="text" class="form-input" id="set-url" value="${esc(url)}" placeholder="https://script.google.com/macros/s/.../exec">
         </div>
         <button class="btn btn-primary btn-sm" id="btn-save-url">保存</button>
       </div>
-      <div class="card">
+      <div class="card settings-card">
         <div class="card-title">自宅座標</div>
         <div class="flex gap-8">
           <div class="form-group" style="flex:1"><label class="form-label">緯度</label>
@@ -3210,7 +3212,7 @@ const App = (() => {
           <button class="btn btn-outline btn-sm" id="btn-gps">現在地を取得</button>
         </div>
       </div>
-      <div class="card">
+      <div class="card settings-card">
         <div class="card-title">パラメータ</div>
         <div class="flex gap-8">
           <div class="form-group" style="flex:1"><label class="form-label">平均速度 (km/h)</label>
@@ -3220,26 +3222,30 @@ const App = (() => {
         </div>
         <button class="btn btn-primary btn-sm" id="btn-save-params">保存</button>
       </div>
-      <div class="card">
+      <div class="settings-section-title">データ更新</div>
+      <div class="card settings-card">
         <div class="card-title">接続テスト</div>
         <button class="btn btn-outline btn-sm" id="btn-test">テスト実行</button>
         <div id="test-result" class="text-sm mt-8"></div>
       </div>
-      <div class="card">
+      <div class="settings-section-title">店舗管理</div>
+      <div class="card settings-card">
         <div class="card-title">データ</div>
         <button class="btn btn-outline btn-sm" id="btn-refresh">データ再取得</button>
       </div>
-      <div class="card">
+      <div class="card settings-card">
         <div class="card-title">店舗管理</div>
         <button class="btn btn-primary btn-sm mb-8" id="btn-add-store">+ 店舗追加</button>
         <div id="store-list"></div>
       </div>
-      <div class="card">
+      <div class="settings-section-title">応急修正</div>
+      <div class="card settings-card">
         <div class="card-title">仕入れ集計を修正</div>
         <div class="text-sm text-dim mb-8">履歴の仕入れ金額・点数が0になっている場合、在庫管理シートから再集計して修正します。</div>
         <button class="btn btn-sm btn-primary" id="btn-recalc-purchases">仕入れ集計を再計算</button>
       </div>
-      <div class="card">
+      <div class="settings-section-title settings-danger-title">危険操作</div>
+      <div class="card settings-card settings-danger-card">
         <div class="card-title">履歴消去</div>
         <div class="text-sm text-dim mb-8">全ての巡回履歴・仕入れ記録を削除します。この操作は取り消せません。</div>
         <button class="btn btn-sm btn-accent" id="btn-clear-history">全履歴を消去</button>
