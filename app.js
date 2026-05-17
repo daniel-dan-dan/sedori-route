@@ -57,7 +57,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v95';
+  const ASSET_VER = 'v96';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -2742,15 +2742,17 @@ const App = (() => {
     }
   }
 
-  // 日付単位の在庫仕入れ品キャッシュ（セッション中のみ。履歴再オープンで再フェッチしない）
+  // 日付単位の在庫仕入れ品キャッシュ（表示は速く、裏で最新化する）
   const inventoryByDateCache = {};
+  const inventoryRefreshInFlightByDate = {};
 
   // 在庫管理シートの仕入れ品を取得し、巡回ルートの訪問店舗に紐付けて表示
-  async function loadInventoryForRoute(route) {
+  async function loadInventoryForRoute(route, options = {}) {
     const section = document.getElementById('inventory-section');
     if (!section) return;
     const date = normalizeRouteDate_(route.date);
     if (!date) return;
+    const backgroundRefresh = options.backgroundRefresh !== false;
 
     let items = inventoryByDateCache[date];
     if (!items) {
@@ -2763,24 +2765,89 @@ const App = (() => {
         }
       } catch (e) {}
     }
+    if (items) {
+      renderInventoryForRoute(route, items);
+      if (backgroundRefresh) {
+        refreshInventoryForRoute(route, date, { showErrors: true });
+      }
+      return;
+    }
+
     if (!items) {
       section.innerHTML = `
         <div class="card-title mt-12">在庫管理からの仕入れ品</div>
         <div class="card text-dim">読み込み中...</div>`;
       try {
-        items = await API.getInventoryPurchases({ from: date, to: date });
-        // 仕入れが0件の場合はキャッシュしない（後で入力された場合に再取得できるよう）
-        if (items && items.length > 0) {
-          inventoryByDateCache[date] = items;
-          Storage.saveViewCache('inventory_' + date, { data: items }).catch(() => {});
-        }
+        items = await fetchInventoryForDate_(date);
       } catch (e) {
-        section.innerHTML = `
-          <div class="card-title mt-12">在庫管理からの仕入れ品</div>
-          <div class="card text-dim">読み込み失敗: ${esc(e.message)}</div>`;
+        renderInventoryFetchError_(route, e.message, false);
         return;
       }
     }
+
+    renderInventoryForRoute(route, items);
+  }
+
+  async function fetchInventoryForDate_(date) {
+    const items = await API.getInventoryPurchases({ from: date, to: date });
+    const list = Array.isArray(items) ? items : [];
+    if (list.length > 0) {
+      inventoryByDateCache[date] = list;
+      Storage.saveViewCache('inventory_' + date, { data: list }).catch(() => {});
+    } else {
+      delete inventoryByDateCache[date];
+      Storage.clearViewCache('inventory_' + date).catch(() => {});
+    }
+    return list;
+  }
+
+  async function refreshInventoryForRoute(route, date, { showErrors = false } = {}) {
+    if (inventoryRefreshInFlightByDate[date]) return;
+    inventoryRefreshInFlightByDate[date] = true;
+    try {
+      const latest = await fetchInventoryForDate_(date);
+      if (Router.getCurrentView() === 'history-detail') {
+        renderInventoryForRoute(route, latest);
+      }
+    } catch (e) {
+      if (showErrors && Router.getCurrentView() === 'history-detail') {
+        renderInventoryFetchError_(route, e.message, true);
+      }
+    } finally {
+      delete inventoryRefreshInFlightByDate[date];
+    }
+  }
+
+  function renderInventoryFetchError_(route, message, hasCachedContent) {
+    const section = document.getElementById('inventory-section');
+    if (!section) return;
+    const alertHtml = `
+      <div class="inventory-refresh-alert">
+        <span>${hasCachedContent ? '最新確認に失敗しました' : '読み込みに失敗しました'}: ${esc(message)}</span>
+        <button class="inventory-retry-btn" id="btn-inventory-retry">再試行</button>
+      </div>`;
+    if (hasCachedContent) {
+      section.querySelector('.inventory-refresh-alert')?.remove();
+      section.insertAdjacentHTML('beforeend', alertHtml);
+    } else {
+      section.innerHTML = `
+        <div class="card-title mt-12">在庫管理からの仕入れ品</div>
+        <div class="card text-dim">読み込み失敗</div>
+        ${alertHtml}`;
+    }
+    document.getElementById('btn-inventory-retry')?.addEventListener('click', () => {
+      const date = normalizeRouteDate_(route.date);
+      if (hasCachedContent && date) {
+        refreshInventoryForRoute(route, date, { showErrors: true });
+      } else {
+        loadInventoryForRoute(route, { backgroundRefresh: false });
+      }
+    });
+  }
+
+  function renderInventoryForRoute(route, items) {
+    const section = document.getElementById('inventory-section');
+    if (!section) return;
 
     // 訪問店舗（この巡回）
     // status=visited に限らずスキップ以外は候補に含める（到着/出発を押さずに終えた場合もカバー）
@@ -2955,7 +3022,7 @@ const App = (() => {
           await API.updateInventoryShop({ row, shop });
           toast(`${shop} に確定しました`);
           updateCachedShop(row, shop);
-          loadInventoryForRoute(route);
+          loadInventoryForRoute(route, { backgroundRefresh: false });
         } catch (e) {
           sel.disabled = false;
           toast('保存失敗: ' + e.message);
@@ -2974,7 +3041,7 @@ const App = (() => {
           await API.updateInventoryShop({ row, shop });
           toast(`${shop} に紐付けました`);
           updateCachedShop(row, shop);
-          loadInventoryForRoute(route);
+          loadInventoryForRoute(route, { backgroundRefresh: false });
         } catch (e) {
           sel.disabled = false;
           toast('保存失敗: ' + e.message);
@@ -3107,34 +3174,23 @@ const App = (() => {
       html += `<div class="card"><div class="card-title">メモ</div><div>${esc(route.note)}</div></div>`;
     }
 
-    // 在庫管理からの仕入れ品（非同期で読み込み）
-    html += `<div id="inventory-section"></div>
-    <button class="btn btn-sm btn-outline mt-4" id="btn-reload-inventory" style="width:100%;color:var(--text-dim);border-color:var(--border)">在庫管理を再読み込み</button>`;
+    // 在庫管理からの仕入れ品（キャッシュ表示後、裏で最新化）
+    html += `<div id="inventory-section"></div>`;
 
+    html += '<div class="history-actions">';
     // 巡回再開ボタン（停止した巡回をやり直せる）
     if (route.stops && route.stops.length > 0) {
-      html += `<button class="btn btn-success btn-block mt-12" id="btn-resume-route">🔄 この巡回を再開</button>`;
+      html += `<button class="btn btn-block history-action-primary" id="btn-resume-route">この巡回を再開</button>`;
     }
-
-    // 店舗を追加ボタン
-    html += `<button class="btn btn-outline btn-block mt-12" id="btn-add-stop-history" style="border-style:dashed;color:var(--primary)">+ 店舗を追加</button>`;
-
-    // 戻るボタン
-    html += `<button class="btn btn-outline btn-block mt-12" id="btn-back-history">履歴一覧に戻る</button>`;
-
-    // 個別消去ボタン
-    html += `<button class="btn btn-accent btn-block mt-12" id="btn-delete-route">この履歴を消去</button>`;
+    html += `
+      <button class="btn btn-block history-action-secondary history-action-add" id="btn-add-stop-history">店舗を追加</button>
+      <button class="btn btn-block history-action-secondary" id="btn-back-history">履歴一覧に戻る</button>
+      <button class="btn btn-block history-action-danger" id="btn-delete-route">この履歴を消去</button>
+    </div>`;
 
     container.innerHTML = html;
 
     loadInventoryForRoute(route);
-
-    document.getElementById('btn-reload-inventory')?.addEventListener('click', () => {
-      // キャッシュを削除して強制再取得
-      const d = normalizeRouteDate_(route.date);
-      if (d) delete inventoryByDateCache[d];
-      loadInventoryForRoute(route);
-    });
 
     document.getElementById('btn-resume-route')?.addEventListener('click', () => {
       resumePatrolFromHistory(route);
