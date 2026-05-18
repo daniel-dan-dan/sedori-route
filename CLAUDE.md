@@ -23,7 +23,7 @@ GitHub Pages (`daniel-dan-dan/sedori-route` → `https://daniel-dan-dan.github.i
 - `router.js` — hashベースSPAルーター（`#home`, `#patrol`, `#history`等）。
 - `app.js` — 全ビュー描画とイベント処理を一枚岩モジュールで実装。**95KB超・重要定数はトップに集約**:
   - `CHAIN_COLORS` / `CHAIN_LOGOS` — 27チェーンのブランドカラーとロゴ画像パス（`icons/chains/*.png`）
-  - `AREAS` — 座標ベースのエリア自動分類（仙台中心に同心円で分割）。`test`は排他的に上から判定。
+  - `AREAS` — 座標ベースのエリア自動分類。履歴で読みやすいように、表示名は `仙台駅`、`中山`、`愛子` など代表地名1つに統一。`test`は排他的に上から判定。
   - `CHAIN_RULES` — 店舗名regex→チェーン名のマッピング。**長い名前を先に判定**（例: `BOOKOFF SUPER BAZAAR` → `ブックオフSB` を `ブックオフ`より先）。
 - `sw.js` — Service Worker、ネットワーク優先・キャッシュフォールバック。`script.google.com` はキャッシュ除外。**ロゴ/CSS/JSを変更したら必ず `CACHE_NAME` のバージョン番号をバンプ**（例: `sedori-route-v32` → `v33`）。
 

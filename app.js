@@ -151,23 +151,39 @@ const App = (() => {
   // ---------- エリア定義（座標ベース自動分類） ----------
 
   const AREAS = [
-    // 分類判定用（広域エリアを先に判定してから仙台市内を細分化）
-    { id: 'yamagata',   name: '山形',          test: s => Number(s.lng) < 140.50 },
-    { id: 'osaki',      name: '大崎・古川',     test: s => Number(s.lat) >= 38.50 },
-    { id: 'ishinomaki', name: '石巻',           test: s => Number(s.lng) >= 141.10 },
-    { id: 'okawara',    name: '大河原・白石',    test: s => Number(s.lat) < 38.10 },
-    { id: 'rifu',       name: '利府・多賀城',    test: s => Number(s.lat) >= 38.28 && Number(s.lng) >= 140.94 },
-    { id: 'izumi',      name: '泉・富谷',       test: s => Number(s.lat) >= 38.30 },
-    { id: 'aoba',       name: '青葉・中心部',    test: s => Number(s.lat) >= 38.25 && Number(s.lng) < 140.90 },
-    { id: 'miyagino',   name: '宮城野・若林',    test: s => Number(s.lat) >= 38.24 && Number(s.lng) >= 140.90 },
-    { id: 'taihaku',    name: '太白・南',        test: s => Number(s.lat) < 38.24 && Number(s.lat) >= 38.19 },
-    { id: 'natori',     name: '名取・岩沼',      test: s => Number(s.lat) < 38.19 },
+    // 分類判定用。広域エリアを先に判定してから、仙台市内を代表地名1つで細分化する。
+    { id: 'yamagata',    name: '山形',   group: '山形方面', test: s => Number(s.lng) < 140.50 },
+    { id: 'ishinomaki',  name: '石巻',   group: '沿岸北',   test: s => Number(s.lng) >= 141.10 },
+    { id: 'furukawa',    name: '古川',   group: '県北',     test: s => Number(s.lat) >= 38.50 },
+    { id: 'shiroishi',   name: '白石',   group: '県南',     test: s => Number(s.lat) < 38.03 },
+    { id: 'ogawara',     name: '大河原', group: '県南',     test: s => Number(s.lat) < 38.10 },
+    { id: 'iwanuma',     name: '岩沼',   group: '県南',     test: s => Number(s.lat) < 38.16 },
+    { id: 'natori',      name: '名取',   group: '仙台南',   test: s => Number(s.lat) < 38.20 },
+    { id: 'tagajo',      name: '多賀城', group: '沿岸',     test: s => Number(s.lat) >= 38.285 && Number(s.lng) >= 140.99 },
+    { id: 'rifu',        name: '利府',   group: '沿岸',     test: s => Number(s.lat) >= 38.30 && Number(s.lng) >= 140.94 },
+    { id: 'tomiya',      name: '富谷',   group: '仙台北',   test: s => Number(s.lat) >= 38.35 },
+    { id: 'izumichuo',   name: '泉中央', group: '仙台北',   test: s => Number(s.lat) >= 38.30 && Number(s.lng) >= 140.86 },
+    { id: 'sendai_port', name: '仙台港', group: '仙台東',   test: s => Number(s.lng) >= 140.99 && Number(s.lat) >= 38.24 },
+    { id: 'ayashi',      name: '愛子',   group: '仙台西',   test: s => Number(s.lng) < 140.75 },
+    { id: 'nakayama',    name: '中山',   group: '仙台西',   test: s => Number(s.lat) >= 38.27 && Number(s.lng) < 140.86 },
+    { id: 'arai',        name: '荒井',   group: '仙台東',   test: s => Number(s.lng) >= 140.92 && Number(s.lat) < 38.255 },
+    { id: 'nigatake',    name: '苦竹',   group: '仙台東',   test: s => Number(s.lng) >= 140.90 && Number(s.lat) >= 38.24 },
+    { id: 'sendai_sta',  name: '仙台駅', group: '仙台中心', test: s => Number(s.lat) >= 38.245 },
+    { id: 'tomizawa',    name: '富沢',   group: '仙台南',   test: s => Number(s.lat) < 38.225 },
+    { id: 'nagamachi',   name: '長町',   group: '仙台南',   test: s => Number(s.lat) < 38.245 },
+    { id: 'other',       name: 'その他', group: 'その他',   test: () => true },
   ];
 
-  // UI表示順（仙台駅から近い順）
+  // UI表示順（履歴やエリア別タブで見やすい巡回方面順）
   const AREA_DISPLAY_ORDER = [
-    'aoba', 'miyagino', 'taihaku', 'izumi', 'rifu', 'natori',
-    'okawara', 'ishinomaki', 'osaki', 'yamagata',
+    'sendai_sta', 'nakayama', 'ayashi',
+    'izumichuo', 'tomiya',
+    'nigatake', 'sendai_port', 'arai',
+    'nagamachi', 'tomizawa', 'natori',
+    'iwanuma', 'ogawara', 'shiroishi',
+    'rifu', 'tagajo',
+    'furukawa', 'ishinomaki', 'yamagata',
+    'other',
   ];
 
   function getArea(store) {
