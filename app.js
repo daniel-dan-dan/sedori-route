@@ -2601,6 +2601,57 @@ const App = (() => {
     Storage.clearViewCache('analytics').catch(() => {});
   }
 
+  function getAreaName_(areaId) {
+    return AREAS.find(a => a.id === areaId)?.name || 'その他';
+  }
+
+  function getStoreForStop_(stop) {
+    if (!stop) return null;
+    const stopId = String(stop.store_id || '');
+    const stopName = String(stop.store_name || stop.name || '');
+    return stores.find(s => String(s.store_id || '') === stopId)
+      || stores.find(s => String(s.name || '') === stopName)
+      || null;
+  }
+
+  function getStopAreaId_(stop) {
+    const store = getStoreForStop_(stop);
+    const source = store || stop;
+    const lat = Number(source?.lat);
+    const lng = Number(source?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '';
+    return getArea(source);
+  }
+
+  function getRouteAreaNames_(route) {
+    const stops = route?.stops || [];
+    const targetStops = stops.filter(s => s.status !== 'skipped');
+    const areaStops = targetStops.length ? targetStops : stops;
+    const seen = new Set();
+    const names = [];
+
+    areaStops.forEach(stop => {
+      const areaId = getStopAreaId_(stop);
+      if (!areaId || seen.has(areaId)) return;
+      seen.add(areaId);
+      names.push(getAreaName_(areaId));
+    });
+
+    return names;
+  }
+
+  function renderHistoryAreas_(route) {
+    const areaNames = getRouteAreaNames_(route);
+    if (!areaNames.length) return '<div class="history-areas history-areas-empty">エリア: 未取得</div>';
+    const visible = areaNames.slice(0, 3);
+    const hiddenCount = areaNames.length - visible.length;
+    return `
+      <div class="history-areas" aria-label="巡回エリア">
+        ${visible.map(name => `<span class="history-area-badge">${esc(name)}</span>`).join('')}
+        ${hiddenCount > 0 ? `<span class="history-area-badge history-area-more">+${hiddenCount}</span>` : ''}
+      </div>`;
+  }
+
   // 履歴一覧をルートの配列から描画して container に書き込む
   function renderHistoryContent(container, routes) {
     // キャッシュ経由でも必ず日付降順（直近が上）
@@ -2623,6 +2674,7 @@ const App = (() => {
               <span class="history-date">${dateStr}</span>
               <span class="badge badge-primary">${r.store_count || 0}店舗</span>
             </div>
+            ${renderHistoryAreas_(r)}
             <div class="history-meta">
               距離: ${r.total_distance_km || 0}km |
               仕入れ: ${Number(r.total_purchase || 0).toLocaleString()}円 (${r.total_items || 0}点)

@@ -1534,6 +1534,31 @@ a.stop-address:active { color: var(--primary); }
 .history-date { font-size: 13px; font-weight: 600; }
 .history-meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 .history-profit { font-size: 12px; color: #2e7d32; font-weight: 600; margin-top: 4px; }
+.history-areas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+.history-area-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #e8f5f2;
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 700;
+}
+.history-area-more {
+  background: #edf2f7;
+  color: var(--text-dim);
+}
+.history-areas-empty {
+  color: var(--text-dim);
+  font-size: 11px;
+}
 
 /* ---- Badges ---- */
 .badge {
