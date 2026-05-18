@@ -1785,12 +1785,6 @@ a.stop-address:active { color: var(--primary); }
   will-change: transform;
 }
 
-/* 慣性ズーム: ease-out-quart（初速 = 4×距離/時間）でピンチ速度から滑らかに減速 */
-.inertia-zoom .leaflet-zoom-anim .leaflet-zoom-animated {
-  transition: transform 0.48s cubic-bezier(0.25, 1, 0.5, 1) !important;
-  -webkit-transition: -webkit-transform 0.48s cubic-bezier(0.25, 1, 0.5, 1) !important;
-}
-
 /* ---- スケルトンUI（分析タブのロード中骨格表示） ---- */
 @keyframes skeleton-shimmer {
   0% { background-position: -200% 0; }

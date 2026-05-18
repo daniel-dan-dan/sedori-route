@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sedori-route-v155';
+const CACHE_NAME = 'sedori-route-v156';
 const ASSETS = [
   './',
   './index.html',
@@ -41,20 +41,18 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   // GAS API はキャッシュしない
   if (e.request.url.includes('script.google.com')) return;
-  // ネットワーク優先、HTTPキャッシュをバイパスして常に最新を取得（失敗時にSWキャッシュ）
-  const req = new Request(e.request.url, {
-    method: 'GET',
-    headers: e.request.headers,
-    mode: e.request.mode === 'navigate' ? 'cors' : e.request.mode,
-    credentials: e.request.credentials,
-    redirect: e.request.redirect,
-    cache: 'no-cache',
-  });
+
+  const url = new URL(e.request.url);
+  // 地図タイルやLeaflet CDNなどの外部リソースは、ブラウザ標準キャッシュに任せる
+  if (url.origin !== self.location.origin) return;
+
+  // 自前ファイルだけネットワーク優先で更新確認（失敗時にSWキャッシュ）
+  const req = new Request(e.request, { cache: 'no-cache' });
   e.respondWith(
     fetch(req)
       .then(res => {
         const clone = res.clone();
-        caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+        if (res.ok) caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
         return res;
       })
       .catch(() => caches.match(e.request))

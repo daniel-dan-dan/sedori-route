@@ -14,7 +14,6 @@ const App = (() => {
   let mapCluster = null;
   let mapMarkers = new Map(); // store_id → L.marker（差分更新用）
   let mapChainFilter = 'all';
-  let pendingInertia = null; // ピンチズーム慣性の次フレーム予約
   let currentLocationMarker = null; // 現在地マーカー
   let currentLocationCircle = null; // 現在地精度サークル
   const HIDDEN_STORE_IDS = new Set(['s20260411082838460']);
@@ -757,13 +756,16 @@ const App = (() => {
     // チェーンチップ: 押したチェーンだけ表示
     container.querySelectorAll('.chain-chip').forEach(chip => {
       chip.addEventListener('click', () => {
+        if (chip.dataset.chain === mapChainFilter) return;
         const chips = container.querySelector('.map-chain-filter');
         const savedScroll = chips ? chips.scrollLeft : 0;
         mapChainFilter = chip.dataset.chain;
-        if (mapInstance) { mapInstance.remove(); mapInstance = null; mapCluster = null; }
-        Router.navigate('home');
-        const newChips = document.querySelector('.map-chain-filter');
-        if (newChips) newChips.scrollLeft = savedScroll;
+        container.querySelectorAll('.chain-chip').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.chain === mapChainFilter);
+        });
+        if (chips) chips.scrollLeft = savedScroll;
+        if (mapInstance) mapInstance.closePopup();
+        refreshMapMarkers();
       });
     });
 
@@ -806,7 +808,8 @@ const App = (() => {
       subdomains: 'abcd',
       updateWhenIdle: false,     // アニメ終了を待たずタイル取得を開始
       updateWhenZooming: false,  // アニメ中の描画更新は抑制（ガクつき防止）
-      keepBuffer: 2,
+      updateInterval: 120,
+      keepBuffer: 5,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
     }).addTo(mapInstance);
 
@@ -816,48 +819,6 @@ const App = (() => {
     mapMarkers.clear();
     refreshMapMarkers();
     fitMapToMarkers();
-
-    // 慣性のフォールバック発火点（_animateZoomパッチで通常は吸収される）
-    mapInstance.on('zoomend', applyInertiaIfPending);
-
-    // Leafletのズームアニメ終了は250ms固定。慣性時のみ延長するためパッチ
-    mapInstance._inertiaExtendMs = 0;
-    const origOnZoomEnd = mapInstance._onZoomTransitionEnd;
-    mapInstance._onZoomTransitionEnd = function () {
-      if (mapInstance._inertiaExtendMs > 0) {
-        const extend = mapInstance._inertiaExtendMs;
-        mapInstance._inertiaExtendMs = 0;
-        setTimeout(() => origOnZoomEnd.call(mapInstance), extend);
-      } else {
-        origOnZoomEnd.call(mapInstance);
-      }
-    };
-
-    // _animateZoomをパッチ: Leafletのtouchend snapアニメに慣性を合成して1回のアニメで完結させる
-    // これによりピンチ直後の「snap→停止→慣性」2段階がなくなり、切れ目のない1本のズームになる
-    const origAnimateZoom = mapInstance._animateZoom;
-    mapInstance._animateZoom = function (center, zoom, startAnim, noUpdate) {
-      if (startAnim && pendingInertia && performance.now() <= pendingInertia.expires) {
-        const { extra, latlng } = pendingInertia;
-        pendingInertia = null;
-        const target = zoom + extra;
-        const clamped = Math.max(this.getMinZoom() || 1, Math.min(this.getMaxZoom() || 19, target));
-        if (clamped !== zoom) {
-          const container = this.getContainer();
-          container.classList.add('inertia-zoom');
-          this._inertiaExtendMs = 230;
-          this.once('zoomend', () => container.classList.remove('inertia-zoom'));
-          return origAnimateZoom.call(this, latlng, clamped, startAnim, noUpdate);
-        }
-      }
-      return origAnimateZoom.call(this, center, zoom, startAnim, noUpdate);
-    };
-
-    // ピンチズーム慣性（指を離した後も少し続く）
-    if (!mapEl._pinchInertiaInstalled) {
-      installPinchZoomInertia(mapEl);
-      mapEl._pinchInertiaInstalled = true;
-    }
 
     // 現在地の取得と表示（初回。以降はupdateCurrentLocation()で差分更新）
     updateCurrentLocation();
@@ -921,87 +882,6 @@ const App = (() => {
     }, () => {
       showToast('現在地を取得できませんでした');
     }, { enableHighAccuracy: true, timeout: 10000 });
-  }
-
-  function applyInertiaIfPending() {
-    if (!pendingInertia || !mapInstance) return;
-    if (performance.now() > pendingInertia.expires) {
-      pendingInertia = null;
-      return;
-    }
-    const { extra, latlng } = pendingInertia;
-    pendingInertia = null;
-    const cur = mapInstance.getZoom();
-    const target = Math.round(cur + extra);
-    const clamped = Math.max(mapInstance.getMinZoom() || 1, Math.min(mapInstance.getMaxZoom() || 19, target));
-    if (clamped !== cur) {
-      requestAnimationFrame(() => {
-        if (!mapInstance) return;
-        const container = mapInstance.getContainer();
-        container.classList.add('inertia-zoom');
-        // Leafletの収束タイミングを450ms延ばし、CSS側の長め(700ms)transitionと合わせる
-        // CSS側の0.48s transitionに合わせる（250ms + 230ms = 480ms）
-        mapInstance._inertiaExtendMs = 230;
-        mapInstance.once('zoomend', () => {
-          container.classList.remove('inertia-zoom');
-        });
-        mapInstance.setZoomAround(latlng, clamped, { animate: true });
-      });
-    }
-  }
-
-  function installPinchZoomInertia(mapEl) {
-    let pinch = null;
-    const dist = (t1, t2) => Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
-
-    mapEl.addEventListener('touchstart', (e) => {
-      if (e.touches.length === 2) {
-        pinch = {
-          samples: [{ d: dist(e.touches[0], e.touches[1]), t: performance.now() }],
-          cx: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-          cy: (e.touches[0].clientY + e.touches[1].clientY) / 2,
-        };
-      } else {
-        pinch = null;
-      }
-    }, { passive: true });
-
-    mapEl.addEventListener('touchmove', (e) => {
-      if (pinch && e.touches.length === 2) {
-        pinch.samples.push({ d: dist(e.touches[0], e.touches[1]), t: performance.now() });
-        if (pinch.samples.length > 8) pinch.samples.shift();
-      }
-    }, { passive: true });
-
-    mapEl.addEventListener('touchend', (e) => {
-      if (pinch && e.touches.length < 2 && mapInstance) {
-        // 直近3サンプルから速度算出（指止め直後の離し対応）
-        const recent = pinch.samples.slice(-3);
-        if (recent.length >= 2) {
-          const first = recent[0];
-          const last = recent[recent.length - 1];
-          const dt = last.t - first.t;
-          if (dt > 5) {
-            const ratio = last.d / first.d; // 1より大→拡大、小→縮小
-            const zoomDelta = Math.log2(ratio); // zoom相当
-            const vel = zoomDelta / dt; // zoom/ms
-            let extra = vel * 120; // 120ms分延長（さらに弱め）
-            extra = Math.max(-0.8, Math.min(0.8, extra));
-            if (Math.abs(extra) > 0.35) {
-              const rect = mapEl.getBoundingClientRect();
-              const pt = L.point(pinch.cx - rect.left, pinch.cy - rect.top);
-              const latlng = mapInstance.containerPointToLatLng(pt);
-              // zoomendを待って発火（Leafletのピンチ処理後に正しい基準値から計算）
-              pendingInertia = { extra, latlng, expires: performance.now() + 1000 };
-            }
-          }
-        }
-        pinch = null;
-      }
-      if (e.touches.length === 0) pinch = null;
-    }, { passive: true });
-
-    mapEl.addEventListener('touchcancel', () => { pinch = null; }, { passive: true });
   }
 
   function buildMapPopupHtml(s, selIdx) {
