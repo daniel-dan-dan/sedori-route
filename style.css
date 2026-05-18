@@ -1551,9 +1551,21 @@ a.stop-address:active { color: var(--primary); }
   font-size: 11px;
   font-weight: 700;
 }
+.history-area-hidden[hidden] {
+  display: none;
+}
 .history-area-more {
+  border: 0;
   background: #edf2f7;
   color: var(--text-dim);
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+}
+.history-area-more[aria-expanded="true"] {
+  background: #d7f7ee;
+  color: #047857;
 }
 .history-areas-empty {
   color: var(--text-dim);

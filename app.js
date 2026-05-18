@@ -2660,11 +2660,12 @@ const App = (() => {
     const areaNames = getRouteAreaNames_(route);
     if (!areaNames.length) return '<div class="history-areas history-areas-empty">エリア: 未取得</div>';
     const visible = areaNames.slice(0, 3);
-    const hiddenCount = areaNames.length - visible.length;
+    const hidden = areaNames.slice(3);
     return `
       <div class="history-areas" aria-label="巡回エリア">
         ${visible.map(name => `<span class="history-area-badge">${esc(name)}</span>`).join('')}
-        ${hiddenCount > 0 ? `<span class="history-area-badge history-area-more">+${hiddenCount}</span>` : ''}
+        ${hidden.map(name => `<span class="history-area-badge history-area-hidden" hidden>${esc(name)}</span>`).join('')}
+        ${hidden.length > 0 ? `<button type="button" class="history-area-badge history-area-more" data-action="toggle-history-areas" data-hidden-count="${hidden.length}" aria-expanded="false" aria-label="すべての巡回エリアを表示">+${hidden.length}</button>` : ''}
       </div>`;
   }
 
@@ -2708,6 +2709,21 @@ const App = (() => {
       el.addEventListener('click', () => {
         const idx = Number(el.dataset.idx);
         Router.navigate('history-detail', { route: historyCache[idx] });
+      });
+    });
+
+    container.querySelectorAll('[data-action="toggle-history-areas"]').forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const areaWrap = btn.closest('.history-areas');
+        if (!areaWrap) return;
+        const expanded = btn.getAttribute('aria-expanded') === 'true';
+        areaWrap.querySelectorAll('.history-area-hidden').forEach(badge => {
+          badge.hidden = expanded;
+        });
+        btn.setAttribute('aria-expanded', String(!expanded));
+        btn.textContent = expanded ? `+${btn.dataset.hiddenCount || ''}` : '閉じる';
+        btn.setAttribute('aria-label', expanded ? 'すべての巡回エリアを表示' : '巡回エリアを折りたたむ');
       });
     });
 
