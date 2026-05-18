@@ -1582,13 +1582,19 @@ a.stop-address:active { color: var(--primary); }
 
 /* ---- マップビュー ---- */
 #map-view {
-  height: calc(100vh - 280px);
-  min-height: 340px;
+  height: clamp(430px, calc(100dvh - 220px), 760px);
+  min-height: 430px;
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow);
   background: var(--surface2);
   position: relative;
+}
+
+@supports not (height: 100dvh) {
+  #map-view {
+    height: clamp(430px, calc(100vh - 220px), 760px);
+  }
 }
 
 /* ---- 現在地ボタン（地図右下に固定） ---- */

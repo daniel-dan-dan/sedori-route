@@ -2316,6 +2316,12 @@ const App = (() => {
       </div>`;
   }
 
+  function formatHistoryProfitYen_(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '0';
+    return (Math.round(num / 100) * 100).toLocaleString();
+  }
+
   // 履歴一覧をルートの配列から描画して container に書き込む
   function renderHistoryContent(container, routes) {
     // キャッシュ経由でも必ず日付降順（直近が上）
@@ -2344,7 +2350,7 @@ const App = (() => {
               仕入れ: ${Number(r.total_purchase || 0).toLocaleString()}円 (${r.total_items || 0}点)
             </div>
             ${Number(r.expected_profit || 0) > 0
-              ? `<div class="history-profit">見込み利益: ${Number(r.expected_profit).toLocaleString()}円</div>`
+              ? `<div class="history-profit">見込み利益: ${formatHistoryProfitYen_(r.expected_profit)}円</div>`
               : ''
             }
             ${r.note ? `<div class="text-sm mt-8">${esc(r.note)}</div>` : ''}
