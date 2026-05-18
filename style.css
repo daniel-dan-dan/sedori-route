@@ -1046,58 +1046,6 @@ body {
   flex: 1 1 0;
 }
 
-/* ---- Mode toggle ---- */
-.mode-toggle {
-  display: flex;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 3px;
-  margin-bottom: 10px;
-}
-.mode-btn {
-  flex: 1;
-  min-height: 38px;
-  padding: 7px 4px;
-  border: none;
-  background: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-.mode-btn.active {
-  background: var(--surface);
-  color: var(--primary);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .08);
-}
-
-/* ---- Filter tabs ---- */
-.filter-tabs {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 8px 0 10px;
-  -webkit-overflow-scrolling: touch;
-}
-.filter-tab {
-  padding: 7px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  white-space: nowrap;
-  cursor: pointer;
-  background: var(--surface);
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-}
-.filter-tab.active {
-  background: var(--primary);
-  color: #fff;
-  border-color: var(--primary);
-  box-shadow: 0 4px 10px rgba(var(--primary-rgb), .16);
-}
-
 /* ---- Optimized Route ---- */
 .route-result {
   background: var(--surface);
@@ -1632,34 +1580,6 @@ a.stop-address:active { color: var(--primary); }
 .gap-8 { gap: 8px; }
 .hidden { display: none !important; }
 
-/* ---- 表示切替（リスト / マップ） ---- */
-.view-toggle {
-  display: flex;
-  gap: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  padding: 4px;
-  border-radius: var(--radius);
-  margin-bottom: 8px;
-}
-.view-btn {
-  flex: 1;
-  min-height: 40px;
-  padding: 8px;
-  border: none;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 14px;
-  font-weight: 600;
-  border-radius: 8px;
-  cursor: pointer;
-}
-.view-btn.active {
-  background: var(--primary);
-  color: #fff;
-  box-shadow: 0 4px 10px rgba(var(--primary-rgb), .16);
-}
-
 /* ---- マップビュー ---- */
 #map-view {
   height: calc(100vh - 280px);
@@ -2053,38 +1973,12 @@ body {
   color: #244550;
 }
 
-.view-toggle,
-.mode-toggle {
-  background: #edf6f7;
-  border-color: #d5e7ea;
-  border-radius: 10px;
-}
-
-.view-btn,
-.mode-btn {
-  border-radius: 8px;
-}
-
-.view-btn.active,
-.mode-btn.active {
-  background: #fff;
-  color: var(--primary-dark);
-  box-shadow: 0 2px 8px rgba(6, 24, 31, .08);
-}
-
-.view-btn.active {
-  background: linear-gradient(180deg, #09939d 0%, var(--primary) 100%);
-  color: #fff;
-}
-
-.filter-tab,
 .chain-chip {
   border-radius: 999px;
   background: #fff;
   border-color: #d7e8eb;
 }
 
-.filter-tab.active,
 .chain-chip.active {
   box-shadow: 0 6px 14px rgba(6, 24, 31, .1);
 }

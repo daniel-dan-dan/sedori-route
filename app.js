@@ -9,10 +9,7 @@ const App = (() => {
   let optimizedRoute = null;
   let patrolState = null; // { routeId, stops, currentIdx }
   let plannedRoute = null; // 予定として保存されたルート（startTime 未打刻）
-  let filterMode = 'area'; // 'area' | 'genre' | 'chain'
-  let activeFilter = 'all';
   let patrolTimerInterval = null;
-  let viewMode = 'map'; // 'list' | 'map'
   let mapInstance = null;
   let mapCluster = null;
   let mapMarkers = new Map(); // store_id → L.marker（差分更新用）
@@ -195,8 +192,6 @@ const App = (() => {
 
   // ---------- ジャンル・チェーン定義 ----------
 
-  // カテゴリ表示順
-  const GENRE_ORDER = ['家電量販', 'HC', 'ドンキ', 'リサイクル', '書店', 'カー用品', 'その他'];
   const GENRE_DISPLAY = {
     '家電量販': '家電量販店',
     'HC': 'ホームセンター',
@@ -268,17 +263,6 @@ const App = (() => {
     // index は 0-based
     if (index < 20) return CIRCLED_NUMBERS[index];
     return `(${index + 1})`;
-  }
-
-  function getDefaultFilter(mode) {
-    if (mode === 'chain') {
-      const chainCounts = {};
-      stores.forEach(s => { const c = getChain(s); chainCounts[c] = (chainCounts[c] || 0) + 1; });
-      const sorted = Object.keys(chainCounts).sort((a, b) => chainCounts[b] - chainCounts[a]);
-      return sorted[0] || 'その他';
-    }
-    if (mode === 'genre') return GENRE_ORDER[0];
-    return AREA_DISPLAY_ORDER[0];
   }
 
   function normalizeStores(list) {
@@ -678,211 +662,7 @@ const App = (() => {
 
   function renderHome(container) {
     setTitle('巡回ルート');
-    if (activeFilter === 'all') activeFilter = getDefaultFilter(filterMode);
-
-    if (viewMode === 'map') {
-      return renderMapView(container);
-    }
-
-    let html = '';
-
-    // 巡回中バナー（最優先）
-    html += buildPatrolBanner();
-
-    // 予定ルートバナー
-    html += buildPlannedRouteBanner();
-
-    // 表示切替（マップ / リスト）
-    html += `<div class="view-toggle">
-      <button class="view-btn" data-view="map">マップ</button>
-      <button class="view-btn active" data-view="list">リスト</button>
-    </div>`;
-
-    // モード切替（エリア / ジャンル / チェーン）
-    html += `<div class="mode-toggle">
-      <button class="mode-btn ${filterMode === 'area' ? 'active' : ''}" data-mode="area">エリア別</button>
-      <button class="mode-btn ${filterMode === 'genre' ? 'active' : ''}" data-mode="genre">ジャンル別</button>
-      <button class="mode-btn ${filterMode === 'chain' ? 'active' : ''}" data-mode="chain">チェーン別</button>
-    </div>`;
-
-    // フィルタータブ
-    html += '<div class="filter-tabs">';
-    if (filterMode === 'chain') {
-      // チェーン名を集計して店舗数順にソート
-      const chainCounts = {};
-      stores.forEach(s => {
-        const c = getChain(s);
-        chainCounts[c] = (chainCounts[c] || 0) + 1;
-      });
-      const chainNames = Object.keys(chainCounts).sort((a, b) => chainCounts[b] - chainCounts[a]);
-      chainNames.forEach(c => {
-        html += `<div class="filter-tab ${activeFilter === c ? 'active' : ''}" data-cat="${c}">${c}(${chainCounts[c]})</div>`;
-      });
-    } else if (filterMode === 'genre') {
-      // ジャンル別タブ（GENRE_ORDER順）
-      GENRE_ORDER.forEach(g => {
-        const count = stores.filter(s => getGenre(s) === g).length;
-        if (count > 0) {
-          html += `<div class="filter-tab ${activeFilter === g ? 'active' : ''}" data-cat="${g}">${GENRE_DISPLAY[g] || g}(${count})</div>`;
-        }
-      });
-    } else {
-      // エリア別タブ
-      AREA_DISPLAY_ORDER.forEach(id => {
-        const a = AREAS.find(x => x.id === id);
-        if (!a) return;
-        const count = stores.filter(s => getArea(s) === a.id).length;
-        if (count > 0) {
-          html += `<div class="filter-tab ${activeFilter === a.id ? 'active' : ''}" data-cat="${a.id}">${a.name}(${count})</div>`;
-        }
-      });
-    }
-    html += '</div>';
-
-    // 店舗フィルタリング
-    let filtered;
-    if (filterMode === 'chain') {
-      filtered = stores.filter(s => getChain(s) === activeFilter);
-    } else if (filterMode === 'genre') {
-      filtered = stores.filter(s => getGenre(s) === activeFilter);
-    } else {
-      filtered = stores.filter(s => getArea(s) === activeFilter);
-    }
-
-    // ソート: チェーン名でまとめ、同チェーン内はスコア順
-    let sorted;
-    if (filterMode === 'area') {
-      sorted = [...filtered].sort((a, b) => {
-        const gi = GENRE_ORDER.indexOf(getGenre(a)) - GENRE_ORDER.indexOf(getGenre(b));
-        if (gi !== 0) return gi;
-        const ci = getChain(a).localeCompare(getChain(b));
-        return ci !== 0 ? ci : calcPriorityScore(b) - calcPriorityScore(a);
-      });
-    } else if (filterMode === 'genre') {
-      sorted = [...filtered].sort((a, b) => {
-        const ci = getChain(a).localeCompare(getChain(b));
-        return ci !== 0 ? ci : calcPriorityScore(b) - calcPriorityScore(a);
-      });
-    } else {
-      sorted = [...filtered].sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a));
-    }
-
-
-    // 店舗一覧
-    sorted.forEach(s => {
-      const selIdx = selectedStoreIds.indexOf(s.store_id);
-      const sel = selIdx >= 0 ? 'selected' : '';
-      const score = calcPriorityScore(s);
-      html += `
-        <div class="store-item ${sel}" data-sid="${s.store_id}">
-          ${renderStoreIconHtml(s)}
-          <div class="store-info">
-            <div class="store-name">${esc(s.name)}</div>
-            <div class="store-meta">${renderStoreStatusPill(s)}${esc(s.category)} | ${formatTime(s.open_time)}-${formatTime(s.close_time)} | ${s.avg_stay_min}分</div>
-            ${score > 0 ? `<div class="store-score">Score: ${score}</div>` : ''}
-          </div>
-          <div class="store-check">${selIdx >= 0 ? getSelectionLabel(selIdx) : ''}</div>
-        </div>`;
-    });
-
-    // フローティング操作バー（選択中の店舗がある場合のみ）
-    if (selectedStoreIds.length > 0) {
-      const selected = selectedStoreIds.map(id => stores.find(s => s.store_id === id)).filter(Boolean);
-      const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
-      const speed = Number(config.avg_speed_kmh) || 30;
-      let distanceHtml = '';
-      if (home.lat && home.lng && selected.length >= 1) {
-        const est = RouteOptimizer.calcSelectionOrder(home, selected, speed);
-        distanceHtml = `<span class="fab-eta">約 ${est.totalDistanceKm}km</span>`;
-      }
-      html += `
-        <div class="floating-action-bar">
-          <div class="floating-action-bar-inner">
-            <div class="fab-summary">
-              <span class="fab-count">${selectedStoreIds.length}店舗 選択中</span>
-              ${distanceHtml}
-              <button class="fab-clear" id="btn-clear">クリア</button>
-            </div>
-            <button class="btn btn-primary btn-block" id="btn-optimize">
-              ルート作成
-            </button>
-          </div>
-        </div>`;
-    }
-
-    container.innerHTML = html;
-    container.classList.toggle('has-floating-bar', selectedStoreIds.length > 0);
-
-    // 予定ルート・巡回中バナーのボタン
-    wirePlannedRouteHandlers();
-    wirePatrolBannerHandlers();
-
-    // 最適化済みルートがあれば表示
-    if (optimizedRoute) {
-      renderOptimizedRoute(container);
-    }
-
-    // イベント: 表示切替（リスト ↔ マップ）
-    container.querySelectorAll('.view-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        viewMode = btn.dataset.view;
-        Router.navigate('home');
-      });
-    });
-
-    // イベント: モード切替
-    container.querySelectorAll('.mode-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        filterMode = btn.dataset.mode;
-        activeFilter = getDefaultFilter(btn.dataset.mode);
-        Router.navigate('home');
-      });
-    });
-
-    // イベント: フィルタータブ
-    container.querySelectorAll('.filter-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        const tabs = container.querySelector('.filter-tabs');
-        const savedScroll = tabs ? tabs.scrollLeft : 0;
-        activeFilter = tab.dataset.cat;
-        Router.navigate('home');
-        const newTabs = document.querySelector('.filter-tabs');
-        if (newTabs) newTabs.scrollLeft = savedScroll;
-      });
-    });
-
-    // アクティブなフィルタータブを自動で可視領域に
-    const activeTab = container.querySelector('.filter-tab.active');
-    if (activeTab) {
-      const tabsEl = container.querySelector('.filter-tabs');
-      if (tabsEl) {
-        const tabRect = activeTab.getBoundingClientRect();
-        const containerRect = tabsEl.getBoundingClientRect();
-        if (tabRect.left < containerRect.left || tabRect.right > containerRect.right) {
-          activeTab.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'center' });
-        }
-      }
-    }
-
-    // イベント: 個別店舗選択
-    container.querySelectorAll('.store-item').forEach(el => {
-      el.addEventListener('click', () => {
-        const sid = el.dataset.sid;
-        const idx = selectedStoreIds.indexOf(sid);
-        if (idx >= 0) selectedStoreIds.splice(idx, 1);
-        else selectedStoreIds.push(sid);
-        optimizedRoute = null;
-        Router.navigate('home');
-      });
-    });
-
-    document.getElementById('btn-clear')?.addEventListener('click', () => {
-      selectedStoreIds = [];
-      optimizedRoute = null;
-      Router.navigate('home');
-    });
-
-    document.getElementById('btn-optimize')?.addEventListener('click', doOptimize);
+    return renderMapView(container);
   }
 
   function doOptimize() {
@@ -948,10 +728,6 @@ const App = (() => {
     container.innerHTML = `
       ${buildPatrolBanner()}
       ${buildPlannedRouteBanner()}
-      <div class="view-toggle">
-        <button class="view-btn active" data-view="map">マップ</button>
-        <button class="view-btn" data-view="list">リスト</button>
-      </div>
       ${chipHtml}
       <div id="map-view">
         <button class="btn-map-current" id="btn-map-current" title="現在地" aria-label="現在地">
@@ -977,15 +753,6 @@ const App = (() => {
     // 予定ルート・巡回中バナーのボタン
     wirePlannedRouteHandlers();
     wirePatrolBannerHandlers();
-
-    // 表示切替イベント
-    container.querySelectorAll('.view-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        viewMode = btn.dataset.view;
-        if (mapInstance) { mapInstance.remove(); mapInstance = null; mapCluster = null; }
-        Router.navigate('home');
-      });
-    });
 
     // チェーンチップ: 押したチェーンだけ表示
     container.querySelectorAll('.chain-chip').forEach(chip => {
