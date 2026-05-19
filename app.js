@@ -42,6 +42,7 @@ const App = (() => {
     'オートバックス': '#FFB300',
     'イエローハット': '#FFC107',
     'ジェームス': '#1E67B3',
+    '2りんかん': '#D6001C',
     'イオン': '#B60081',
     'トイザらス': '#E60012',
     'オフィスベンダー': '#6B7280',
@@ -53,7 +54,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v96';
+  const ASSET_VER = 'v97';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -230,7 +231,7 @@ const App = (() => {
     { re: /オートバックス/, chain: 'オートバックス' },
     { re: /イエローハット/, chain: 'イエローハット' },
     { re: /ジェームス/, chain: 'ジェームス' },
-    { re: /にりんかん/, chain: 'にりんかん' },
+    { re: /[２2]りんかん|にりんかん/i, chain: '2りんかん' },
     // その他
     { re: /イオン/, chain: 'イオン' },
     { re: /トイザらス/, chain: 'トイザらス' },
