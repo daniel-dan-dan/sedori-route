@@ -1478,10 +1478,23 @@ a.stop-address:active { color: var(--primary); }
   border-radius: var(--radius);
   margin-bottom: 8px;
   box-shadow: var(--shadow);
+  cursor: pointer;
 }
+.history-item:active { transform: translateY(1px); }
 .history-date { font-size: 13px; font-weight: 600; }
 .history-meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 .history-profit { font-size: 12px; color: #2e7d32; font-weight: 600; margin-top: 4px; }
+.history-card-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.history-detail-chevron {
+  color: var(--text-dim);
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+}
 .history-areas {
   display: flex;
   flex-wrap: wrap;

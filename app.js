@@ -736,10 +736,10 @@ const App = (() => {
       <div class="map-bottom-bar">
         <div class="flex-between mb-8">
           <span class="text-sm text-dim"><span id="map-sel-count">${selectedStoreIds.length}</span>店舗 選択中</span>
-          <button class="btn btn-sm btn-outline" id="btn-map-clear">クリア</button>
+          <button class="btn btn-sm btn-outline" id="btn-map-clear" ${selectedStoreIds.length < 1 ? 'disabled' : ''}>クリア</button>
         </div>
         <button class="btn btn-primary btn-block" id="btn-map-optimize" ${selectedStoreIds.length < 1 ? 'disabled' : ''}>
-          ルート作成
+          ${selectedStoreIds.length < 1 ? '店舗を選択してください' : 'ルート作成'}
         </button>
       </div>
     `;
@@ -1041,8 +1041,14 @@ const App = (() => {
   function updateMapBottomBar() {
     const countEl = document.getElementById('map-sel-count');
     const btn = document.getElementById('btn-map-optimize');
+    const clearBtn = document.getElementById('btn-map-clear');
+    const hasSelection = selectedStoreIds.length > 0;
     if (countEl) countEl.textContent = selectedStoreIds.length;
-    if (btn) btn.disabled = selectedStoreIds.length < 1;
+    if (btn) {
+      btn.disabled = !hasSelection;
+      btn.textContent = hasSelection ? 'ルート作成' : '店舗を選択してください';
+    }
+    if (clearBtn) clearBtn.disabled = !hasSelection;
   }
 
   function renderOptimizedRoute(container) {
@@ -2339,10 +2345,13 @@ const App = (() => {
       routes.forEach((r, idx) => {
         const dateStr = formatRouteDate_(r.date);
         html += `
-          <div class="history-item" data-idx="${idx}" style="cursor:pointer">
+          <div class="history-item" data-idx="${idx}" role="button" tabindex="0" aria-label="${esc(dateStr)}の巡回履歴を開く">
             <div class="flex-between">
               <span class="history-date">${dateStr}</span>
-              <span class="badge badge-primary">${r.store_count || 0}店舗</span>
+              <span class="history-card-side">
+                <span class="badge badge-primary">${r.store_count || 0}店舗</span>
+                <span class="history-detail-chevron" aria-hidden="true">›</span>
+              </span>
             </div>
             ${renderHistoryAreas_(r)}
             <div class="history-meta">
@@ -2360,6 +2369,12 @@ const App = (() => {
     container.innerHTML = html;
     container.querySelectorAll('.history-item').forEach(el => {
       el.addEventListener('click', () => {
+        const idx = Number(el.dataset.idx);
+        Router.navigate('history-detail', { route: historyCache[idx] });
+      });
+      el.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Enter' && ev.key !== ' ') return;
+        ev.preventDefault();
         const idx = Number(el.dataset.idx);
         Router.navigate('history-detail', { route: historyCache[idx] });
       });
