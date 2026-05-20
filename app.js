@@ -16,7 +16,14 @@ const App = (() => {
   let mapChainFilter = 'all';
   let currentLocationMarker = null; // 現在地マーカー
   let currentLocationCircle = null; // 現在地精度サークル
-  const HIDDEN_STORE_IDS = new Set(['s20260411082838460']);
+  const HIDDEN_STORE_IDS = new Set([
+    's20260411082838460',
+    // DCM 利府店は店舗マスタに同名・同座標で5件入っているため、先頭1件だけ表示する
+    's20260427202126440',
+    's20260427202154941',
+    's20260427202226440',
+    's20260427205454995',
+  ]);
 
   // チェーン別ブランドカラー（ピン・チップの色分け）
   const CHAIN_COLORS = {
@@ -54,7 +61,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v98';
+  const ASSET_VER = 'v99';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
