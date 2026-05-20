@@ -54,7 +54,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v97';
+  const ASSET_VER = 'v98';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -799,10 +799,12 @@ const App = (() => {
       center: SENDAI_STATION,
       zoom: 11,
       zoomControl: true,
+      doubleClickZoom: false,
       preferCanvas: true,
       fadeAnimation: true,
       markerZoomAnimation: true,
     });
+    wireMapDoubleTapZoom(mapEl);
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -820,68 +822,108 @@ const App = (() => {
     mapMarkers.clear();
     refreshMapMarkers();
     fitMapToMarkers();
-
-    // 現在地の取得と表示（初回。以降はupdateCurrentLocation()で差分更新）
-    updateCurrentLocation();
   }
 
-  // 現在地マーカーを取得・更新する
-  function updateCurrentLocation() {
+  function wireMapDoubleTapZoom(mapEl) {
+    if (!mapInstance || !mapEl) return;
+
+    function zoomInAt(latlng) {
+      if (!latlng || !mapInstance) return;
+      const maxZoom = mapInstance.getMaxZoom() || 19;
+      const nextZoom = Math.min(mapInstance.getZoom() + 1, maxZoom);
+      mapInstance.setZoomAround(latlng, nextZoom, { animate: true });
+    }
+
+    let lastTapAt = 0;
+    let lastTapPoint = null;
+    let touchZoomAt = 0;
+
+    mapInstance.on('dblclick', e => {
+      if (Date.now() - touchZoomAt < 450) return;
+      zoomInAt(e.latlng);
+    });
+
+    mapEl.addEventListener('touchend', e => {
+      if (!mapInstance || e.changedTouches.length !== 1) return;
+      const target = e.target instanceof Element ? e.target : null;
+      if (target && target.closest('.leaflet-control, .leaflet-marker-icon, .leaflet-popup, button, a')) return;
+
+      const touch = e.changedTouches[0];
+      const now = Date.now();
+      const point = { x: touch.clientX, y: touch.clientY };
+      const distance = lastTapPoint
+        ? Math.hypot(point.x - lastTapPoint.x, point.y - lastTapPoint.y)
+        : Infinity;
+
+      if (now - lastTapAt < 320 && distance < 28) {
+        e.preventDefault();
+        touchZoomAt = now;
+        lastTapAt = 0;
+        lastTapPoint = null;
+        const rect = mapEl.getBoundingClientRect();
+        const containerPoint = L.point(touch.clientX - rect.left, touch.clientY - rect.top);
+        zoomInAt(mapInstance.containerPointToLatLng(containerPoint));
+        return;
+      }
+
+      lastTapAt = now;
+      lastTapPoint = point;
+    }, { passive: false });
+  }
+
+  function setCurrentLocationMarker(pos) {
     if (!mapInstance) return;
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(pos => {
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      const accuracy = pos.coords.accuracy;
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+    const accuracy = pos.coords.accuracy;
 
-      // 既存マーカーを削除してから再作成（差分更新）
-      if (currentLocationMarker) {
-        mapInstance.removeLayer(currentLocationMarker);
-        currentLocationMarker = null;
-      }
-      if (currentLocationCircle) {
-        mapInstance.removeLayer(currentLocationCircle);
-        currentLocationCircle = null;
-      }
+    // 既存マーカーを削除してから再作成（差分更新）
+    if (currentLocationMarker) {
+      mapInstance.removeLayer(currentLocationMarker);
+      currentLocationMarker = null;
+    }
+    if (currentLocationCircle) {
+      mapInstance.removeLayer(currentLocationCircle);
+      currentLocationCircle = null;
+    }
 
-      // 精度サークル（薄い青）
-      currentLocationCircle = L.circle([lat, lng], {
-        radius: accuracy,
-        color: '#2563EB',
-        fillColor: '#3B82F6',
-        fillOpacity: 0.12,
-        weight: 1,
-      }).addTo(mapInstance);
+    // 精度サークル（薄い青）
+    currentLocationCircle = L.circle([lat, lng], {
+      radius: accuracy,
+      color: '#2563EB',
+      fillColor: '#3B82F6',
+      fillOpacity: 0.12,
+      weight: 1,
+    }).addTo(mapInstance);
 
-      // 現在地マーカー（青い丸）
-      const currentIcon = L.divIcon({
-        className: '',
-        html: '<div class="map-current-location"></div>',
-        iconSize: [30, 30],
-        iconAnchor: [15, 15],
-      });
-      currentLocationMarker = L.marker([lat, lng], {
-        icon: currentIcon,
-        zIndexOffset: 1000,
-        interactive: false,
-      }).addTo(mapInstance);
-    }, null, { enableHighAccuracy: true, timeout: 10000 });
+    // 現在地マーカー（青い丸）
+    const currentIcon = L.divIcon({
+      className: '',
+      html: '<div class="map-current-location"></div>',
+      iconSize: [30, 30],
+      iconAnchor: [15, 15],
+    });
+    currentLocationMarker = L.marker([lat, lng], {
+      icon: currentIcon,
+      zIndexOffset: 1000,
+      interactive: false,
+    }).addTo(mapInstance);
   }
 
   // 現在地にマップ中心を移動する
   function moveToCurrent() {
     if (!mapInstance) return;
     if (!navigator.geolocation) {
-      showToast('位置情報が使えません');
+      toast('位置情報が使えません');
       return;
     }
     navigator.geolocation.getCurrentPosition(pos => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
       mapInstance.setView([lat, lng], 14, { animate: true });
-      updateCurrentLocation();
+      setCurrentLocationMarker(pos);
     }, () => {
-      showToast('現在地を取得できませんでした');
+      toast('現在地を取得できませんでした');
     }, { enableHighAccuracy: true, timeout: 10000 });
   }
 
@@ -1350,7 +1392,6 @@ const App = (() => {
 
     html += `
       <div class="patrol-actions">
-        <button class="btn btn-warning btn-block" id="btn-purchase">＋ 仕入れを記録する</button>
         <button class="btn btn-success btn-block" id="btn-depart">完了して次へ</button>
       </div>`;
 
@@ -1457,7 +1498,6 @@ const App = (() => {
       });
     });
 
-    document.getElementById('btn-purchase')?.addEventListener('click', () => showPurchaseModal(current));
     document.getElementById('btn-add-memo')?.addEventListener('click', () => showStoreMemoModal(current));
   }
 
@@ -1613,7 +1653,7 @@ const App = (() => {
 
   function showAddStopModal(existingStoreIds, onSelect) {
     // existingStoreIds: Set of store_id already in the route
-    const available = stores.filter(s => !existingStoreIds.has(s.store_id));
+    const available = stores.filter(s => !existingStoreIds.has(s.store_id) && Number(s.lat) && Number(s.lng));
     if (available.length === 0) {
       toast('追加できる店舗がありません');
       return;
@@ -1628,9 +1668,6 @@ const App = (() => {
       _genre: getGenre(s)
     }));
 
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-
     // フィルタオプション生成
     const areaSet = [...new Set(storesWithMeta.map(s => s._area))];
     const areaOptions = areaSet.map(id => {
@@ -1641,9 +1678,12 @@ const App = (() => {
     const genreSet = [...new Set(storesWithMeta.map(s => s._genre))];
     const genreOptions = genreSet.map(g => `<option value="${g}">${GENRE_DISPLAY[g] || g}</option>`).join('');
 
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
     overlay.innerHTML = `
-      <div class="modal" style="max-height:85vh;">
+      <div class="modal add-stop-map-modal">
         <div class="modal-title">店舗を追加</div>
+        <div class="text-sm text-dim mb-8">地図のピンをタップして追加する店舗を選んでください</div>
         <div class="form-group">
           <input type="text" class="form-input" id="stop-search" placeholder="店舗名で検索...">
         </div>
@@ -1657,67 +1697,125 @@ const App = (() => {
             ${genreOptions}
           </select>
         </div>
-        <div id="stop-store-list" style="max-height:50vh;overflow-y:auto;"></div>
-        <div class="mt-8">
-          <button class="btn btn-outline btn-block" id="stop-modal-cancel">閉じる</button>
+        <div id="stop-add-map" class="add-stop-map"></div>
+        <div id="stop-add-info" class="add-stop-map-info">追加する店舗を地図から選択してください</div>
+        <div class="btn-group mt-8">
+          <button class="btn btn-outline" style="flex:1" id="stop-modal-cancel">閉じる</button>
+          <button class="btn btn-primary" style="flex:1" id="stop-add-confirm" disabled>追加</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);
 
-    const listEl = overlay.querySelector('#stop-store-list');
     const searchInput = overlay.querySelector('#stop-search');
     const areaFilter = overlay.querySelector('#stop-filter-area');
     const genreFilter = overlay.querySelector('#stop-filter-genre');
+    const infoEl = overlay.querySelector('#stop-add-info');
+    const confirmBtn = overlay.querySelector('#stop-add-confirm');
+    const mapEl = overlay.querySelector('#stop-add-map');
+    let selectedStore = null;
 
-    function renderList() {
+    const addMap = L.map(mapEl, {
+      center: SENDAI_STATION,
+      zoom: 11,
+      zoomControl: true,
+      doubleClickZoom: false,
+      preferCanvas: true,
+    });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      subdomains: 'abcd',
+      attribution: '&copy; OpenStreetMap &copy; CARTO',
+    }).addTo(addMap);
+    const addLayer = L.layerGroup().addTo(addMap);
+
+    function closeModal() {
+      addMap.remove();
+      overlay.remove();
+    }
+
+    function getFilteredStores() {
       const query = (searchInput.value || '').trim().toLowerCase();
       const areaVal = areaFilter.value;
       const genreVal = genreFilter.value;
-
       let filtered = storesWithMeta;
       if (query) filtered = filtered.filter(s => s.name.toLowerCase().includes(query));
       if (areaVal) filtered = filtered.filter(s => s._area === areaVal);
       if (genreVal) filtered = filtered.filter(s => s._genre === genreVal);
+      return filtered;
+    }
 
+    function selectStore(store) {
+      selectedStore = store;
+      confirmBtn.disabled = false;
+      infoEl.innerHTML = `
+        <div class="add-stop-selected-name">${renderStopIconHtml(store)}${esc(store.name)}</div>
+        <div class="text-sm text-dim">${esc(store._areaName)} | ${esc(store.category)} | ${formatTime(store.open_time)}-${formatTime(store.close_time)}</div>
+      `;
+    }
+
+    function fitAddMap(filtered) {
+      if (!filtered.length) return;
+      const bounds = L.latLngBounds(filtered.map(s => [Number(s.lat), Number(s.lng)]));
+      addMap.fitBounds(bounds, { padding: [28, 28], maxZoom: 13, animate: false });
+    }
+
+    function renderMarkers({ keepView = false } = {}) {
+      const filtered = getFilteredStores();
+      addLayer.clearLayers();
       if (filtered.length === 0) {
-        listEl.innerHTML = '<div class="text-center text-dim text-sm" style="padding:20px;">該当する店舗がありません</div>';
+        infoEl.innerHTML = '<div class="add-stop-map-empty">該当する店舗がありません</div>';
+        selectedStore = null;
+        confirmBtn.disabled = true;
         return;
       }
 
-      let html = '';
       filtered.forEach(s => {
-        html += `
-          <div class="store-item add-stop-item" data-sid="${s.store_id}" style="cursor:pointer;">
-            ${renderStoreIconHtml(s)}
-            <div class="store-info">
-              <div class="store-name">${esc(s.name)}</div>
-              <div class="store-meta">${renderStoreStatusPill(s)}${esc(s._areaName)} | ${esc(s.category)} | ${formatTime(s.open_time)}-${formatTime(s.close_time)}</div>
-            </div>
-          </div>`;
-      });
-      listEl.innerHTML = html;
-
-      // 各店舗クリックで選択
-      listEl.querySelectorAll('.add-stop-item').forEach(el => {
-        el.addEventListener('click', () => {
-          const sid = el.dataset.sid;
-          const store = stores.find(s => s.store_id === sid);
-          if (store) {
-            overlay.remove();
-            onSelect(store);
-          }
+        const isSelected = selectedStore && selectedStore.store_id === s.store_id;
+        const marker = L.marker([Number(s.lat), Number(s.lng)], {
+          icon: buildPinIcon(s, isSelected ? 0 : -1),
         });
+        marker.bindPopup(`
+          <div class="add-stop-popup">
+            <div class="map-popup-name">${esc(s.name)}</div>
+            <div class="map-popup-meta">${esc(s._areaName)} | ${esc(s.category)}</div>
+            <button class="btn btn-primary map-popup-btn" data-add-stop-sid="${esc(s.store_id)}">この店舗を追加</button>
+          </div>
+        `);
+        marker.on('click', () => selectStore(s));
+        marker.on('popupopen', e => {
+          const btn = e.popup.getElement()?.querySelector('[data-add-stop-sid]');
+          if (btn) btn.addEventListener('click', () => {
+            closeModal();
+            onSelect(s);
+          });
+        });
+        addLayer.addLayer(marker);
       });
+
+      if (!keepView) fitAddMap(filtered);
+      if (selectedStore && !filtered.some(s => s.store_id === selectedStore.store_id)) {
+        selectedStore = null;
+        confirmBtn.disabled = true;
+        infoEl.textContent = '追加する店舗を地図から選択してください';
+      }
     }
 
-    renderList();
+    requestAnimationFrame(() => {
+      addMap.invalidateSize(false);
+      renderMarkers();
+    });
 
-    searchInput.addEventListener('input', renderList);
-    areaFilter.addEventListener('change', renderList);
-    genreFilter.addEventListener('change', renderList);
+    searchInput.addEventListener('input', () => renderMarkers());
+    areaFilter.addEventListener('change', () => renderMarkers());
+    genreFilter.addEventListener('change', () => renderMarkers());
+    confirmBtn.addEventListener('click', () => {
+      if (!selectedStore) return;
+      closeModal();
+      onSelect(selectedStore);
+    });
 
-    overlay.querySelector('#stop-modal-cancel').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector('#stop-modal-cancel').addEventListener('click', closeModal);
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
   }
 
   // ---------- サマリー画面 ----------
