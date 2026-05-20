@@ -298,6 +298,71 @@ const Quiz = (() => {
     return '日用品';
   }
 
+  // ---------- 出題品質 ----------
+  const LOW_QUALITY_NAME_RE = /(テスト|test|サンプル|商品名未取得|取得失敗|不明|エラー|該当なし|^[-ー―\s]+$)/i;
+  function cleanText(v) {
+    return String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+  }
+  function normalizeMakerName(v) {
+    return cleanText(v).replace(/[（(][^）)]*[）)]/g, '').replace(/\s+/g, ' ').trim();
+  }
+  function itemName(item) { return cleanText(item?.['商品名']); }
+  function itemMaker(item) { return normalizeMakerName(item?.['ブランド名']); }
+  function itemAsin(item) { return cleanText(item?.ASIN); }
+  function itemPrice(item) {
+    const n = Number(item?.['最安値'] || 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function itemProfit(item) {
+    const n = Number(item?.['月間期待利益'] || 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function hasScore(item) {
+    return Boolean(cleanText(item?.['プレ値スコア']) || cleanText(item?.['仕入れスコア']));
+  }
+  function hasUsefulName(name) {
+    return name.length >= 6 && !LOW_QUALITY_NAME_RE.test(name);
+  }
+  function isQuizUsableItem(item) {
+    return Boolean(itemMaker(item) && hasUsefulName(itemName(item)));
+  }
+  function isHighSignalItem(item) {
+    return isQuizUsableItem(item) &&
+      Boolean(itemAsin(item) || cleanText(item?.['画像ファイル'])) &&
+      Boolean(hasScore(item) || itemPrice(item) > 0 || itemProfit(item) > 0);
+  }
+  function isRecommendedQuizItem(item) {
+    return isHighSignalItem(item) && itemAsin(item);
+  }
+  function uniqueStrings(values) {
+    const seen = new Set();
+    const out = [];
+    for (const value of values) {
+      const s = cleanText(value);
+      if (!s || seen.has(s)) continue;
+      seen.add(s);
+      out.push(s);
+    }
+    return out;
+  }
+  function canAskMakerQuestion(item, allItems) {
+    const correct = itemMaker(item);
+    if (!correct || !hasUsefulName(itemName(item))) return false;
+    return uniqueStrings(allItems.map(itemMaker)).filter(m => m !== correct).length >= 3;
+  }
+  function canAskPriceQuestion(item) {
+    const price = itemPrice(item);
+    return isQuizUsableItem(item) && price >= 500 && price <= 500000;
+  }
+  function applyQualityFallback(pool, minCount) {
+    const recommended = pool.filter(isRecommendedQuizItem);
+    if (recommended.length >= minCount) return recommended;
+    const highSignal = pool.filter(isHighSignalItem);
+    if (highSignal.length >= minCount) return highSignal;
+    const usable = pool.filter(isQuizUsableItem);
+    return usable.length >= minCount ? usable : pool;
+  }
+
   // ---------- スコアランク ----------
   function scoreRank(preScore, purScore) {
     const preMap = { 'A': 4, 'B': 3, 'C': 2, 'D': 1 };
@@ -343,21 +408,14 @@ const Quiz = (() => {
   }
 
   async function buildSessionItems(items, settings, opts = {}) {
-    let pool = dedupByAsin(items.slice());
+    const basePool = dedupByAsin(items.slice()).filter(isQuizUsableItem);
+    let pool = basePool.length >= 3 ? basePool : dedupByAsin(items.slice());
 
     // 範囲フィルタ
     if (settings.range === 'maker' && settings.rangeValue) {
       pool = pool.filter(it => String(it['ブランド名'] || '').trim() === settings.rangeValue);
     } else if (settings.range === 'genre' && settings.rangeValue) {
       pool = pool.filter(it => inferSimpleGenre(it) === settings.rangeValue);
-    }
-
-    // 問題タイプが「プレ値推測」専用のときは、最安値が取れている商品のみを対象にする。
-    // (getQuizPool はスコアnull商品も含むため、最安値が0/未取得の商品が混ざる可能性がある)
-    if (settings.type === 'price_quiz') {
-      const priced = pool.filter(it => Number(it['最安値'] || 0) > 0);
-      // 件数が極端に減った場合のセーフティ: 3件以上残ったときだけ絞り込みを採用
-      if (priced.length >= 3) pool = priced;
     }
 
     // 復習モード
@@ -378,6 +436,24 @@ const Quiz = (() => {
       if (weakMakers.length > 0) {
         pool = pool.filter(it => weakMakers.includes(String(it['ブランド名'] || '').trim()));
       }
+    }
+
+    // 今日のおすすめは、ASIN/価格/スコアがある問題を優先する。
+    // ただし対象が少なすぎる場合は段階的に条件を緩める。
+    const want = settings.questionCount === 'endless' ? 30 : settings.questionCount;
+    if (opts.quality === 'recommended' || opts.shortcut === 'today' || opts.shortcut === 'weak') {
+      pool = applyQualityFallback(pool, Math.max(3, want));
+    }
+
+    if (settings.type === 'price_quiz') {
+      const priced = pool.filter(canAskPriceQuestion);
+      if (priced.length >= 3) pool = priced;
+    } else if (settings.type === 'maker_quiz') {
+      const makerReady = pool.filter(it => canAskMakerQuestion(it, items));
+      if (makerReady.length >= 3) pool = makerReady;
+    } else {
+      const quizReady = pool.filter(it => canAskPriceQuestion(it) || canAskMakerQuestion(it, items));
+      if (quizReady.length >= 3) pool = quizReady;
     }
 
     // ── ここから出題分散ロジック ──
@@ -404,9 +480,6 @@ const Quiz = (() => {
       const minPool = Math.max(10, (settings.questionCount === 'endless' ? 30 : settings.questionCount) * 2);
       if (filtered.length >= minPool) workPool = filtered;
     }
-
-    // 難易度フィルタ
-    const want = settings.questionCount === 'endless' ? 30 : settings.questionCount;
 
     if (settings.difficulty === 'easy') {
       const easy = workPool.filter(isEasyItem);
@@ -457,7 +530,7 @@ const Quiz = (() => {
     const asinToBrand = new Map();
     for (const it of items) {
       const a = String(it.ASIN || '').trim();
-      if (a) asinToBrand.set(a, String(it['ブランド名'] || '').trim());
+      if (a) asinToBrand.set(a, itemMaker(it));
     }
     const byMaker = new Map();
     for (const h of allHist) {
@@ -477,26 +550,29 @@ const Quiz = (() => {
   }
 
   function buildMakerChoices(item, allItems) {
-    const correct = String(item['ブランド名'] || '').trim();
-    const allMakers = Array.from(new Set(allItems.map(it => String(it['ブランド名'] || '').trim()).filter(Boolean)));
+    const correct = itemMaker(item);
+    const allMakers = uniqueStrings(allItems.map(itemMaker));
     // 同ジャンルから優先的に選びつつ、ジャンル混在を許容して候補を広く取る
     const correctGenre = inferSimpleGenre(item);
-    const sameGenreMakers = Array.from(new Set(
+    const sameGenreMakers = uniqueStrings(
       allItems
         .filter(it => inferSimpleGenre(it) === correctGenre)
-        .map(it => String(it['ブランド名'] || '').trim())
-        .filter(Boolean)
-    )).filter(m => m !== correct);
+        .map(itemMaker)
+    ).filter(m => m !== correct);
     const otherGenreMakers = allMakers.filter(m => m !== correct && !sameGenreMakers.includes(m));
 
-    let decoys = pickRandom(sameGenreMakers, 3);
-    if (decoys.length < 3) {
-      // 不足分はジャンル外から補充
-      const need = 3 - decoys.length;
-      const extra = pickRandom(otherGenreMakers, need);
-      decoys = [...decoys, ...extra];
+    const decoys = [];
+    for (const maker of shuffle(sameGenreMakers)) {
+      if (decoys.length >= 3) break;
+      decoys.push(maker);
     }
-    return shuffle([correct, ...decoys]);
+    if (decoys.length < 3) {
+      for (const maker of shuffle(otherGenreMakers)) {
+        if (decoys.length >= 3) break;
+        decoys.push(maker);
+      }
+    }
+    return shuffle([correct, ...decoys.slice(0, 3)]);
   }
 
   // ---------- 直近セッションの記録・参照 ----------
@@ -532,7 +608,7 @@ const Quiz = (() => {
   async function saveSessionRecord(items) {
     try {
       const asins = items.map(it => String(it.ASIN || '').trim()).filter(Boolean);
-      const makers = Array.from(new Set(items.map(it => String(it['ブランド名'] || '').trim()).filter(Boolean)));
+      const makers = Array.from(new Set(items.map(itemMaker).filter(Boolean)));
       await dbPut('recentSessions', {
         playedAt: Date.now(),
         asins,
@@ -562,7 +638,7 @@ const Quiz = (() => {
     // メーカー別グルーピング
     const byMaker = new Map();
     for (const it of pool) {
-      const m = String(it['ブランド名'] || '').trim() || '__unknown__';
+      const m = itemMaker(it) || '__unknown__';
       if (!byMaker.has(m)) byMaker.set(m, []);
       byMaker.get(m).push(it);
     }
@@ -606,10 +682,14 @@ const Quiz = (() => {
     return out;
   }
 
-  function decideQuestionType(settings) {
-    if (settings.type === 'maker_quiz') return 'maker';
-    if (settings.type === 'price_quiz') return 'price';
-    return Math.random() < 0.5 ? 'maker' : 'price';
+  function decideQuestionType(settings, item, allItems) {
+    const canMaker = canAskMakerQuestion(item, allItems);
+    const canPrice = canAskPriceQuestion(item);
+    if (settings.type === 'maker_quiz') return canMaker ? 'maker' : (canPrice ? 'price' : 'maker');
+    if (settings.type === 'price_quiz') return canPrice ? 'price' : (canMaker ? 'maker' : 'price');
+    if (canMaker && canPrice) return Math.random() < 0.55 ? 'maker' : 'price';
+    if (canMaker) return 'maker';
+    return 'price';
   }
 
   // ---------- ビュー描画 ----------
@@ -644,14 +724,15 @@ const Quiz = (() => {
     document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === 'quiz'));
     container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
-    let items, makers, genres, settings, stats;
+    let items, makers, genres, settings, stats, reviewQueue;
     try {
-      [items, makers, genres, settings, stats] = await Promise.all([
+      [items, makers, genres, settings, stats, reviewQueue] = await Promise.all([
         fetchQuizPool(),  // クイズ専用の広いプール(最大1,000件・49社)
         fetchMakerList(),
         fetchGenreList(),
         loadSettings(),
         loadStats(),
+        dbGetAll('reviewQueue'),
       ]);
     } catch (e) {
       container.innerHTML = `
@@ -665,13 +746,16 @@ const Quiz = (() => {
     }
     updateQuizNavBadge(stats.streak || 0);
 
-    renderStartScreen(container, { items, makers, genres, settings, stats });
+    renderStartScreen(container, { items, makers, genres, settings, stats, reviewQueue });
   }
 
   function renderStartScreen(container, ctx) {
     const { items, makers, genres, settings, stats } = ctx;
     const learnedCount = (stats.learnedAsins || []).length;
     const totalCount = items.length;
+    const reviewCount = Array.isArray(ctx.reviewQueue) ? ctx.reviewQueue.length : 0;
+    const recommendedCount = dedupByAsin(items.filter(isRecommendedQuizItem)).length;
+    const usableCount = dedupByAsin(items.filter(isQuizUsableItem)).length;
     const accRate = stats.totalQuestions > 0
       ? Math.round((stats.totalCorrect / stats.totalQuestions) * 100)
       : 0;
@@ -697,60 +781,73 @@ const Quiz = (() => {
         </div>
       </div>
 
-      <div class="quiz-section">
-        <div class="quiz-label">出題範囲</div>
-        <div class="quiz-btn-row" data-axis="range">
-          <button class="quiz-opt ${settings.range==='mixed'?'on':''}" data-val="mixed">ミックス</button>
-          <button class="quiz-opt ${settings.range==='maker'?'on':''}" data-val="maker">メーカー別</button>
-          <button class="quiz-opt ${settings.range==='genre'?'on':''}" data-val="genre">ジャンル別</button>
+      <div class="quiz-today-card">
+        <div class="quiz-today-kicker">今日のクイズ</div>
+        <div class="quiz-today-title">5問だけ確認</div>
+        <div class="quiz-today-meta">ミックス / ふつう / ASIN・価格・スコアありを優先</div>
+        <button class="btn btn-primary quiz-start-btn" id="btn-quiz-today">今日の5問を始める</button>
+        <div class="quiz-quality-note">
+          出題候補 ${recommendedCount || usableCount}件
+          ${reviewCount > 0 ? ` / 復習 ${reviewCount}件` : ''}
         </div>
-        <div class="quiz-range-detail" id="quiz-range-detail">${
-          (settings.range==='maker' || settings.range==='genre')
-            ? `<button class="quiz-pick-btn" id="btn-pick-range">${escHtml(rangeLabel)} ▼</button>`
-            : ''
-        }</div>
+        ${reviewCount > 0 ? '<button class="quiz-review-link" id="sc-review">前回間違えた問題を復習</button>' : ''}
       </div>
 
-      <div class="quiz-section">
-        <div class="quiz-label">問題タイプ</div>
-        <div class="quiz-btn-row" data-axis="type">
-          <button class="quiz-opt ${settings.type==='mixed'?'on':''}" data-val="mixed">ミックス</button>
-          <button class="quiz-opt ${settings.type==='maker_quiz'?'on':''}" data-val="maker_quiz">メーカー当て</button>
-          <button class="quiz-opt ${settings.type==='price_quiz'?'on':''}" data-val="price_quiz">プレ値推測</button>
+      <details class="quiz-advanced">
+        <summary>条件を変える</summary>
+
+        <div class="quiz-current">
+          現在の設定: ${escHtml(rangeLabel)} / ${escHtml(typeLabel)} / ${escHtml(diffLabel)} / ${escHtml(qcLabel)}
         </div>
-      </div>
 
-      <div class="quiz-section">
-        <div class="quiz-label">難易度</div>
-        <div class="quiz-btn-row" data-axis="difficulty">
-          <button class="quiz-opt ${settings.difficulty==='easy'?'on':''}"   data-val="easy">かんたん</button>
-          <button class="quiz-opt ${settings.difficulty==='normal'?'on':''}" data-val="normal">ふつう</button>
-          <button class="quiz-opt ${settings.difficulty==='hard'?'on':''}"   data-val="hard">むずかしい</button>
+        <div class="quiz-section">
+          <div class="quiz-label">出題範囲</div>
+          <div class="quiz-btn-row" data-axis="range">
+            <button class="quiz-opt ${settings.range==='mixed'?'on':''}" data-val="mixed">ミックス</button>
+            <button class="quiz-opt ${settings.range==='maker'?'on':''}" data-val="maker">メーカー別</button>
+            <button class="quiz-opt ${settings.range==='genre'?'on':''}" data-val="genre">ジャンル別</button>
+          </div>
+          <div class="quiz-range-detail" id="quiz-range-detail">${
+            (settings.range==='maker' || settings.range==='genre')
+              ? `<button class="quiz-pick-btn" id="btn-pick-range">${escHtml(rangeLabel)} ▼</button>`
+              : ''
+          }</div>
         </div>
-      </div>
 
-      <div class="quiz-section">
-        <div class="quiz-label">問題数</div>
-        <div class="quiz-btn-row" data-axis="questionCount">
-          <button class="quiz-opt ${settings.questionCount===3?'on':''}" data-val="3">3問</button>
-          <button class="quiz-opt ${settings.questionCount===5?'on':''}" data-val="5">5問</button>
-          <button class="quiz-opt ${settings.questionCount===10?'on':''}" data-val="10">10問</button>
-          <button class="quiz-opt ${settings.questionCount==='endless'?'on':''}" data-val="endless">エンドレス</button>
+        <div class="quiz-section">
+          <div class="quiz-label">問題タイプ</div>
+          <div class="quiz-btn-row" data-axis="type">
+            <button class="quiz-opt ${settings.type==='mixed'?'on':''}" data-val="mixed">ミックス</button>
+            <button class="quiz-opt ${settings.type==='maker_quiz'?'on':''}" data-val="maker_quiz">メーカー当て</button>
+            <button class="quiz-opt ${settings.type==='price_quiz'?'on':''}" data-val="price_quiz">プレ値推測</button>
+          </div>
         </div>
-      </div>
 
-      <button class="btn btn-primary quiz-start-btn" id="btn-quiz-start">スタート ▶</button>
+        <div class="quiz-section">
+          <div class="quiz-label">難易度</div>
+          <div class="quiz-btn-row" data-axis="difficulty">
+            <button class="quiz-opt ${settings.difficulty==='easy'?'on':''}"   data-val="easy">かんたん</button>
+            <button class="quiz-opt ${settings.difficulty==='normal'?'on':''}" data-val="normal">ふつう</button>
+            <button class="quiz-opt ${settings.difficulty==='hard'?'on':''}"   data-val="hard">むずかしい</button>
+          </div>
+        </div>
 
-      <div class="quiz-shortcut-section">
-        <div class="quiz-label">ワンタップで始める</div>
-        <button class="quiz-shortcut" id="sc-today"><span class="quiz-shortcut-tag">今日</span><span>今日のおすすめ</span></button>
-        <button class="quiz-shortcut" id="sc-review"><span class="quiz-shortcut-tag">復習</span><span>復習モード（前日間違えた問題）</span></button>
-        <button class="quiz-shortcut" id="sc-weak"><span class="quiz-shortcut-tag">苦手</span><span>苦手モード（正解率の低い3社）</span></button>
-      </div>
+        <div class="quiz-section">
+          <div class="quiz-label">問題数</div>
+          <div class="quiz-btn-row" data-axis="questionCount">
+            <button class="quiz-opt ${settings.questionCount===3?'on':''}" data-val="3">3問</button>
+            <button class="quiz-opt ${settings.questionCount===5?'on':''}" data-val="5">5問</button>
+            <button class="quiz-opt ${settings.questionCount===10?'on':''}" data-val="10">10問</button>
+            <button class="quiz-opt ${settings.questionCount==='endless'?'on':''}" data-val="endless">エンドレス</button>
+          </div>
+        </div>
 
-      <div class="quiz-current">
-        現在の設定: ${escHtml(rangeLabel)} / ${escHtml(typeLabel)} / ${escHtml(diffLabel)} / ${escHtml(qcLabel)}
-      </div>
+        <button class="btn btn-outline quiz-start-btn" id="btn-quiz-start">この条件で始める</button>
+
+        <div class="quiz-shortcut-section">
+          <button class="quiz-shortcut" id="sc-weak"><span class="quiz-shortcut-tag">苦手</span><span>苦手メーカーだけ確認</span></button>
+        </div>
+      </details>
       ${showQuizDebug ? '<div class="quiz-debug" id="quiz-debug-info" style="margin-top:8px;font-size:11px;color:#888;text-align:center;line-height:1.6;"></div>' : ''}
     `;
 
@@ -762,7 +859,7 @@ const Quiz = (() => {
         const recentMakerCounts = await getRecentMakerCounts();
         const totalPool = items.length;
         const withAsin = items.filter(it => String(it.ASIN || '').trim()).length;
-        const uniqueMakers = new Set(items.map(it => String(it['ブランド名'] || '').trim()).filter(Boolean)).size;
+        const uniqueMakers = new Set(items.map(itemMaker).filter(Boolean)).size;
         // getQuizPool 由来のメタ情報があればそれを優先（totalAll = 全監視商品数）
         const meta = items.__quizMeta || {};
         const totalAll = Number(meta.totalAll || 0);
@@ -807,15 +904,15 @@ const Quiz = (() => {
       renderStartScreen(container, ctx);
     });
 
-    container.querySelector('#btn-quiz-start')?.addEventListener('click', async () => {
-      await startSession(container, ctx, {});
-    });
-    container.querySelector('#sc-today')?.addEventListener('click', async () => {
+    container.querySelector('#btn-quiz-today')?.addEventListener('click', async () => {
       // 今日のおすすめ: ふつう・ミックス・5問・全範囲
       const s = { range: 'mixed', rangeValue: null, type: 'mixed', difficulty: 'normal', questionCount: 5 };
       await saveSettings(s);
       ctx.settings = s;
-      await startSession(container, ctx, {});
+      await startSession(container, ctx, { shortcut: 'today', quality: 'recommended' });
+    });
+    container.querySelector('#btn-quiz-start')?.addEventListener('click', async () => {
+      await startSession(container, ctx, { quality: 'manual' });
     });
     container.querySelector('#sc-review')?.addEventListener('click', async () => {
       await startSession(container, ctx, { shortcut: 'review' });
@@ -904,7 +1001,7 @@ const Quiz = (() => {
       renderSummary(container);
       return;
     }
-    const qType = decideQuestionType(session.ctx.settings);
+    const qType = decideQuestionType(session.ctx.settings, q, session.ctx.items);
     const total = session.total ? `${session.currentIdx + 1}/${session.total}` : `Q${session.currentIdx + 1}`;
 
     if (qType === 'maker') {
@@ -933,9 +1030,24 @@ const Quiz = (() => {
     `;
   }
 
+  function roundPrice(value, step, mode = 'nearest') {
+    if (mode === 'down') return Math.max(step, Math.floor(value / step) * step);
+    if (mode === 'up') return Math.max(step, Math.ceil(value / step) * step);
+    return Math.max(step, Math.round(value / step) * step);
+  }
+
+  function buildPriceQuestionRange(real) {
+    const step = real >= 50000 ? 500 : 100;
+    const min = Math.max(500, roundPrice(real * 0.45, step, 'down'));
+    const max = Math.min(500000, roundPrice(real * 1.75, step, 'up'));
+    const safeMax = max <= min ? min + step * 12 : max;
+    const initial = roundPrice((min + safeMax) / 2, step);
+    return { min, max: safeMax, step, initial };
+  }
+
   function renderMakerQuestion(container, item, headLabel) {
     const choices = buildMakerChoices(item, session.ctx.items);
-    const correct = String(item['ブランド名'] || '').trim();
+    const correct = itemMaker(item);
     container.innerHTML = `
       <div class="quiz-progress">${escHtml(headLabel)} メーカー当て</div>
       ${buildItemCardHtml(item)}
@@ -971,12 +1083,11 @@ const Quiz = (() => {
       renderMakerQuestion(container, item, headLabel);
       return;
     }
-    const min = 500, max = 100000;
-    const initial = Math.min(max, Math.max(min, Math.round((min + max) / 4)));
+    const { min, max, step, initial } = buildPriceQuestionRange(real);
     container.innerHTML = `
       <div class="quiz-progress">${escHtml(headLabel)} プレ値推測</div>
       ${buildItemCardHtml(item)}
-      <div class="quiz-question-meta">メーカー: ${escHtml(item['ブランド名'] || '')}</div>
+      <div class="quiz-question-meta">メーカー: ${escHtml(itemMaker(item))}</div>
       <div class="quiz-question-text">Amazon最安値はいくら？</div>
       <input type="range" class="quiz-slider" id="quiz-slider" min="${min}" max="${max}" step="100" value="${initial}">
       <div class="quiz-slider-labels"><span>¥${min.toLocaleString()}</span><span>¥${max.toLocaleString()}</span></div>
@@ -1059,7 +1170,7 @@ const Quiz = (() => {
       ${resultLine}
       <div class="quiz-feedback-card">
         <div class="quiz-feedback-section-title">解説</div>
-        <div class="quiz-feedback-brand">${escHtml(item['ブランド名'] || '')}</div>
+        <div class="quiz-feedback-brand">${escHtml(itemMaker(item))}</div>
         <div class="quiz-feedback-name">${escHtml(item['商品名'] || '')}</div>
         <div class="quiz-feedback-badges">
           ${pre ? `<span class="score-badge pre-${pre}">プレ値 ${pre}</span>` : ''}
@@ -1109,7 +1220,7 @@ const Quiz = (() => {
     const lines = session.results.map((r, i) => {
       const mark = r.isCorrect ? '&#x2b55;' : '&#x274c;';
       const name = r['item'] ? r.item['商品名'] : '';
-      const brand = r['item'] ? r.item['ブランド名'] : '';
+      const brand = r['item'] ? itemMaker(r.item) : '';
       let extra = '';
       if (r.detail?.type === 'price') {
         extra = ` 価格 ±${Math.round((r.detail.diffRate || 0) * 100)}%`;

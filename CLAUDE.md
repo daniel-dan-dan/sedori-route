@@ -1,6 +1,6 @@
-# CLAUDE.md
+# CLAUDE.md（参照用）
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+このファイルは旧Claude Code向けの参照用です。現在の正本は `AGENTS.md` です。
 
 ## アプリ概要
 
