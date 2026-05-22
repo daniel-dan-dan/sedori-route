@@ -1400,6 +1400,7 @@ const App = (() => {
     html += `
       <div class="patrol-actions">
         <button class="btn btn-success btn-block" id="btn-depart">完了して次へ</button>
+        <button class="btn btn-primary btn-block" id="btn-add-inventory-current">商品を在庫に登録</button>
       </div>`;
 
     html += renderStoreContextPanel(current);
@@ -1480,6 +1481,26 @@ const App = (() => {
     });
 
     document.getElementById('btn-end')?.addEventListener('click', () => endPatrol());
+
+    document.getElementById('btn-add-inventory-current')?.addEventListener('click', () => {
+      showInventoryPurchaseModal(current, {
+        routeId: patrolState.routeId,
+        date: today_(),
+        onSaved: (result, payload) => {
+          const amount = Number(payload.purchase_price) || 0;
+          current.purchaseAmount = (Number(current.purchaseAmount) || 0) + amount;
+          current.purchaseItems = (Number(current.purchaseItems) || 0) + 1;
+          Storage.saveCurrentRoute(patrolState);
+          API.updateStop({
+            route_id: patrolState.routeId,
+            store_id: current.store_id,
+            status: current.status || 'planned',
+            purchase_amount: current.purchaseAmount,
+            purchase_items: current.purchaseItems
+          }).catch(() => {});
+        }
+      });
+    });
 
     document.getElementById('btn-add-stop')?.addEventListener('click', () => {
       const existingIds = new Set(patrolState.stops.map(s => s.store_id));
@@ -1648,6 +1669,113 @@ const App = (() => {
         route_id: patrolState.routeId,
         amount, items_count: items, genre, note
       }).catch(() => {});
+    });
+  }
+
+  function showInventoryPurchaseModal(store, options = {}) {
+    const purchaseDate = normalizeRouteDate_(options.date) || today_();
+    const storeName = store?.name || store?.store_name || '';
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-title">商品を在庫に登録</div>
+        <div class="text-sm text-dim mb-8">${esc(storeName)} の仕入れ品として登録します</div>
+        <div class="form-group">
+          <label class="form-label">商品名</label>
+          <input type="text" class="form-input" id="ip-name" placeholder="例: BURBERRY 長袖シャツ">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">仕入価格</label>
+            <input type="number" class="form-input" id="ip-price" inputmode="numeric" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">販売予定価格</label>
+            <input type="number" class="form-input" id="ip-sale-price" inputmode="numeric" placeholder="任意">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">ブランド</label>
+            <input type="text" class="form-input" id="ip-brand" placeholder="任意">
+          </div>
+          <div class="form-group">
+            <label class="form-label">サイズ</label>
+            <input type="text" class="form-input" id="ip-size" placeholder="任意">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">色</label>
+            <input type="text" class="form-input" id="ip-color" placeholder="任意">
+          </div>
+          <div class="form-group">
+            <label class="form-label">状態</label>
+            <select class="form-select" id="ip-condition">
+              <option>中古品 - 良い</option>
+              <option>中古品 - 非常に良い</option>
+              <option>中古品 - 可</option>
+              <option>中古品 - ほぼ新品</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">仕入日</label>
+          <input type="date" class="form-input" id="ip-date" value="${purchaseDate}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">メモ</label>
+          <textarea class="form-textarea" id="ip-note" placeholder="任意"></textarea>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-outline" style="flex:1" id="inventory-modal-cancel">キャンセル</button>
+          <button class="btn btn-primary" style="flex:1" id="inventory-modal-submit">登録する</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('#inventory-modal-cancel').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector('#inventory-modal-submit').addEventListener('click', async () => {
+      const button = overlay.querySelector('#inventory-modal-submit');
+      const payload = {
+        store_id: store?.store_id || '',
+        store_name: storeName,
+        route_id: options.routeId || '',
+        purchase_date: overlay.querySelector('#ip-date').value || purchaseDate,
+        product_name: overlay.querySelector('#ip-name').value.trim(),
+        purchase_price: overlay.querySelector('#ip-price').value,
+        expected_sale_price: overlay.querySelector('#ip-sale-price').value,
+        brand: overlay.querySelector('#ip-brand').value.trim(),
+        size: overlay.querySelector('#ip-size').value.trim(),
+        color: overlay.querySelector('#ip-color').value.trim(),
+        condition: overlay.querySelector('#ip-condition').value,
+        note: overlay.querySelector('#ip-note').value.trim(),
+      };
+      if (!payload.product_name) { toast('商品名を入力してください'); return; }
+      if (!payload.purchase_price) { toast('仕入価格を入力してください'); return; }
+      button.disabled = true;
+      button.textContent = '登録中...';
+      try {
+        const result = await API.addInventoryPurchase(payload);
+        const dateKey = normalizeRouteDate_(payload.purchase_date);
+        if (dateKey) {
+          delete inventoryByDateCache[dateKey];
+          Storage.clearViewCache('inventory_' + dateKey).catch(() => {});
+        }
+        overlay.remove();
+        if (result && result._queued) {
+          toast('オフラインのため、オンライン復帰後に登録します');
+        } else {
+          toast(`在庫に登録しました${result && result.row ? `（${result.row}行）` : ''}`);
+        }
+        if (typeof options.onSaved === 'function') options.onSaved(result || {}, payload);
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = '登録する';
+        toast('登録に失敗: ' + err.message, 4000);
+      }
     });
   }
 
@@ -3024,6 +3152,7 @@ const App = (() => {
             ${purchase > 0 ? `<div class="text-sm mt-8">仕入れ: ${purchase.toLocaleString()}円</div>` : ''}
             ${s.arrival_time ? `<div class="text-sm text-dim">到着: ${new Date(s.arrival_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</div>` : ''}
             ${s.departure_time ? `<div class="text-sm text-dim">出発: ${new Date(s.departure_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</div>` : ''}
+            <button class="btn btn-sm btn-outline btn-block mt-8 inventory-add-from-history" data-stop-index="${i}">この店の商品を在庫に登録</button>
           </div>`;
       });
     }
@@ -3049,6 +3178,34 @@ const App = (() => {
     container.innerHTML = html;
 
     loadInventoryForRoute(route);
+
+    container.querySelectorAll('.inventory-add-from-history').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const stop = (route.stops || [])[Number(btn.dataset.stopIndex)];
+        if (!stop) return;
+        const storeObj = stores.find(st => st.store_id === stop.store_id) || {};
+        showInventoryPurchaseModal({
+          ...storeObj,
+          store_id: stop.store_id,
+          name: storeObj.name || stop.store_name || stop.store_id,
+        }, {
+          routeId: route.route_id,
+          date: normalizeRouteDate_(route.date),
+          onSaved: async () => {
+            const dateKey = normalizeRouteDate_(route.date);
+            if (dateKey) {
+              delete inventoryByDateCache[dateKey];
+              Storage.clearViewCache('inventory_' + dateKey).catch(() => {});
+            }
+            try {
+              await API.recalcRoutePurchases({ route_id: route.route_id });
+              invalidateHistoryApiCache();
+            } catch (e) {}
+            loadInventoryForRoute(route, { backgroundRefresh: false });
+          }
+        });
+      });
+    });
 
     document.getElementById('btn-resume-route')?.addEventListener('click', () => {
       resumePatrolFromHistory(route);

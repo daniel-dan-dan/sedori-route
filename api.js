@@ -68,6 +68,7 @@ const API = (() => {
     endRoute:        (b)         => post('endRoute', b),
     addStopToRoute:  (b)         => post('addStopToRoute', b),
     addPurchase:     (b)         => post('addPurchase', b),
+    addInventoryPurchase:(b)      => post('addInventoryPurchase', b),
     addMemo:         (b)         => post('addMemo', b),
     getInventoryPurchases:(p={}) => get('getInventoryPurchases', p),
     recalcRoutePurchases:(p={})  => get('recalcRoutePurchases', p),
