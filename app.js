@@ -24,6 +24,9 @@ const App = (() => {
     's20260427202226440',
     's20260427205454995',
   ]);
+  const RECOMMENDATION_CACHE_ID = 'recommendations';
+  const RECOMMENDATION_FROM_DATE = '2026-04-21';
+  const RECOMMENDATION_TOP_STORE_LIMIT = 5;
 
   // チェーン別ブランドカラー（ピン・チップの色分け）
   const CHAIN_COLORS = {
@@ -746,7 +749,8 @@ const App = (() => {
           <span class="text-sm text-dim"><span id="map-sel-count">${selectedStoreIds.length}</span>店舗 選択中</span>
           <button class="btn btn-sm btn-outline" id="btn-map-clear" ${selectedStoreIds.length < 1 ? 'disabled' : ''}>クリア</button>
         </div>
-        <button class="btn btn-primary btn-block" id="btn-map-optimize" ${selectedStoreIds.length < 1 ? 'disabled' : ''}>
+        <button class="btn btn-outline btn-block map-recommend-btn" id="btn-map-recommend">次に回る候補</button>
+        <button class="btn btn-primary btn-block mt-8" id="btn-map-optimize" ${selectedStoreIds.length < 1 ? 'disabled' : ''}>
           ${selectedStoreIds.length < 1 ? '店舗を選択してください' : 'ルート作成'}
         </button>
       </div>
@@ -787,6 +791,7 @@ const App = (() => {
       updateMapBottomBar();
     });
     document.getElementById('btn-map-optimize').addEventListener('click', doOptimize);
+    document.getElementById('btn-map-recommend').addEventListener('click', showNextStoreRecommendationModal);
 
     // 現在地ボタン（Leaflet初期化後に押せるようにrAF後ではなく直後に登録）
     const btnCurrent = document.getElementById('btn-map-current');
@@ -1099,6 +1104,334 @@ const App = (() => {
       btn.textContent = hasSelection ? 'ルート作成' : '店舗を選択してください';
     }
     if (clearBtn) clearBtn.disabled = !hasSelection;
+  }
+
+  async function showNextStoreRecommendationModal() {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay recommendation-overlay';
+    overlay.innerHTML = `
+      <div class="modal recommendation-modal">
+        <div class="recommendation-head">
+          <div>
+            <div class="recommendation-title">次に回る候補</div>
+            <div class="recommendation-subtitle">地域の空き期間を強めに見て選びます</div>
+          </div>
+          <button class="recommendation-close" type="button" aria-label="閉じる">閉じる</button>
+        </div>
+        <div id="recommendation-body" class="recommendation-body">
+          <div class="recommendation-loading"><span class="spinner"></span><span>候補を計算中...</span></div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.querySelector('.recommendation-close')?.addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+    try {
+      const { payload, fromCache, error } = await loadRecommendationPayload_();
+      renderRecommendationModalContent_(overlay, payload, { fromCache, error });
+    } catch (err) {
+      const body = overlay.querySelector('#recommendation-body');
+      if (body) {
+        body.innerHTML = `
+          <div class="recommendation-empty">
+            <div class="card-title">候補を出せませんでした</div>
+            <div class="text-sm text-dim mt-8">API URLと通信状態を確認してからもう一度試してください。</div>
+          </div>`;
+      }
+    }
+  }
+
+  async function loadRecommendationPayload_() {
+    try {
+      const [inventoryItems, routes] = await Promise.all([
+        API.getInventoryPurchases({ from: RECOMMENDATION_FROM_DATE, to: today_() }),
+        API.getRouteHistory({ limit: 100, include_stops: 'true' }),
+      ]);
+      const stats = buildRecommendationStats(inventoryItems, routes, stores);
+      const areas = scoreRecommendedAreas(stats);
+      const payload = { generatedAt: new Date().toISOString(), stats, areas };
+      Storage.saveViewCache(RECOMMENDATION_CACHE_ID, payload).catch(() => {});
+      return { payload, fromCache: false };
+    } catch (error) {
+      const cached = await Storage.getViewCache(RECOMMENDATION_CACHE_ID).catch(() => null);
+      if (cached && cached.data && Array.isArray(cached.data.areas)) {
+        return { payload: cached.data, fromCache: true, error };
+      }
+      throw error;
+    }
+  }
+
+  function buildRecommendationStats(inventoryItems, routes, allStores) {
+    const baseStats = buildStoreStats(inventoryItems, routes, allStores);
+    const storeById = new Map(allStores.map(s => [String(s.store_id || ''), s]));
+    const visitsByStore = new Map();
+    const areaMap = new Map();
+
+    function ensureArea(areaId) {
+      const areaDef = AREAS.find(a => a.id === areaId) || AREAS.find(a => a.id === 'other');
+      const id = areaDef ? areaDef.id : 'other';
+      if (!areaMap.has(id)) {
+        areaMap.set(id, {
+          id,
+          name: areaDef ? areaDef.name : 'その他',
+          group: areaDef ? areaDef.group : 'その他',
+          storeCount: 0,
+          mappableStoreCount: 0,
+          visitCount: 0,
+          totalExpectedProfit: 0,
+          lastVisited: '',
+        });
+      }
+      return areaMap.get(id);
+    }
+
+    allStores.forEach(store => {
+      const area = ensureArea(getArea(store));
+      area.storeCount += 1;
+      if (Number(store.lat) && Number(store.lng)) area.mappableStoreCount += 1;
+      const lastVisited = normalizeRouteDate_(store.last_visited);
+      if (lastVisited) area.lastVisited = newerDateText_(area.lastVisited, lastVisited);
+    });
+
+    (routes || []).forEach(route => {
+      const routeDate = normalizeRouteDate_(route.date || route.created_at || route.started_at);
+      (route.stops || []).forEach(stop => {
+        if (stop.status && stop.status !== 'visited') return;
+        const store = storeById.get(String(stop.store_id || ''));
+        if (!store) return;
+        const stopDate = normalizeRouteDate_(stop.departure_time || stop.arrival_time) || routeDate;
+        const info = visitsByStore.get(store.store_id) || { visitCount: 0, lastVisited: '' };
+        info.visitCount += 1;
+        if (stopDate) info.lastVisited = newerDateText_(info.lastVisited, stopDate);
+        visitsByStore.set(store.store_id, info);
+
+        const area = ensureArea(getArea(store));
+        area.visitCount += 1;
+        if (stopDate) area.lastVisited = newerDateText_(area.lastVisited, stopDate);
+      });
+    });
+
+    const storeStats = allStores.map(store => {
+      const base = baseStats[store.store_id] || {};
+      const visitInfo = visitsByStore.get(store.store_id) || {};
+      const areaId = getArea(store);
+      const totalExpectedProfit = Number(base.totalExpectedProfit) || 0;
+      const visits = Math.max(
+        Number(store.visit_count) || 0,
+        Number(base.visitCount) || 0,
+        Number(visitInfo.visitCount) || 0
+      );
+      const lastVisited = [store.last_visited, visitInfo.lastVisited]
+        .map(normalizeRouteDate_)
+        .filter(Boolean)
+        .reduce((latest, value) => newerDateText_(latest, value), '');
+      const area = ensureArea(areaId);
+      area.totalExpectedProfit += totalExpectedProfit;
+      if (lastVisited) area.lastVisited = newerDateText_(area.lastVisited, lastVisited);
+      return {
+        store,
+        store_id: store.store_id,
+        name: store.name || '',
+        areaId,
+        areaName: area.name,
+        category: store.category || '',
+        visits,
+        lastVisited,
+        daysSinceStoreVisit: daysSinceDateText_(lastVisited),
+        totalExpectedProfit,
+        hasCoords: !!(Number(store.lat) && Number(store.lng)),
+      };
+    });
+
+    const areaStats = Array.from(areaMap.values()).map(area => ({
+      ...area,
+      daysSinceAreaVisit: daysSinceDateText_(area.lastVisited),
+    }));
+
+    return { areas: areaStats, stores: storeStats };
+  }
+
+  function scoreRecommendedAreas(stats) {
+    return stats.areas
+      .filter(area => area.storeCount > 0)
+      .map(area => {
+        const topStores = scoreRecommendedStores(area.id, stats).slice(0, 7);
+        const topScoreAvg = topStores.length
+          ? topStores.slice(0, 3).reduce((sum, s) => sum + s.finalScore, 0) / Math.min(3, topStores.length)
+          : clamp_(area.daysSinceAreaVisit / 45, 0, 1) * 50;
+        const avgFrequencyScore = topStores.length
+          ? topStores.slice(0, 3).reduce((sum, s) => sum + s.frequencyScore, 0) / Math.min(3, topStores.length)
+          : 0;
+        return {
+          ...area,
+          finalScore: Math.round(topScoreAvg * 10) / 10,
+          intervalScore: clamp_(area.daysSinceAreaVisit / 45, 0, 1) * 50,
+          profitRatio: clamp_(area.totalExpectedProfit / 50000, 0, 1),
+          intervalRatio: clamp_(area.daysSinceAreaVisit / 45, 0, 1),
+          frequencyRatio: clamp_(avgFrequencyScore / 20, 0, 1),
+          topStores,
+        };
+      })
+      .sort((a, b) => b.finalScore - a.finalScore);
+  }
+
+  function scoreRecommendedStores(areaId, stats) {
+    const area = stats.areas.find(a => a.id === areaId);
+    const areaIntervalScore = clamp_((area?.daysSinceAreaVisit || 0) / 45, 0, 1) * 50;
+    return stats.stores
+      .filter(st => st.areaId === areaId)
+      .map(st => {
+        const profitScore = clamp_(st.totalExpectedProfit / 50000, 0, 1) * 30;
+        const frequencyScore = getRecommendationFrequencyScore_(st.visits);
+        const finalScore = Math.round((areaIntervalScore + profitScore + frequencyScore) * 10) / 10;
+        return {
+          ...st,
+          areaIntervalScore,
+          profitScore,
+          frequencyScore,
+          finalScore,
+          reasons: buildRecommendationReasons_(st, area),
+        };
+      })
+      .sort((a, b) => b.finalScore - a.finalScore || b.totalExpectedProfit - a.totalExpectedProfit);
+  }
+
+  function getRecommendationFrequencyScore_(visits) {
+    if (visits === 0) return 8;
+    if (visits <= 3) return 20;
+    if (visits <= 8) return 16;
+    return 10;
+  }
+
+  function buildRecommendationReasons_(storeScore, area) {
+    const reasons = [];
+    if (!area || !area.lastVisited) reasons.push('地域未訪問');
+    else if (area.daysSinceAreaVisit >= 14) reasons.push(`前回から${area.daysSinceAreaVisit}日`);
+    if (storeScore.totalExpectedProfit > 0) reasons.push(`見込み${formatYen_(storeScore.totalExpectedProfit)}`);
+    if (storeScore.visits === 0) reasons.push('未開拓');
+    else reasons.push(`訪問${storeScore.visits}回`);
+    if (!storeScore.hasCoords) reasons.push('座標なし');
+    return reasons;
+  }
+
+  function renderRecommendationModalContent_(overlay, payload, options = {}) {
+    const body = overlay.querySelector('#recommendation-body');
+    if (!body) return;
+    const area = payload.areas && payload.areas[0];
+    if (!area || !area.topStores || area.topStores.length === 0) {
+      body.innerHTML = `
+        <div class="recommendation-empty">
+          <div class="card-title">候補がありません</div>
+          <div class="text-sm text-dim mt-8">店舗データまたは履歴データを更新してからもう一度試してください。</div>
+        </div>`;
+      return;
+    }
+
+    const selectableCount = area.topStores.filter(st => st.hasCoords).slice(0, RECOMMENDATION_TOP_STORE_LIMIT).length;
+    body.innerHTML = `
+      ${options.fromCache ? '<div class="recommendation-cache-note">前回保存した候補を表示中です。最新データの取得には失敗しました。</div>' : ''}
+      <div class="recommend-area-summary">
+        <div>
+          <div class="recommend-label">おすすめ地域</div>
+          <div class="recommend-area-name">${esc(area.name)}</div>
+          <div class="recommend-area-meta">${esc(area.group)} / 候補${area.mappableStoreCount || area.storeCount}店舗</div>
+        </div>
+        <div class="recommend-area-score">${Math.round(area.finalScore)}</div>
+      </div>
+      <div class="recommend-reasons">
+        <span>前回から ${area.lastVisited ? `${area.daysSinceAreaVisit}日` : '未訪問'}</span>
+        <span>見込み利益 ${formatYen_(area.totalExpectedProfit)}</span>
+        <span>訪問実績 ${area.visitCount || 0}回</span>
+      </div>
+      <div class="recommend-score-bars">
+        ${renderRecommendationBar_('地域間隔', area.intervalRatio, area.lastVisited ? `${area.daysSinceAreaVisit}日` : '未訪問')}
+        ${renderRecommendationBar_('利益', area.profitRatio, formatYen_(area.totalExpectedProfit))}
+        ${renderRecommendationBar_('訪問頻度', area.frequencyRatio, `${area.visitCount || 0}回`)}
+      </div>
+      <div class="recommend-store-list">
+        ${area.topStores.map(renderRecommendationStoreRow_).join('')}
+      </div>
+      <div class="btn-group mt-12">
+        <button class="btn btn-primary" id="recommend-select-area" ${selectableCount ? '' : 'disabled'}>この地域を選択</button>
+        <button class="btn btn-outline" id="recommend-skip">今日は見送る</button>
+      </div>`;
+
+    overlay.querySelector('#recommend-select-area')?.addEventListener('click', () => {
+      const added = addRecommendedStoresToSelection_(area.topStores.filter(st => st.hasCoords).slice(0, RECOMMENDATION_TOP_STORE_LIMIT));
+      if (added > 0) toast(`${added}店舗を選択しました`);
+      updateRecommendationSelectionState_(overlay);
+    });
+    overlay.querySelector('#recommend-skip')?.addEventListener('click', () => overlay.remove());
+    overlay.querySelectorAll('.recommend-add-store').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const added = addRecommendedStoresToSelection_([{ store_id: btn.dataset.storeId }]);
+        if (added > 0) toast('店舗を追加しました');
+        updateRecommendationSelectionState_(overlay);
+      });
+    });
+    updateRecommendationSelectionState_(overlay);
+  }
+
+  function renderRecommendationBar_(label, ratio, value) {
+    const pct = Math.round(clamp_(ratio, 0, 1) * 100);
+    return `
+      <div class="recommend-score-row">
+        <div class="recommend-score-label"><span>${label}</span><b>${esc(value)}</b></div>
+        <div class="recommend-score-track"><div style="width:${pct}%"></div></div>
+      </div>`;
+  }
+
+  function renderRecommendationStoreRow_(st) {
+    const storeId = String(st.store_id || '');
+    const selected = selectedStoreIds.some(id => String(id) === storeId);
+    const disabled = selected || !st.hasCoords;
+    const label = selected ? '選択済み' : (!st.hasCoords ? '座標なし' : '追加');
+    return `
+      <div class="recommend-store-row" data-store-id="${esc(storeId)}">
+        <div class="recommend-store-main">
+          <div class="recommend-store-name">${renderStopIconHtml(st.store)}${esc(st.name)}</div>
+          <div class="recommend-store-meta">
+            ${st.reasons.map(r => `<span>${esc(r)}</span>`).join('')}
+          </div>
+        </div>
+        <div class="recommend-store-side">
+          <div class="recommend-store-profit">${formatYen_(st.totalExpectedProfit)}</div>
+          <button class="btn btn-sm btn-outline recommend-add-store" data-store-id="${esc(storeId)}" ${disabled ? 'disabled' : ''}>${label}</button>
+        </div>
+      </div>`;
+  }
+
+  function addRecommendedStoresToSelection_(storeScores) {
+    let added = 0;
+    storeScores.forEach(st => {
+      const storeId = String(st.store_id || '');
+      const store = stores.find(s => String(s.store_id) === storeId);
+      if (!store || !Number(store.lat) || !Number(store.lng)) return;
+      if (selectedStoreIds.some(id => String(id) === storeId)) return;
+      selectedStoreIds.push(store.store_id);
+      added += 1;
+    });
+    if (added > 0) {
+      optimizedRoute = null;
+      if (mapInstance) mapInstance.closePopup();
+      refreshMapMarkers();
+      updateMapBottomBar();
+    }
+    return added;
+  }
+
+  function updateRecommendationSelectionState_(overlay) {
+    const selectedCount = overlay.querySelector('#recommend-selected-count');
+    if (selectedCount) selectedCount.textContent = selectedStoreIds.length;
+    overlay.querySelectorAll('.recommend-add-store').forEach(btn => {
+      const selected = selectedStoreIds.some(id => String(id) === String(btn.dataset.storeId || ''));
+      if (selected) {
+        btn.disabled = true;
+        btn.textContent = '選択済み';
+      }
+    });
   }
 
   function renderOptimizedRoute(container) {
@@ -1782,6 +2115,35 @@ const App = (() => {
   function today_() {
     const d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function clamp_(value, min, max) {
+    const n = Number(value);
+    if (!isFinite(n)) return min;
+    return Math.min(max, Math.max(min, n));
+  }
+
+  function newerDateText_(current, candidate) {
+    const a = normalizeRouteDate_(current);
+    const b = normalizeRouteDate_(candidate);
+    if (!a) return b || '';
+    if (!b) return a;
+    return b > a ? b : a;
+  }
+
+  function daysSinceDateText_(dateText) {
+    const normalized = normalizeRouteDate_(dateText);
+    if (!normalized) return 999;
+    const m = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return 999;
+    const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    return Math.max(0, Math.floor((todayStart - date) / 86400000));
+  }
+
+  function formatYen_(value) {
+    return `${Math.round(Number(value) || 0).toLocaleString()}円`;
   }
 
   // ---------- 店舗追加モーダル（巡回中 & 履歴詳細共用） ----------
