@@ -1319,8 +1319,10 @@ const App = (() => {
   function renderRecommendationModalContent_(overlay, payload, options = {}) {
     const body = overlay.querySelector('#recommendation-body');
     if (!body) return;
-    const area = payload.areas && payload.areas[0];
-    if (!area || !area.topStores || area.topStores.length === 0) {
+    const topAreas = (payload.areas || [])
+      .filter(area => area && Array.isArray(area.topStores) && area.topStores.length > 0)
+      .slice(0, 3);
+    if (topAreas.length === 0) {
       body.innerHTML = `
         <div class="recommendation-empty">
           <div class="card-title">候補がありません</div>
@@ -1329,41 +1331,40 @@ const App = (() => {
       return;
     }
 
-    const selectableCount = area.topStores.filter(st => st.hasCoords).slice(0, RECOMMENDATION_TOP_STORE_LIMIT).length;
     body.innerHTML = `
       ${options.fromCache ? '<div class="recommendation-cache-note">前回保存した候補を表示中です。最新データの取得には失敗しました。</div>' : ''}
-      <div class="recommend-area-summary">
-        <div>
-          <div class="recommend-label">おすすめ地域</div>
-          <div class="recommend-area-name">${esc(area.name)}</div>
-          <div class="recommend-area-meta">${esc(area.group)} / 候補${area.mappableStoreCount || area.storeCount}店舗</div>
-        </div>
-        <div class="recommend-area-score">${Math.round(area.finalScore)}</div>
+      <div class="recommend-area-list-head">
+        <span>おすすめ地域 Top3</span>
+        <b>${topAreas.length}地域</b>
       </div>
-      <div class="recommend-reasons">
-        <span>前回から ${area.lastVisited ? `${area.daysSinceAreaVisit}日` : '未訪問'}</span>
-        <span>見込み利益 ${formatYen_(area.totalExpectedProfit)}</span>
-        <span>訪問実績 ${area.visitCount || 0}回</span>
-      </div>
-      <div class="recommend-score-bars">
-        ${renderRecommendationBar_('地域間隔', area.intervalRatio, area.lastVisited ? `${area.daysSinceAreaVisit}日` : '未訪問')}
-        ${renderRecommendationBar_('利益', area.profitRatio, formatYen_(area.totalExpectedProfit))}
-        ${renderRecommendationBar_('訪問頻度', area.frequencyRatio, `${area.visitCount || 0}回`)}
-      </div>
-      <div class="recommend-store-list">
-        ${area.topStores.map(renderRecommendationStoreRow_).join('')}
+      <div class="recommend-area-list">
+        ${topAreas.map(renderRecommendationAreaOption_).join('')}
       </div>
       <div class="btn-group mt-12">
-        <button class="btn btn-primary" id="recommend-select-area" ${selectableCount ? '' : 'disabled'}>この地域を選択</button>
         <button class="btn btn-outline" id="recommend-skip">今日は見送る</button>
       </div>`;
 
-    overlay.querySelector('#recommend-select-area')?.addEventListener('click', () => {
-      const added = addRecommendedStoresToSelection_(area.topStores.filter(st => st.hasCoords).slice(0, RECOMMENDATION_TOP_STORE_LIMIT));
-      if (added > 0) toast(`${added}店舗を選択しました`);
-      updateRecommendationSelectionState_(overlay);
+    overlay.querySelectorAll('.recommend-area-option').forEach(detail => {
+      detail.addEventListener('toggle', () => {
+        if (!detail.open) return;
+        overlay.querySelectorAll('.recommend-area-option[open]').forEach(other => {
+          if (other !== detail) other.open = false;
+        });
+      });
     });
     overlay.querySelector('#recommend-skip')?.addEventListener('click', () => overlay.remove());
+    overlay.querySelectorAll('.recommend-select-area').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const area = topAreas.find(a => String(a.id || '') === String(btn.dataset.areaId || ''));
+        if (!area) return;
+        const storesToAdd = area.topStores
+          .filter(st => st.hasCoords)
+          .slice(0, RECOMMENDATION_TOP_STORE_LIMIT);
+        const added = addRecommendedStoresToSelection_(storesToAdd);
+        if (added > 0) toast(`${added}店舗を選択しました`);
+        updateRecommendationSelectionState_(overlay);
+      });
+    });
     overlay.querySelectorAll('.recommend-add-store').forEach(btn => {
       btn.addEventListener('click', () => {
         const added = addRecommendedStoresToSelection_([{ store_id: btn.dataset.storeId }]);
@@ -1372,6 +1373,44 @@ const App = (() => {
       });
     });
     updateRecommendationSelectionState_(overlay);
+  }
+
+  function renderRecommendationAreaOption_(area, index) {
+    const selectableStores = area.topStores
+      .filter(st => st.hasCoords)
+      .slice(0, RECOMMENDATION_TOP_STORE_LIMIT);
+    const selectableIds = selectableStores.map(st => String(st.store_id || '')).filter(Boolean);
+    const visitText = area.lastVisited ? `${area.daysSinceAreaVisit}日` : '未訪問';
+    return `
+      <details class="recommend-area-option" data-area-id="${esc(area.id)}">
+        <summary class="recommend-area-trigger" aria-label="${esc(area.name)}の店舗候補を開く">
+          <span class="recommend-area-rank">${index + 1}</span>
+          <span class="recommend-area-copy">
+            <span class="recommend-label">おすすめ${index + 1}</span>
+            <span class="recommend-area-name">${esc(area.name)}</span>
+            <span class="recommend-area-meta">${esc(area.group)} / 候補${area.mappableStoreCount || area.storeCount}店舗</span>
+          </span>
+          <span class="recommend-area-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="recommend-area-detail">
+          <div class="recommend-reasons">
+            <span>前回から ${visitText}</span>
+            <span>見込み利益 ${formatYen_(area.totalExpectedProfit)}</span>
+            <span>訪問実績 ${area.visitCount || 0}回</span>
+          </div>
+          <div class="recommend-store-list">
+            ${area.topStores.map(renderRecommendationStoreRow_).join('')}
+          </div>
+          <div class="btn-group mt-12">
+            <button
+              class="btn btn-primary recommend-select-area"
+              data-area-id="${esc(area.id)}"
+              data-store-ids="${esc(selectableIds.join(','))}"
+              ${selectableIds.length ? '' : 'disabled'}
+            >この地域を選択</button>
+          </div>
+        </div>
+      </details>`;
   }
 
   function renderRecommendationBar_(label, ratio, value) {
@@ -1425,6 +1464,17 @@ const App = (() => {
   function updateRecommendationSelectionState_(overlay) {
     const selectedCount = overlay.querySelector('#recommend-selected-count');
     if (selectedCount) selectedCount.textContent = selectedStoreIds.length;
+    overlay.querySelectorAll('.recommend-select-area').forEach(btn => {
+      const ids = String(btn.dataset.storeIds || '').split(',').filter(Boolean);
+      if (!ids.length) {
+        btn.disabled = true;
+        btn.textContent = '座標なし';
+        return;
+      }
+      const hasRemaining = ids.some(storeId => !selectedStoreIds.some(id => String(id) === String(storeId)));
+      btn.disabled = !hasRemaining;
+      btn.textContent = hasRemaining ? 'この地域を選択' : '選択済み';
+    });
     overlay.querySelectorAll('.recommend-add-store').forEach(btn => {
       const selected = selectedStoreIds.some(id => String(id) === String(btn.dataset.storeId || ''));
       if (selected) {
