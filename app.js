@@ -1376,7 +1376,7 @@ const App = (() => {
       .filter(st => st.hasCoords)
       .slice(0, RECOMMENDATION_TOP_STORE_LIMIT);
     const selectableIds = selectableStores.map(st => String(st.store_id || '')).filter(Boolean);
-    const visitText = area.lastVisited ? `${area.daysSinceAreaVisit}日` : '未訪問';
+    const areaVisitLabel = area.lastVisited ? `前回から${area.daysSinceAreaVisit}日` : '未訪問';
     return `
       <details class="recommend-area-option" data-area-id="${esc(area.id)}">
         <summary class="recommend-area-trigger" aria-label="${esc(area.name)}の店舗候補を開く">
@@ -1384,13 +1384,13 @@ const App = (() => {
           <span class="recommend-area-copy">
             <span class="recommend-label">おすすめ${index + 1}</span>
             <span class="recommend-area-name">${esc(area.name)}</span>
-            <span class="recommend-area-meta">${esc(area.group)} / 候補${area.mappableStoreCount || area.storeCount}店舗</span>
+            <span class="recommend-area-meta">${esc(area.group)} / ${esc(areaVisitLabel)} / 候補${area.mappableStoreCount || area.storeCount}店舗</span>
           </span>
           <span class="recommend-area-chevron" aria-hidden="true">⌄</span>
         </summary>
         <div class="recommend-area-detail">
           <div class="recommend-reasons">
-            <span>前回から ${visitText}</span>
+            <span>${esc(areaVisitLabel)}</span>
             <span>見込み利益 ${formatYen_(area.totalExpectedProfit)}</span>
             <span>訪問実績 ${area.visitCount || 0}回</span>
           </div>
