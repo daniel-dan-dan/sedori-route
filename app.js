@@ -1339,9 +1339,6 @@ const App = (() => {
       </div>
       <div class="recommend-area-list">
         ${topAreas.map(renderRecommendationAreaOption_).join('')}
-      </div>
-      <div class="btn-group mt-12">
-        <button class="btn btn-outline" id="recommend-skip">今日は見送る</button>
       </div>`;
 
     overlay.querySelectorAll('.recommend-area-option').forEach(detail => {
@@ -1352,7 +1349,6 @@ const App = (() => {
         });
       });
     });
-    overlay.querySelector('#recommend-skip')?.addEventListener('click', () => overlay.remove());
     overlay.querySelectorAll('.recommend-select-area').forEach(btn => {
       btn.addEventListener('click', () => {
         const area = topAreas.find(a => String(a.id || '') === String(btn.dataset.areaId || ''));
