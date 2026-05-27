@@ -1198,7 +1198,7 @@ const App = (() => {
     (routes || []).forEach(route => {
       const routeDate = normalizeRouteDate_(route.date || route.created_at || route.started_at);
       (route.stops || []).forEach(stop => {
-        if (stop.status && stop.status !== 'visited') return;
+        if (!isRouteAreaVisitStop_(stop)) return;
         const store = storeById.get(String(stop.store_id || ''));
         if (!store) return;
         const stopDate = normalizeRouteDate_(stop.departure_time || stop.arrival_time) || routeDate;
@@ -2888,9 +2888,13 @@ const App = (() => {
     return getArea(source);
   }
 
+  function isRouteAreaVisitStop_(stop) {
+    return !!stop && stop.status !== 'skipped';
+  }
+
   function getRouteAreaNames_(route) {
     const stops = route?.stops || [];
-    const targetStops = stops.filter(s => s.status !== 'skipped');
+    const targetStops = stops.filter(isRouteAreaVisitStop_);
     const areaStops = targetStops.length ? targetStops : stops;
     const seen = new Set();
     const names = [];
