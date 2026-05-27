@@ -1681,7 +1681,7 @@ a.stop-address:active { color: var(--primary); }
 
 /* ---- マップビュー ---- */
 #map-view {
-  height: clamp(350px, calc(100dvh - 340px), 680px);
+  height: clamp(350px, calc(100dvh - 300px), 700px);
   min-height: 350px;
   border-radius: var(--radius);
   overflow: hidden;
@@ -1692,7 +1692,7 @@ a.stop-address:active { color: var(--primary); }
 
 @supports not (height: 100dvh) {
   #map-view {
-    height: clamp(350px, calc(100vh - 340px), 680px);
+    height: clamp(350px, calc(100vh - 300px), 700px);
   }
 }
 
@@ -2505,13 +2505,13 @@ body {
 
 @media (max-width: 520px) {
   #map-view {
-    height: clamp(330px, calc(100dvh - 360px), 560px);
+    height: clamp(330px, calc(100dvh - 308px), 610px);
     min-height: 330px;
   }
 
   @supports not (height: 100dvh) {
     #map-view {
-      height: clamp(330px, calc(100vh - 360px), 560px);
+      height: clamp(330px, calc(100vh - 308px), 610px);
     }
   }
 
