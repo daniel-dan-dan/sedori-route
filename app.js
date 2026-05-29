@@ -27,6 +27,8 @@ const App = (() => {
   const RECOMMENDATION_CACHE_ID = 'recommendations';
   const RECOMMENDATION_FROM_DATE = '2026-04-21';
   const RECOMMENDATION_TOP_STORE_LIMIT = 5;
+  const RECOMMENDATION_AREA_COOLDOWN_DAYS = 14;
+  const RECOMMENDATION_AREA_TARGET_DAYS = 45;
 
   // チェーン別ブランドカラー（ピン・チップの色分け）
   const CHAIN_COLORS = {
@@ -1114,7 +1116,7 @@ const App = (() => {
         <div class="recommendation-head">
           <div>
             <div class="recommendation-title">次に回る候補</div>
-            <div class="recommendation-subtitle">地域の空き期間を強めに見て選びます</div>
+            <div class="recommendation-subtitle">14日未満は原則外し、地域の空き期間を強めに見ます</div>
           </div>
           <button class="recommendation-close" type="button" aria-label="閉じる">閉じる</button>
         </div>
@@ -1253,33 +1255,49 @@ const App = (() => {
     return { areas: areaStats, stores: storeStats };
   }
 
+  function getRecommendationIntervalRatio_(daysSince) {
+    const days = Number(daysSince);
+    if (!Number.isFinite(days) || days >= 999) return 1;
+    const scoringDays = RECOMMENDATION_AREA_TARGET_DAYS - RECOMMENDATION_AREA_COOLDOWN_DAYS;
+    return clamp_((days - RECOMMENDATION_AREA_COOLDOWN_DAYS) / scoringDays, 0, 1);
+  }
+
+  function isRecommendationAreaReady_(area) {
+    if (!area || !area.lastVisited) return true;
+    return Number(area.daysSinceAreaVisit) >= RECOMMENDATION_AREA_COOLDOWN_DAYS;
+  }
+
   function scoreRecommendedAreas(stats) {
-    return stats.areas
+    const scoredAreas = stats.areas
       .filter(area => area.storeCount > 0)
       .map(area => {
         const topStores = scoreRecommendedStores(area.id, stats).slice(0, 7);
+        const intervalRatio = getRecommendationIntervalRatio_(area.daysSinceAreaVisit);
         const topScoreAvg = topStores.length
           ? topStores.slice(0, 3).reduce((sum, s) => sum + s.finalScore, 0) / Math.min(3, topStores.length)
-          : clamp_(area.daysSinceAreaVisit / 45, 0, 1) * 50;
+          : intervalRatio * 50;
         const avgFrequencyScore = topStores.length
           ? topStores.slice(0, 3).reduce((sum, s) => sum + s.frequencyScore, 0) / Math.min(3, topStores.length)
           : 0;
         return {
           ...area,
           finalScore: Math.round(topScoreAvg * 10) / 10,
-          intervalScore: clamp_(area.daysSinceAreaVisit / 45, 0, 1) * 50,
+          intervalScore: intervalRatio * 50,
           profitRatio: clamp_(area.totalExpectedProfit / 50000, 0, 1),
-          intervalRatio: clamp_(area.daysSinceAreaVisit / 45, 0, 1),
+          intervalRatio,
           frequencyRatio: clamp_(avgFrequencyScore / 20, 0, 1),
           topStores,
         };
-      })
-      .sort((a, b) => b.finalScore - a.finalScore);
+      });
+
+    const readyAreas = scoredAreas.filter(isRecommendationAreaReady_);
+    const rankTarget = readyAreas.length > 0 ? readyAreas : scoredAreas;
+    return rankTarget.sort((a, b) => b.finalScore - a.finalScore);
   }
 
   function scoreRecommendedStores(areaId, stats) {
     const area = stats.areas.find(a => a.id === areaId);
-    const areaIntervalScore = clamp_((area?.daysSinceAreaVisit || 0) / 45, 0, 1) * 50;
+    const areaIntervalScore = getRecommendationIntervalRatio_(area?.daysSinceAreaVisit || 0) * 50;
     return stats.stores
       .filter(st => st.areaId === areaId)
       .map(st => {
