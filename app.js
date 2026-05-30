@@ -1291,8 +1291,8 @@ const App = (() => {
       });
 
     const readyAreas = scoredAreas.filter(isRecommendationAreaReady_);
-    const rankTarget = readyAreas.length > 0 ? readyAreas : scoredAreas;
-    return rankTarget.sort((a, b) => b.finalScore - a.finalScore);
+    if (readyAreas.length === 0) return [];
+    return readyAreas.sort((a, b) => b.finalScore - a.finalScore);
   }
 
   function scoreRecommendedStores(areaId, stats) {
@@ -1341,10 +1341,11 @@ const App = (() => {
       .filter(area => area && Array.isArray(area.topStores) && area.topStores.length > 0)
       .slice(0, 3);
     if (topAreas.length === 0) {
+      const hasTrackedAreas = (payload.stats?.areas || []).some(area => area && area.storeCount > 0);
       body.innerHTML = `
         <div class="recommendation-empty">
-          <div class="card-title">候補がありません</div>
-          <div class="text-sm text-dim mt-8">店舗データまたは履歴データを更新してからもう一度試してください。</div>
+          <div class="card-title">${hasTrackedAreas ? '全地域がクールダウン中です' : '候補がありません'}</div>
+          <div class="text-sm text-dim mt-8">${hasTrackedAreas ? 'いまは全地域が14日未満（クールダウン中）です。急いで回る地域はありません。' : '店舗データまたは履歴データを更新してからもう一度試してください。'}</div>
         </div>`;
       return;
     }
