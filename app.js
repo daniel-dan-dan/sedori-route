@@ -1193,8 +1193,6 @@ const App = (() => {
       const area = ensureArea(getArea(store));
       area.storeCount += 1;
       if (Number(store.lat) && Number(store.lng)) area.mappableStoreCount += 1;
-      const lastVisited = normalizeRouteDate_(store.last_visited);
-      if (lastVisited) area.lastVisited = newerDateText_(area.lastVisited, lastVisited);
     });
 
     (routes || []).forEach(route => {
@@ -1203,7 +1201,7 @@ const App = (() => {
         if (!isRouteAreaVisitStop_(stop)) return;
         const store = storeById.get(String(stop.store_id || ''));
         if (!store) return;
-        const stopDate = normalizeRouteDate_(stop.departure_time || stop.arrival_time) || routeDate;
+        const stopDate = routeDate || normalizeRouteDate_(stop.departure_time || stop.arrival_time);
         const info = visitsByStore.get(store.store_id) || { visitCount: 0, lastVisited: '' };
         info.visitCount += 1;
         if (stopDate) info.lastVisited = newerDateText_(info.lastVisited, stopDate);
@@ -1225,13 +1223,12 @@ const App = (() => {
         Number(base.visitCount) || 0,
         Number(visitInfo.visitCount) || 0
       );
-      const lastVisited = [store.last_visited, visitInfo.lastVisited]
-        .map(normalizeRouteDate_)
-        .filter(Boolean)
-        .reduce((latest, value) => newerDateText_(latest, value), '');
+      const routeLastVisited = normalizeRouteDate_(visitInfo.lastVisited);
+      const sheetLastVisited = normalizeRouteDate_(store.last_visited);
+      const lastVisited = routeLastVisited || sheetLastVisited;
       const area = ensureArea(areaId);
       area.totalExpectedProfit += totalExpectedProfit;
-      if (lastVisited) area.lastVisited = newerDateText_(area.lastVisited, lastVisited);
+      if (routeLastVisited) area.lastVisited = newerDateText_(area.lastVisited, routeLastVisited);
       return {
         store,
         store_id: store.store_id,
