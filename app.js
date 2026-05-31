@@ -163,7 +163,7 @@ const App = (() => {
     // 分類判定用。広域エリアを先に判定してから、仙台市内を代表地名1つで細分化する。
     { id: 'yamagata',    name: '山形',   group: '山形方面', test: s => Number(s.lng) < 140.50 },
     { id: 'ishinomaki',  name: '石巻',   group: '沿岸北',   test: s => Number(s.lng) >= 141.10 },
-    { id: 'furukawa',    name: '古川',   group: '県北',     test: s => Number(s.lat) >= 38.50 },
+    { id: 'furukawa',    name: '大崎',   group: '県北',     test: s => Number(s.lat) >= 38.50 },
     { id: 'shiroishi',   name: '白石',   group: '県南',     test: s => Number(s.lat) < 38.03 },
     { id: 'ogawara',     name: '大河原', group: '県南',     test: s => Number(s.lat) < 38.10 },
     { id: 'iwanuma',     name: '岩沼',   group: '県南',     test: s => Number(s.lat) < 38.16 },
@@ -1149,11 +1149,12 @@ const App = (() => {
     try {
       const [inventoryItems, routes] = await Promise.all([
         API.getInventoryPurchases({ from: RECOMMENDATION_FROM_DATE, to: today_() }),
-        API.getRouteHistory({ limit: 100, include_stops: 'true' }),
+        API.getRouteHistory({ limit: 300, include_stops: 'true' }),
       ]);
       const stats = buildRecommendationStats(inventoryItems, routes, stores);
       const areas = scoreRecommendedAreas(stats);
-      const payload = { generatedAt: new Date().toISOString(), stats, areas };
+      const allAreas = scoreRecommendedAreas(stats, { includeCooldown: true });
+      const payload = { generatedAt: new Date().toISOString(), stats, areas, allAreas };
       Storage.saveViewCache(RECOMMENDATION_CACHE_ID, payload).catch(() => {});
       return { payload, fromCache: false };
     } catch (error) {
@@ -1196,6 +1197,7 @@ const App = (() => {
     });
 
     (routes || []).forEach(route => {
+      if (!isRecommendationRouteEffective_(route)) return;
       const routeDate = normalizeRouteDate_(route.date || route.created_at || route.started_at);
       (route.stops || []).forEach(stop => {
         if (!isRouteAreaVisitStop_(stop)) return;
@@ -1264,7 +1266,15 @@ const App = (() => {
     return Number(area.daysSinceAreaVisit) >= RECOMMENDATION_AREA_COOLDOWN_DAYS;
   }
 
-  function scoreRecommendedAreas(stats) {
+  function isRecommendationRouteEffective_(route) {
+    const stops = route?.stops || [];
+    if (stops.some(stop => String(stop.status || '').trim().toLowerCase() === 'visited')) return true;
+    if (Number(route?.total_purchase) > 0 || Number(route?.total_items) > 0) return true;
+    if (Number(route?.expected_profit) > 0) return true;
+    return !!(route && normalizeRouteDate_(route.end_time || route.finished_at));
+  }
+
+  function scoreRecommendedAreas(stats, options = {}) {
     const scoredAreas = stats.areas
       .filter(area => area.storeCount > 0)
       .map(area => {
@@ -1287,9 +1297,11 @@ const App = (() => {
         };
       });
 
-    const readyAreas = scoredAreas.filter(isRecommendationAreaReady_);
+    const sortedAreas = scoredAreas.sort((a, b) => b.finalScore - a.finalScore);
+    if (options.includeCooldown) return sortedAreas;
+    const readyAreas = sortedAreas.filter(isRecommendationAreaReady_);
     if (readyAreas.length === 0) return [];
-    return readyAreas.sort((a, b) => b.finalScore - a.finalScore);
+    return readyAreas;
   }
 
   function scoreRecommendedStores(areaId, stats) {
@@ -1339,10 +1351,14 @@ const App = (() => {
       .slice(0, 3);
     if (topAreas.length === 0) {
       const hasTrackedAreas = (payload.stats?.areas || []).some(area => area && area.storeCount > 0);
+      const cooldownAreas = (payload.allAreas || payload.stats?.areas || [])
+        .filter(area => area && area.storeCount > 0)
+        .slice(0, 6);
       body.innerHTML = `
         <div class="recommendation-empty">
           <div class="card-title">${hasTrackedAreas ? '全地域がクールダウン中です' : '候補がありません'}</div>
           <div class="text-sm text-dim mt-8">${hasTrackedAreas ? 'いまは全地域が14日未満（クールダウン中）です。急いで回る地域はありません。' : '店舗データまたは履歴データを更新してからもう一度試してください。'}</div>
+          ${renderRecommendationCooldownList_(cooldownAreas)}
         </div>`;
       return;
     }
@@ -1385,6 +1401,23 @@ const App = (() => {
       });
     });
     updateRecommendationSelectionState_(overlay);
+  }
+
+  function renderRecommendationCooldownList_(areas) {
+    if (!areas.length) return '';
+    return `
+      <div class="recommend-cooldown-list">
+        ${areas.map(area => {
+          const visitLabel = area.lastVisited ? `前回から${area.daysSinceAreaVisit}日` : '未訪問';
+          const stateLabel = isRecommendationAreaReady_(area) ? '候補対象' : '14日未満';
+          return `
+            <div class="recommend-cooldown-row">
+              <span>${esc(area.name)}</span>
+              <b>${esc(visitLabel)}</b>
+              <em>${esc(stateLabel)}</em>
+            </div>`;
+        }).join('')}
+      </div>`;
   }
 
   function renderRecommendationAreaOption_(area, index) {
@@ -2951,7 +2984,7 @@ const App = (() => {
   }
 
   function isRouteAreaVisitStop_(stop) {
-    return !!stop && stop.status !== 'skipped';
+    return !!stop && String(stop.status || '').trim().toLowerCase() !== 'skipped';
   }
 
   function getRouteAreaNames_(route) {

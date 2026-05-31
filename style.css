@@ -2050,6 +2050,43 @@ a.stop-address:active { color: var(--primary); }
   padding: 18px 4px;
   text-align: center;
 }
+.recommend-cooldown-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  text-align: left;
+}
+.recommend-cooldown-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+}
+.recommend-cooldown-row span {
+  min-width: 0;
+  color: #143840;
+  font-weight: 900;
+}
+.recommend-cooldown-row b {
+  color: var(--primary-dark);
+  font-weight: 900;
+  white-space: nowrap;
+}
+.recommend-cooldown-row em {
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: #eef6f8;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
 
 /* ---- チェーンフィルターチップ ---- */
 .map-chain-filter {
