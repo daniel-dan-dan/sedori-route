@@ -2188,7 +2188,17 @@ a.stop-address:active { color: var(--primary); }
 /* ---- ポップアップ ---- */
 .map-popup { min-width: 180px; text-align: center; }
 .map-popup-name { font-weight: 700; font-size: 15px; margin-bottom: 4px; color: var(--text); text-align: center; }
-.map-popup-meta { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; text-align: center; }
+.map-popup-meta { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; text-align: center; }
+.map-popup-visit {
+  font-size: 12px;
+  color: var(--text);
+  background: var(--primary-light);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-bottom: 10px;
+  text-align: center;
+  white-space: nowrap;
+}
 .map-popup-btn {
   display: block;
   width: 100%;

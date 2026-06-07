@@ -14,6 +14,10 @@ const App = (() => {
   let mapCluster = null;
   let mapMarkers = new Map(); // store_id → L.marker（差分更新用）
   let mapChainFilter = 'all';
+  let mapVisitInfoByStoreId = new Map();
+  let mapVisitInfoLoaded = false;
+  let mapVisitInfoLoading = null;
+  let mapVisitInfoFetchedAt = 0;
   let currentLocationMarker = null; // 現在地マーカー
   let currentLocationCircle = null; // 現在地精度サークル
   const HIDDEN_STORE_IDS = new Set([
@@ -25,10 +29,12 @@ const App = (() => {
     's20260427205454995',
   ]);
   const RECOMMENDATION_CACHE_ID = 'recommendations';
+  const MAP_VISIT_INFO_CACHE_ID = 'mapVisitInfo';
   const RECOMMENDATION_FROM_DATE = '2026-04-21';
   const RECOMMENDATION_TOP_STORE_LIMIT = 5;
   const RECOMMENDATION_AREA_COOLDOWN_DAYS = 14;
   const RECOMMENDATION_AREA_TARGET_DAYS = 45;
+  const MAP_VISIT_INFO_TTL_MS = 60 * 60 * 1000;
 
   // チェーン別ブランドカラー（ピン・チップの色分け）
   const CHAIN_COLORS = {
@@ -801,6 +807,8 @@ const App = (() => {
     // 現在地ボタン（Leaflet初期化後に押せるようにrAF後ではなく直後に登録）
     const btnCurrent = document.getElementById('btn-map-current');
     if (btnCurrent) btnCurrent.addEventListener('click', moveToCurrent);
+
+    preloadMapVisitInfo_();
   }
 
   // 初期中心は常に仙台駅固定
@@ -946,13 +954,114 @@ const App = (() => {
 
   function buildMapPopupHtml(s, selIdx) {
     const categoryLabel = GENRE_DISPLAY[s.category] || s.category || '';
+    const visitLabel = getMapPopupLastVisitLabel_(s);
     return `<div class="map-popup">
           <div class="map-popup-name">${esc(s.name)}</div>
           <div class="map-popup-meta">${esc(categoryLabel)}</div>
+          <div class="map-popup-visit">${esc(visitLabel)}</div>
           <button class="btn btn-primary map-popup-btn" data-sid="${s.store_id}" onclick="App.toggleMapSelection('${s.store_id}')">
             ${selIdx >= 0 ? '選択解除' : '選択'}
           </button>
         </div>`;
+  }
+
+  function buildStoreVisitInfoFromRoutes_(routes) {
+    const infoByStoreId = new Map();
+    (routes || []).forEach(route => {
+      const routeDate = normalizeRouteDate_(route.date || route.created_at || route.started_at || route.end_time || route.finished_at);
+      (route.stops || []).forEach(stop => {
+        if (!isRouteAreaVisitStop_(stop)) return;
+        const storeId = String(stop.store_id || '').trim();
+        if (!storeId) return;
+        const stopDate = routeDate || normalizeRouteDate_(stop.departure_time || stop.arrival_time || stop.updated_at);
+        if (!stopDate) return;
+        const current = infoByStoreId.get(storeId) || { visitCount: 0, lastVisited: '' };
+        current.visitCount += 1;
+        current.lastVisited = newerDateText_(current.lastVisited, stopDate);
+        infoByStoreId.set(storeId, current);
+      });
+    });
+    return infoByStoreId;
+  }
+
+  function setMapVisitInfoFromRoutes_(routes) {
+    mapVisitInfoByStoreId = buildStoreVisitInfoFromRoutes_(routes);
+    mapVisitInfoLoaded = true;
+    mapVisitInfoFetchedAt = Date.now();
+    refreshMapMarkers();
+  }
+
+  function setMapVisitInfoFromCachedRows_(rows, savedAt) {
+    mapVisitInfoByStoreId = new Map((rows || [])
+      .filter(row => row && row.store_id)
+      .map(row => [String(row.store_id), {
+        visitCount: Number(row.visitCount) || 0,
+        lastVisited: normalizeRouteDate_(row.lastVisited),
+      }]));
+    mapVisitInfoLoaded = true;
+    mapVisitInfoFetchedAt = Number(savedAt) || Date.now();
+    refreshMapMarkers();
+  }
+
+  function serializeMapVisitInfo_() {
+    return Array.from(mapVisitInfoByStoreId.entries()).map(([store_id, info]) => ({
+      store_id,
+      visitCount: Number(info.visitCount) || 0,
+      lastVisited: normalizeRouteDate_(info.lastVisited),
+    }));
+  }
+
+  function getMapVisitInfo_(store) {
+    const storeId = String(store?.store_id || '').trim();
+    const routeInfo = storeId ? mapVisitInfoByStoreId.get(storeId) : null;
+    const routeLastVisited = normalizeRouteDate_(routeInfo?.lastVisited);
+    if (routeLastVisited) return { lastVisited: routeLastVisited, source: 'history' };
+
+    const sheetLastVisited = normalizeRouteDate_(store?.last_visited);
+    if (sheetLastVisited) return { lastVisited: sheetLastVisited, source: 'store' };
+
+    return { lastVisited: '', source: mapVisitInfoLoaded ? 'none' : 'loading' };
+  }
+
+  function getMapPopupLastVisitLabel_(store) {
+    const info = getMapVisitInfo_(store);
+    if (!info.lastVisited) {
+      return info.source === 'loading' ? '訪問履歴を確認中' : '前回訪問なし';
+    }
+    const days = daysSinceDateText_(info.lastVisited);
+    return `前回訪問から${days}日経過`;
+  }
+
+  async function preloadMapVisitInfo_() {
+    if (mapVisitInfoLoaded && (Date.now() - mapVisitInfoFetchedAt) < MAP_VISIT_INFO_TTL_MS) {
+      return Promise.resolve();
+    }
+    if (mapVisitInfoLoading) return mapVisitInfoLoading;
+    mapVisitInfoLoading = (async () => {
+      try {
+        const cachedMapInfo = await Storage.getViewCache(MAP_VISIT_INFO_CACHE_ID).catch(() => null);
+        if (cachedMapInfo && Array.isArray(cachedMapInfo.data) && cachedMapInfo.data.length) {
+          setMapVisitInfoFromCachedRows_(cachedMapInfo.data, cachedMapInfo.savedAt);
+          if ((Date.now() - mapVisitInfoFetchedAt) < MAP_VISIT_INFO_TTL_MS) return;
+        }
+
+        const cached = await Storage.getViewCache('history').catch(() => null);
+        if (cached && Array.isArray(cached.data) && cached.data.length) {
+          setMapVisitInfoFromRoutes_(cached.data);
+        }
+
+        const routes = await API.getRouteHistory({ limit: 300, include_stops: 'true' });
+        setMapVisitInfoFromRoutes_(routes);
+        Storage.saveViewCache(MAP_VISIT_INFO_CACHE_ID, serializeMapVisitInfo_()).catch(() => {});
+      } catch (error) {
+        mapVisitInfoLoaded = true;
+        refreshMapMarkers();
+        console.warn('map visit info load failed:', error);
+      } finally {
+        mapVisitInfoLoading = null;
+      }
+    })();
+    return mapVisitInfoLoading;
   }
 
   function getLatLngKey(store) {
