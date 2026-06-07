@@ -42,6 +42,7 @@ const App = (() => {
     'セカンドストリート': '#4CAF50',
     'トレファク': '#F08300',
     'オフハウス': '#4FC3F7',
+    'オーディン': '#3A0A0C',
     'ドンキホーテ': '#FFCC00',
     'カインズ': '#2E7D32',
     'DCM': '#FF7F00',
@@ -66,7 +67,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v99';
+  const ASSET_VER = 'v100';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -125,7 +126,7 @@ const App = (() => {
     return `<span class="stop-icon-emoji">${store.icon || '&#x1f3ea;'}</span>`;
   }
 
-  // チェーン別ロゴ（公式サイト/Wikimedia Commons由来）
+  // チェーン別ロゴ（公式サイト/Wikimedia Commons/ユーザー提供画像由来）
   const CHAIN_LOGOS = {
     'ヤマダデンキ': 'icons/chains/yamada.png',
     'ケーズデンキ': 'icons/chains/kdenki.png',
@@ -137,6 +138,7 @@ const App = (() => {
     'セカンドストリート': 'icons/chains/2ndstreet.png',
     'トレファク': 'icons/chains/trefac.png',
     'オフハウス': 'icons/chains/offhouse.png',
+    'オーディン': 'icons/chains/odin.png',
     'ドンキホーテ': 'icons/chains/donki.png',
     'カインズ': 'icons/chains/cainz.png',
     'DCM': 'icons/chains/dcm.png',
@@ -221,6 +223,7 @@ const App = (() => {
     { re: /トレファクスタイル|トレファクファッション|トレジャーファクトリー|トレファク/, chain: 'トレファク' },
     { re: /オフハウス/, chain: 'オフハウス' },
     { re: /ハードオフ/, chain: 'ハードオフ' },
+    { re: /オーディン|Odin/i, chain: 'オーディン' },
     // 家電量販
     { re: /ヤマダデンキ|ヤマダ電機|LABI|YAMADA/i, chain: 'ヤマダデンキ' },
     { re: /ケーズデンキ/, chain: 'ケーズデンキ' },
