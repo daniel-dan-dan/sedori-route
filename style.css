@@ -2537,6 +2537,33 @@ body {
   color: var(--success);
 }
 
+.history-date-editor {
+  margin: 10px 0 14px;
+  padding: 10px;
+  border: 1px solid #dbe9ed;
+  border-radius: 8px;
+  background: #f8fcfd;
+}
+
+.history-date-editor label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.history-date-editor-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.history-date-editor-row .form-input {
+  min-width: 0;
+}
+
 .history-actions {
   display: grid;
   gap: 10px;

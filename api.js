@@ -74,6 +74,7 @@ const API = (() => {
     recalcRoutePurchases:(p={})  => get('recalcRoutePurchases', p),
     updateInventoryShop:(b)      => post('updateInventoryShop', b),
     updateConfig:    (entries)   => post('updateConfig', { entries }),
+    updateRouteDate: (b)         => post('updateRouteDate', b),
     deleteRoute:     (b)         => post('deleteRoute', b),
     clearHistory:    ()          => post('clearHistory'),
   };

@@ -3075,6 +3075,17 @@ const App = (() => {
     Storage.clearViewCache('analytics').catch(() => {});
   }
 
+  function isValidRouteDate_(dateText) {
+    const s = normalizeRouteDate_(dateText);
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return false;
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    const dt = new Date(y, mo - 1, d);
+    return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d;
+  }
+
   function getAreaName_(areaId) {
     return AREAS.find(a => a.id === areaId)?.name || 'その他';
   }
@@ -3701,6 +3712,13 @@ const App = (() => {
       <div class="settings-section-title">基本情報</div>
       <div class="card settings-card">
         <div class="card-title">${dateStr} の巡回</div>
+        <div class="history-date-editor">
+          <label for="history-date-input">履歴の日付</label>
+          <div class="history-date-editor-row">
+            <input type="date" class="form-input" id="history-date-input" value="${esc(normalizeRouteDate_(route.date))}">
+            <button class="btn btn-sm btn-outline" id="btn-update-route-date">保存</button>
+          </div>
+        </div>
         <div class="summary-grid">
           <div class="summary-item"><div class="value">${route.store_count || 0}</div><div class="label">店舗数</div></div>
           <div class="summary-item"><div class="value">${route.total_distance_km || 0}km</div><div class="label">距離</div></div>
@@ -3753,6 +3771,37 @@ const App = (() => {
     container.innerHTML = html;
 
     loadInventoryForRoute(route);
+
+    document.getElementById('btn-update-route-date')?.addEventListener('click', async () => {
+      const input = document.getElementById('history-date-input');
+      const btn = document.getElementById('btn-update-route-date');
+      const oldDate = normalizeRouteDate_(route.date);
+      const newDate = normalizeRouteDate_(input?.value);
+      if (!newDate || !isValidRouteDate_(newDate)) {
+        toast('日付を正しく入力してください');
+        return;
+      }
+      if (newDate === oldDate) {
+        toast('日付は変更されていません');
+        return;
+      }
+      if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+      try {
+        await API.updateRouteDate({ route_id: route.route_id, date: newDate });
+        route.date = newDate;
+        invalidateHistoryApiCache();
+        delete inventoryByDateCache[oldDate];
+        delete inventoryByDateCache[newDate];
+        Storage.clearViewCache('inventory_' + oldDate).catch(() => {});
+        Storage.clearViewCache('inventory_' + newDate).catch(() => {});
+        toast('日付を変更しました');
+        Router.navigate('history-detail', { route });
+      } catch (e) {
+        toast('保存失敗: ' + e.message);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '保存'; }
+      }
+    });
 
     container.querySelectorAll('.inventory-add-from-history').forEach(btn => {
       btn.addEventListener('click', () => {
