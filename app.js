@@ -3662,6 +3662,149 @@ const App = (() => {
     return `${y}/${Number(mo)}/${Number(day)}`;
   }
 
+  function formatCorrectionYen_(value) {
+    return `${Number(value || 0).toLocaleString()}円`;
+  }
+
+  function routeCorrectionSeverityLabel_(severity) {
+    if (severity === 'high') return '要修正';
+    if (severity === 'medium') return '要確認';
+    if (severity === 'low') return '確認';
+    return 'メモ';
+  }
+
+  function renderRouteCorrectionSuggestions_(result) {
+    const wrap = document.getElementById('route-correction-result');
+    if (!wrap) return;
+    const items = (result && result.suggestions) || [];
+    if (!items.length) {
+      wrap.innerHTML = `
+        <div class="correction-empty">
+          直近${result?.checked_routes || 0}件に、自動補正候補はありません。
+        </div>`;
+      return;
+    }
+
+    let html = `
+      <div class="correction-summary">
+        直近${result.checked_routes || 0}件中、${result.suggestion_routes || items.length}件に確認候補があります。
+      </div>`;
+    items.forEach(route => {
+      html += `
+        <div class="correction-card" data-route-id="${esc(route.route_id)}">
+          <div class="flex-between">
+            <div>
+              <div class="correction-date">${formatRouteDate_(route.date)} の履歴</div>
+              <div class="text-sm text-dim">${route.store_count || 0}店舗 / 仕入れ ${formatCorrectionYen_(route.total_purchase)} (${route.total_items || 0}点)</div>
+            </div>
+            <button class="btn btn-sm btn-outline js-open-correction-route" data-route-id="${esc(route.route_id)}">詳細</button>
+          </div>`;
+      route.suggestions.forEach((s, idx) => {
+        const badge = routeCorrectionSeverityLabel_(s.severity);
+        html += `
+          <div class="correction-suggestion">
+            <div class="correction-message"><span class="correction-badge">${badge}</span>${esc(s.message)}</div>`;
+        if (s.type === 'date_shift') {
+          html += `
+            <div class="text-sm text-dim">候補日: ${formatRouteDate_(s.new_date)} / 仕入れ ${formatCorrectionYen_(s.inventory_amount)} (${s.inventory_count || 0}点)</div>
+            <button class="btn btn-sm btn-primary js-apply-route-date" data-route-id="${esc(route.route_id)}" data-new-date="${esc(s.new_date)}">この日付に変更</button>`;
+        } else if (s.type === 'recalc_purchase') {
+          html += `
+            <div class="text-sm text-dim">在庫管理: ${formatCorrectionYen_(s.inventory_amount)} (${s.inventory_count || 0}点)</div>
+            <button class="btn btn-sm btn-outline js-recalc-route" data-route-id="${esc(route.route_id)}">仕入れ集計を再計算</button>`;
+        } else if (s.type === 'missing_shop') {
+          html += `
+            <button class="btn btn-sm btn-outline js-open-correction-route" data-route-id="${esc(route.route_id)}">詳細で店舗を紐付ける</button>`;
+        }
+        html += `</div>`;
+      });
+      html += `</div>`;
+    });
+    wrap.innerHTML = html;
+
+    wrap.querySelectorAll('.js-apply-route-date').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const routeId = btn.dataset.routeId;
+        const newDate = btn.dataset.newDate;
+        if (!routeId || !newDate) return;
+        if (!confirm(`${formatRouteDate_(newDate)} に変更しますか？`)) return;
+        btn.disabled = true;
+        btn.textContent = '変更中...';
+        try {
+          await API.updateRouteDate({ route_id: routeId, date: newDate });
+          await API.recalcRoutePurchases({ route_id: routeId });
+          invalidateHistoryApiCache();
+          toast('履歴の日付と仕入れ集計を修正しました');
+          await loadRouteCorrectionSuggestions_();
+        } catch (e) {
+          toast('修正失敗: ' + e.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'この日付に変更';
+        }
+      });
+    });
+
+    wrap.querySelectorAll('.js-recalc-route').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const routeId = btn.dataset.routeId;
+        if (!routeId) return;
+        btn.disabled = true;
+        btn.textContent = '再計算中...';
+        try {
+          await API.recalcRoutePurchases({ route_id: routeId });
+          invalidateHistoryApiCache();
+          toast('仕入れ集計を再計算しました');
+          await loadRouteCorrectionSuggestions_();
+        } catch (e) {
+          toast('再計算失敗: ' + e.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '仕入れ集計を再計算';
+        }
+      });
+    });
+
+    wrap.querySelectorAll('.js-open-correction-route').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await openHistoryDetailByRouteId_(btn.dataset.routeId);
+      });
+    });
+  }
+
+  async function loadRouteCorrectionSuggestions_() {
+    const result = document.getElementById('route-correction-result');
+    const btn = document.getElementById('btn-route-correction-scan');
+    if (result) result.innerHTML = '<div class="text-sm text-dim">確認中...</div>';
+    if (btn) btn.disabled = true;
+    try {
+      const data = await API.getRouteCorrectionSuggestions({ limit: 30 });
+      renderRouteCorrectionSuggestions_(data);
+    } catch (e) {
+      if (result) result.innerHTML = `<div class="text-sm" style="color:var(--accent)">確認失敗: ${esc(e.message)}</div>`;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function openHistoryDetailByRouteId_(routeId) {
+    if (!routeId) return;
+    toast('履歴詳細を開いています...');
+    try {
+      const routes = await API.getRouteHistory({ limit: 50, include_stops: 'true' });
+      const route = (routes || []).find(r => String(r.route_id) === String(routeId));
+      if (!route) {
+        toast('対象の履歴が見つかりません');
+        return;
+      }
+      historyApiCache = { ts: Date.now(), routes };
+      historyCache = routes;
+      Router.navigate('history-detail', { route });
+    } catch (e) {
+      toast('履歴取得失敗: ' + e.message);
+    }
+  }
+
   async function renderHistoryDetail(container, { route } = {}) {
     if (!route) { Router.navigate('history'); return; }
     setTitle('履歴詳細');
@@ -3935,6 +4078,12 @@ const App = (() => {
       </div>
       <div class="settings-section-title">応急修正</div>
       <div class="card settings-card">
+        <div class="card-title">履歴補正アシスタント</div>
+        <div class="text-sm text-dim mb-8">日付入力忘れ、仕入れ集計ズレ、店舗未確定を直近履歴から探します。</div>
+        <button class="btn btn-sm btn-primary" id="btn-route-correction-scan">補正候補を確認</button>
+        <div id="route-correction-result" class="route-correction-result"></div>
+      </div>
+      <div class="card settings-card">
         <div class="card-title">仕入れ集計を修正</div>
         <div class="text-sm text-dim mb-8">履歴の仕入れ金額・点数が0になっている場合、在庫管理シートから再集計して修正します。</div>
         <button class="btn btn-sm btn-primary" id="btn-recalc-purchases">仕入れ集計を再計算</button>
@@ -4046,6 +4195,10 @@ const App = (() => {
           if (btn) btn.disabled = false;
         }
       })();
+    });
+
+    document.getElementById('btn-route-correction-scan')?.addEventListener('click', () => {
+      loadRouteCorrectionSuggestions_();
     });
 
     document.getElementById('btn-clear-history')?.addEventListener('click', () => {
