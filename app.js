@@ -34,6 +34,8 @@ const App = (() => {
   const RECOMMENDATION_TOP_STORE_LIMIT = 5;
   const RECOMMENDATION_AREA_COOLDOWN_DAYS = 14;
   const RECOMMENDATION_AREA_TARGET_DAYS = 45;
+  const RECOMMENDATION_TIMEOUT_MS = 12000;
+  const RECOMMENDATION_INVENTORY_LIMIT = 1000;
   const MAP_VISIT_INFO_TTL_MS = 60 * 60 * 1000;
 
   // チェーン別ブランドカラー（ピン・チップの色分け）
@@ -1244,6 +1246,17 @@ const App = (() => {
     overlay.querySelector('.recommendation-close')?.addEventListener('click', close);
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
+    const slowTimer = setTimeout(() => {
+      const body = overlay.querySelector('#recommendation-body');
+      if (body) {
+        body.innerHTML = `
+          <div class="recommendation-loading">
+            <span class="spinner"></span>
+            <span>通信が遅いため、軽量候補に切り替えています...</span>
+          </div>`;
+      }
+    }, 5000);
+
     try {
       const { payload, fromCache, error } = await loadRecommendationPayload_();
       renderRecommendationModalContent_(overlay, payload, { fromCache, error });
@@ -1256,19 +1269,39 @@ const App = (() => {
             <div class="text-sm text-dim mt-8">API URLと通信状態を確認してからもう一度試してください。</div>
           </div>`;
       }
+    } finally {
+      clearTimeout(slowTimer);
     }
+  }
+
+  function withTimeout_(promise, timeoutMs, message) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(message || 'timeout')), timeoutMs);
+      })
+    ]);
+  }
+
+  function buildRecommendationPayload_(inventoryItems, routes, meta = {}) {
+    const stats = buildRecommendationStats(inventoryItems || [], routes || [], stores);
+    const areas = scoreRecommendedAreas(stats);
+    const allAreas = scoreRecommendedAreas(stats, { includeCooldown: true });
+    return { generatedAt: new Date().toISOString(), stats, areas, allAreas, ...meta };
   }
 
   async function loadRecommendationPayload_() {
     try {
-      const [inventoryItems, routes] = await Promise.all([
-        API.getInventoryPurchases({ from: RECOMMENDATION_FROM_DATE, to: today_() }),
-        API.getRouteHistory({ limit: 300, include_stops: 'true' }),
-      ]);
-      const stats = buildRecommendationStats(inventoryItems, routes, stores);
-      const areas = scoreRecommendedAreas(stats);
-      const allAreas = scoreRecommendedAreas(stats, { includeCooldown: true });
-      const payload = { generatedAt: new Date().toISOString(), stats, areas, allAreas };
+      const inventoryItems = await withTimeout_(
+        API.getInventoryPurchases({
+          from_date: RECOMMENDATION_FROM_DATE,
+          to_date: today_(),
+          limit: RECOMMENDATION_INVENTORY_LIMIT
+        }),
+        RECOMMENDATION_TIMEOUT_MS,
+        'recommendation inventory timeout'
+      );
+      const payload = buildRecommendationPayload_(inventoryItems, [], { fallback: false });
       Storage.saveViewCache(RECOMMENDATION_CACHE_ID, payload).catch(() => {});
       return { payload, fromCache: false };
     } catch (error) {
@@ -1276,7 +1309,8 @@ const App = (() => {
       if (cached && cached.data && Array.isArray(cached.data.areas)) {
         return { payload: cached.data, fromCache: true, error };
       }
-      throw error;
+      const payload = buildRecommendationPayload_([], [], { fallback: true });
+      return { payload, fromCache: false, error };
     }
   }
 
@@ -1344,7 +1378,7 @@ const App = (() => {
       const lastVisited = routeLastVisited || sheetLastVisited;
       const area = ensureArea(areaId);
       area.totalExpectedProfit += totalExpectedProfit;
-      if (routeLastVisited) area.lastVisited = newerDateText_(area.lastVisited, routeLastVisited);
+      if (lastVisited) area.lastVisited = newerDateText_(area.lastVisited, lastVisited);
       return {
         store,
         store_id: store.store_id,
@@ -1479,6 +1513,7 @@ const App = (() => {
 
     body.innerHTML = `
       ${options.fromCache ? '<div class="recommendation-cache-note">前回保存した候補を表示中です。最新データの取得には失敗しました。</div>' : ''}
+      ${payload.fallback ? '<div class="recommendation-cache-note">通信が遅いため、店舗の最終訪問日だけで軽量候補を表示中です。</div>' : ''}
       <div class="recommend-area-list-head">
         <span>おすすめ地域 Top3</span>
         <b>${topAreas.length}地域</b>
