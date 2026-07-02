@@ -25,7 +25,7 @@
 
 ## GAS API contract
 
-- GET: `getStores`, `getConfig`, `getRouteHistory`, `getRouteCorrectionSuggestions`, `getPurchases`, `getMemos`, `getFinds`, `getInventoryPurchases`, `recalcPriorityScores`, `updateRouteDate`
+- GET: `getStores`, `getConfig`, `getRouteHistory`, `getRouteStops`, `getRouteAreaVisits`, `getRouteCorrectionSuggestions`, `getPurchases`, `getMemos`, `getFinds`, `getInventoryPurchases`, `recalcPriorityScores`, `updateRouteDate`
 - POST: `addStore`, `updateStore`, `deleteStore`, `startRoute`, `updateStop`, `endRoute`, `addStopToRoute`, `addPurchase`, `updateInventoryShop`, `updateConfig`, `updateRouteDate`, `deleteRoute`, `clearHistory`
 - POSTは `Content-Type: text/plain` + JSON body。レスポンスがJSONでなくても書き込み自体は成功していることがある。
 

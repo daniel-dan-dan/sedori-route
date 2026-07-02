@@ -86,6 +86,7 @@ const API = (() => {
     getConfig:       ()          => get('getConfig'),
     getRouteHistory: (p = {})    => get('getRouteHistory', p),
     getRouteStops:   (p = {})    => get('getRouteStops', p),
+    getRouteAreaVisits:(p = {})  => get('getRouteAreaVisits', p),
     getRouteCorrectionSuggestions:(p = {}) => get('getRouteCorrectionSuggestions', p),
     getPurchases:    (p = {})    => get('getPurchases', p),
     getMemos:        (p = {})    => get('getMemos', p),

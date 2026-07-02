@@ -28,7 +28,7 @@ const App = (() => {
     's20260427202226440',
     's20260427205454995',
   ]);
-  const RECOMMENDATION_CACHE_ID = 'recommendations';
+  const RECOMMENDATION_CACHE_ID = 'recommendations-v2';
   const MAP_VISIT_INFO_CACHE_ID = 'mapVisitInfo';
   const RECOMMENDATION_FROM_DATE = '2026-04-21';
   const RECOMMENDATION_TOP_STORE_LIMIT = 5;
@@ -1284,15 +1284,18 @@ const App = (() => {
   }
 
   function buildRecommendationPayload_(inventoryItems, routes, meta = {}) {
-    const stats = buildRecommendationStats(inventoryItems || [], routes || [], stores);
+    const areaVisits = Array.isArray(meta.areaVisits) ? meta.areaVisits : [];
+    const { areaVisits: _areaVisits, ...payloadMeta } = meta;
+    const stats = buildRecommendationStats(inventoryItems || [], routes || [], stores, areaVisits);
     const areas = scoreRecommendedAreas(stats);
     const allAreas = scoreRecommendedAreas(stats, { includeCooldown: true });
-    return { generatedAt: new Date().toISOString(), stats, areas, allAreas, ...meta };
+    return { generatedAt: new Date().toISOString(), stats, areas, allAreas, ...payloadMeta };
   }
 
   async function loadRecommendationPayload_() {
     try {
-      const inventoryItems = await withTimeout_(
+      const [inventoryResult, areaResult] = await Promise.allSettled([
+        withTimeout_(
         API.getInventoryPurchases({
           from_date: RECOMMENDATION_FROM_DATE,
           to_date: today_(),
@@ -1300,8 +1303,22 @@ const App = (() => {
         }),
         RECOMMENDATION_TIMEOUT_MS,
         'recommendation inventory timeout'
-      );
-      const payload = buildRecommendationPayload_(inventoryItems, [], { fallback: false });
+        ),
+        withTimeout_(
+          API.getRouteAreaVisits({ from_date: RECOMMENDATION_FROM_DATE, to_date: today_() }),
+          RECOMMENDATION_TIMEOUT_MS,
+          'recommendation area visits timeout'
+        )
+      ]);
+      if (inventoryResult.status === 'rejected' && areaResult.status === 'rejected') {
+        throw inventoryResult.reason || areaResult.reason;
+      }
+      const inventoryItems = inventoryResult.status === 'fulfilled' ? inventoryResult.value : [];
+      const areaVisits = areaResult.status === 'fulfilled' ? areaResult.value : [];
+      const payload = buildRecommendationPayload_(inventoryItems, [], {
+        fallback: inventoryResult.status === 'rejected',
+        areaVisits,
+      });
       Storage.saveViewCache(RECOMMENDATION_CACHE_ID, payload).catch(() => {});
       return { payload, fromCache: false };
     } catch (error) {
@@ -1314,7 +1331,7 @@ const App = (() => {
     }
   }
 
-  function buildRecommendationStats(inventoryItems, routes, allStores) {
+  function buildRecommendationStats(inventoryItems, routes, allStores, areaVisits = []) {
     const baseStats = buildStoreStats(inventoryItems, routes, allStores);
     const storeById = new Map(allStores.map(s => [String(s.store_id || ''), s]));
     const visitsByStore = new Map();
@@ -1392,6 +1409,17 @@ const App = (() => {
         totalExpectedProfit,
         hasCoords: !!(Number(store.lat) && Number(store.lng)),
       };
+    });
+
+    (areaVisits || []).forEach(row => {
+      const areaId = String(row.area_id || row.id || '').trim();
+      if (!areaId) return;
+      const area = ensureArea(areaId);
+      const lastVisited = normalizeRouteDate_(row.last_visited || row.lastVisited);
+      if (lastVisited) area.lastVisited = newerDateText_(area.lastVisited, lastVisited);
+      area.visitCount = Math.max(Number(area.visitCount) || 0, Number(row.visit_count) || 0);
+      if (row.name) area.name = row.name;
+      if (row.group) area.group = row.group;
     });
 
     const areaStats = Array.from(areaMap.values()).map(area => ({
@@ -1513,7 +1541,7 @@ const App = (() => {
 
     body.innerHTML = `
       ${options.fromCache ? '<div class="recommendation-cache-note">前回保存した候補を表示中です。最新データの取得には失敗しました。</div>' : ''}
-      ${payload.fallback ? '<div class="recommendation-cache-note">通信が遅いため、店舗の最終訪問日だけで軽量候補を表示中です。</div>' : ''}
+      ${payload.fallback ? '<div class="recommendation-cache-note">通信が遅いため、地域の最終巡回日を優先して軽量候補を表示中です。</div>' : ''}
       <div class="recommend-area-list-head">
         <span>おすすめ地域 Top3</span>
         <b>${topAreas.length}地域</b>
