@@ -15,6 +15,9 @@ const cacheVersion = cacheMatch && cacheMatch[1];
 const badgeVersion = badgeMatch && badgeMatch[1];
 const errors = [];
 
+const cacheBustVersions = [...html.matchAll(/(?:style\.css|quiz\.js|app\.js)\?v=(\d+)/g)]
+  .map((match) => `v${match[1]}`);
+
 if (!cacheVersion) errors.push('sw.js の CACHE_NAME から版数を読み取れません。');
 if (!badgeVersion) errors.push('index.html の app-version-badge から版数を読み取れません。');
 if (cacheVersion && badgeVersion && cacheVersion !== badgeVersion) {
@@ -25,6 +28,15 @@ if (!sw.includes('GET_VERSION') || !sw.includes('SW_VERSION')) {
 }
 if (!html.includes('checkPwaVersion')) {
   errors.push('index.html の版数チェック処理が見つかりません。');
+}
+if (!/CACHE_PREFIX\s*=\s*['"]sedori-route-['"]/.test(sw)) {
+  errors.push('Service Worker の専用CACHE_PREFIXが見つかりません。');
+}
+if (!/\.filter\(k\s*=>\s*k\.startsWith\(CACHE_PREFIX\)\s*&&\s*k\s*!==\s*CACHE_NAME\)/.test(sw)) {
+  errors.push('旧cache削除がsedori-route専用prefixへ限定されていません。');
+}
+if (cacheBustVersions.length !== 3 || cacheBustVersions.some((version) => version !== badgeVersion)) {
+  errors.push(`CSS/JSのcache bustが画面版数(${badgeVersion})と一致していません。`);
 }
 
 if (errors.length) {

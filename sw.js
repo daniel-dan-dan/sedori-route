@@ -1,4 +1,5 @@
-const CACHE_NAME = 'sedori-route-v182';
+const CACHE_PREFIX = 'sedori-route-';
+const CACHE_NAME = 'sedori-route-v183';
 const ASSETS = [
   './',
   './index.html',
@@ -31,7 +32,11 @@ self.addEventListener('message', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter(k => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)
+          .map(k => caches.delete(k))
+      )
     )
   );
   self.clients.claim();
