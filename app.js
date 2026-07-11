@@ -14,7 +14,6 @@ const App = (() => {
   let mapInstance = null;
   let mapCluster = null;
   let mapMarkers = new Map(); // store_id → L.marker（差分更新用）
-  let mapAreaMarkers = new Map(); // area_id → L.marker（広域表示用）
   let mapChainFilter = 'all';
   let mapBoundsFilter = false;
   let mapVisitInfoByStoreId = new Map();
@@ -844,7 +843,6 @@ const App = (() => {
       mapInstance = null;
       mapCluster = null;
       mapMarkers.clear();
-      mapAreaMarkers.clear();
     }
     patrolPolyline = null;
 
@@ -872,10 +870,9 @@ const App = (() => {
     mapCluster = L.layerGroup();
     mapInstance.addLayer(mapCluster);
     mapMarkers.clear();
-    mapAreaMarkers.clear();
     mapInstance.on('zoomend moveend', () => {
       if (!mapInstance) return;
-      if (mapBoundsFilter || mapInstance.getZoom() <= 11) refreshMapMarkers();
+      if (mapBoundsFilter) refreshMapMarkers();
     });
     refreshMapMarkers();
     fitMapToMarkers();
@@ -1141,81 +1138,6 @@ const App = (() => {
     return positions;
   }
 
-  function clearStoreMarkers_() {
-    mapMarkers.forEach(marker => mapCluster.removeLayer(marker));
-    mapMarkers.clear();
-  }
-
-  function clearAreaMarkers_() {
-    mapAreaMarkers.forEach(marker => mapCluster.removeLayer(marker));
-    mapAreaMarkers.clear();
-  }
-
-  function buildAreaClusterIcon_(name, count) {
-    return L.divIcon({
-      className: '',
-      html: `<div class="map-area-cluster" aria-hidden="true"><span>${esc(name)}</span><strong>${count}</strong></div>`,
-      iconSize: [76, 54],
-      iconAnchor: [38, 27],
-    });
-  }
-
-  function renderAreaClusters_(visibleStores) {
-    clearStoreMarkers_();
-    const useBroadRegions = mapInstance.getZoom() <= 9;
-    const getClusterKey = store => {
-      const areaId = getArea(store);
-      if (!useBroadRegions) return areaId;
-      if (areaId === 'yamagata') return 'region:yamagata';
-      if (areaId === 'ishinomaki') return 'region:ishinomaki';
-      if (areaId === 'furukawa') return 'region:kenpoku';
-      if (['natori', 'iwanuma', 'ogawara', 'shiroishi'].includes(areaId)) return 'region:kennan';
-      return 'region:sendai';
-    };
-    const broadRegionNames = {
-      'region:yamagata': '山形方面',
-      'region:ishinomaki': '石巻方面',
-      'region:kenpoku': '県北',
-      'region:kennan': '県南',
-      'region:sendai': '仙台周辺',
-    };
-    const grouped = MapUtils.groupStoresByArea(visibleStores, getClusterKey);
-
-    const wantedAreas = new Set(grouped.keys());
-    mapAreaMarkers.forEach((marker, areaId) => {
-      if (wantedAreas.has(areaId)) return;
-      mapCluster.removeLayer(marker);
-      mapAreaMarkers.delete(areaId);
-    });
-
-    grouped.forEach((areaStores, areaId) => {
-      const area = AREAS.find(item => item.id === areaId);
-      const name = broadRegionNames[areaId] || (area ? area.name : 'その他');
-      const latLngs = areaStores.map(s => [Number(s.lat), Number(s.lng)]);
-      const center = MapUtils.meanCenter(areaStores);
-      const existing = mapAreaMarkers.get(areaId);
-      if (existing) {
-        existing.setLatLng(center);
-        existing.setIcon(buildAreaClusterIcon_(name, areaStores.length));
-        existing._areaBounds = L.latLngBounds(latLngs);
-        return;
-      }
-      const marker = L.marker(center, {
-        icon: buildAreaClusterIcon_(name, areaStores.length),
-        keyboard: true,
-        title: `${name} ${areaStores.length}店舗`,
-      });
-      marker._areaBounds = L.latLngBounds(latLngs);
-      marker.on('click', () => {
-        const bounds = marker._areaBounds;
-        if (!bounds || !mapInstance) return;
-        mapInstance.fitBounds(bounds, { padding: [36, 36], maxZoom: 13 });
-      });
-      mapCluster.addLayer(marker);
-      mapAreaMarkers.set(areaId, marker);
-    });
-  }
-
   function refreshMapMarkers() {
     if (!mapInstance || !mapCluster) return;
 
@@ -1233,14 +1155,6 @@ const App = (() => {
       if (mapBoundsFilter && !patrolIdSet.has(s.store_id) && !mapInstance.getBounds().contains([lat, lng])) return;
       wanted.set(s.store_id, s);
     });
-
-    const shouldClusterByArea = mapInstance.getZoom() <= 10 && !patrolState && selectedStoreIds.length === 0;
-    if (shouldClusterByArea) {
-      renderAreaClusters_([...wanted.values()]);
-      drawPatrolPolyline();
-      return;
-    }
-    clearAreaMarkers_();
 
     const markerPositions = buildMarkerPositions([...wanted.values()]);
 

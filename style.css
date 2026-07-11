@@ -1936,40 +1936,6 @@ a.stop-address:active { color: var(--primary); }
   background: var(--primary-light);
   color: var(--primary-dark);
 }
-.map-area-cluster {
-  width: 76px;
-  min-height: 52px;
-  padding: 6px 8px;
-  border: 2px solid #fff;
-  border-radius: 8px;
-  background: #087f89;
-  color: #fff;
-  box-shadow: 0 5px 14px rgba(15, 23, 42, .28);
-  font: inherit;
-  line-height: 1.05;
-  letter-spacing: 0;
-}
-.map-area-cluster span,
-.map-area-cluster strong {
-  display: block;
-}
-.map-area-cluster span {
-  overflow: hidden;
-  font-size: 11px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.map-area-cluster strong {
-  margin-top: 4px;
-  font-size: 18px;
-  font-variant-numeric: tabular-nums;
-}
-.map-area-cluster:focus-visible {
-  outline: 3px solid #fbbf24;
-  outline-offset: 2px;
-}
-
 /* ---- 次に回る候補 ---- */
 .recommendation-overlay {
   z-index: 1200;
