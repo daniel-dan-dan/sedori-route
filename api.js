@@ -4,6 +4,7 @@
 
 const API = (() => {
   const CANONICAL_GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwYfwDG7Kqplk2oVeX7kF_gsAKTlK087ToE4LGp5R7PglTFMARP2lrA6ZV9m3MD0LEs/exec';
+  const API_URL_MIGRATION_KEY = 'gas_api_url_migrated_v185';
   const AUTH_TOKEN_KEY = 'daniel_api_auth_token';
   const DEFAULT_TIMEOUT_MS = 25000;
   const READ_ACTIONS = new Set([
@@ -13,9 +14,11 @@ const API = (() => {
     'getAnalyticsData',
     '_debugInventory'
   ]);
+  if (localStorage.getItem(API_URL_MIGRATION_KEY) !== '1') {
+    localStorage.setItem('gas_api_url', CANONICAL_GAS_API_URL);
+    localStorage.setItem(API_URL_MIGRATION_KEY, '1');
+  }
   let baseUrl = normalizeUrl_(localStorage.getItem('gas_api_url') || CANONICAL_GAS_API_URL);
-
-  if (!localStorage.getItem('gas_api_url')) localStorage.setItem('gas_api_url', baseUrl);
 
   function normalizeUrl_(url) {
     return String(url || '').trim().replace(/\/+$/, '');
