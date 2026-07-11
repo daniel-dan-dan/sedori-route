@@ -5,6 +5,28 @@
 const Router = (() => {
   const routes = {};
   let currentView = null;
+  const navViewByRoute = {
+    home: 'home',
+    'route-select': 'home',
+    patrol: 'home',
+    summary: 'home',
+    history: 'history',
+    'history-detail': 'history',
+    analytics: 'analytics',
+    haiban: 'haiban',
+    quiz: 'quiz',
+    settings: 'settings'
+  };
+
+  function syncNavigation(name) {
+    const navView = navViewByRoute[name] || name;
+    document.querySelectorAll('.nav-item').forEach(button => {
+      const active = button.dataset.view === navView;
+      button.classList.toggle('active', active);
+      if (active) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
+  }
 
   function register(name, renderFn) {
     routes[name] = renderFn;
@@ -19,6 +41,7 @@ const Router = (() => {
       if (window.location.hash !== '#' + name) {
         window.location.hash = name;
       }
+      syncNavigation(name);
       container.innerHTML = '';
       routes[name](container, params);
     }

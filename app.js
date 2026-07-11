@@ -10,10 +10,13 @@ const App = (() => {
   let patrolState = null; // { routeId, stops, currentIdx }
   let plannedRoute = null; // 予定として保存されたルート（startTime 未打刻）
   let patrolTimerInterval = null;
+  let patrolEnding = false;
   let mapInstance = null;
   let mapCluster = null;
   let mapMarkers = new Map(); // store_id → L.marker（差分更新用）
+  let mapAreaMarkers = new Map(); // area_id → L.marker（広域表示用）
   let mapChainFilter = 'all';
+  let mapBoundsFilter = false;
   let mapVisitInfoByStoreId = new Map();
   let mapVisitInfoLoaded = false;
   let mapVisitInfoLoading = null;
@@ -313,6 +316,14 @@ const App = (() => {
     setupNav();
     registerViews();
 
+    if (!API.hasToken()) {
+      stores = normalizeStores(await Storage.getCachedStores());
+      config = await Storage.getCachedConfig();
+      Router.navigate('settings');
+      toast('端末接続コードを設定してください', 5000);
+      return;
+    }
+
     // GASウォームアップ & データ更新を最速で並行スタート（await しない）
     // IDB読み込みと並行してGASが起動するためコールドスタートを実質ゼロにする
     const loadDataPromise = loadData();
@@ -347,7 +358,7 @@ const App = (() => {
 
     // GASコールドスタート防止: 15分おきにpingを送ってウォームアップ維持
     setInterval(() => {
-      API.get('ping').catch(() => {});
+      API.ping().catch(() => {});
     }, 15 * 60 * 1000);
   }
 
@@ -372,8 +383,6 @@ const App = (() => {
     document.querySelectorAll('.nav-item').forEach(btn => {
       btn.addEventListener('click', () => {
         const view = btn.dataset.view;
-        document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
         Router.navigate(view);
       });
     });
@@ -428,7 +437,6 @@ const App = (() => {
 
   async function renderHaiban(container) {
     setTitle('廃盤リスト');
-    setNavActive('haiban');
 
     const now = Date.now();
 
@@ -762,7 +770,10 @@ const App = (() => {
       <div class="map-bottom-bar">
         <div class="flex-between mb-8">
           <span class="text-sm text-dim"><span id="map-sel-count">${selectedStoreIds.length}</span>店舗 選択中</span>
-          <button class="btn btn-sm btn-outline" id="btn-map-clear" ${selectedStoreIds.length < 1 ? 'disabled' : ''}>クリア</button>
+          <div class="map-bottom-actions">
+            <button class="btn btn-sm btn-outline ${mapBoundsFilter ? 'active' : ''}" id="btn-map-bounds" aria-pressed="${mapBoundsFilter}">${mapBoundsFilter ? '範囲指定中' : '表示範囲に絞る'}</button>
+            <button class="btn btn-sm btn-outline" id="btn-map-clear" ${selectedStoreIds.length < 1 ? 'disabled' : ''}>クリア</button>
+          </div>
         </div>
         <button class="btn btn-outline btn-block map-recommend-btn" id="btn-map-recommend">次に回る候補</button>
         <button class="btn btn-primary btn-block mt-8" id="btn-map-optimize" ${selectedStoreIds.length < 1 ? 'disabled' : ''}>
@@ -805,6 +816,13 @@ const App = (() => {
       refreshMapMarkers();
       updateMapBottomBar();
     });
+    document.getElementById('btn-map-bounds').addEventListener('click', e => {
+      mapBoundsFilter = !mapBoundsFilter;
+      e.currentTarget.classList.toggle('active', mapBoundsFilter);
+      e.currentTarget.setAttribute('aria-pressed', String(mapBoundsFilter));
+      e.currentTarget.textContent = mapBoundsFilter ? '範囲指定中' : '表示範囲に絞る';
+      refreshMapMarkers();
+    });
     document.getElementById('btn-map-optimize').addEventListener('click', doOptimize);
     document.getElementById('btn-map-recommend').addEventListener('click', showNextStoreRecommendationModal);
 
@@ -821,7 +839,13 @@ const App = (() => {
   function initMap() {
     const mapEl = document.getElementById('map-view');
     if (!mapEl) return;
-    if (mapInstance) { mapInstance.remove(); mapInstance = null; mapCluster = null; mapMarkers.clear(); }
+    if (mapInstance) {
+      mapInstance.remove();
+      mapInstance = null;
+      mapCluster = null;
+      mapMarkers.clear();
+      mapAreaMarkers.clear();
+    }
     patrolPolyline = null;
 
     mapInstance = L.map(mapEl, {
@@ -845,10 +869,14 @@ const App = (() => {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
     }).addTo(mapInstance);
 
-    // クラスタリングせず、全ピンを個別に表示するためLayerGroupを使用
     mapCluster = L.layerGroup();
     mapInstance.addLayer(mapCluster);
     mapMarkers.clear();
+    mapAreaMarkers.clear();
+    mapInstance.on('zoomend moveend', () => {
+      if (!mapInstance) return;
+      if (mapBoundsFilter || mapInstance.getZoom() <= 11) refreshMapMarkers();
+    });
     refreshMapMarkers();
     fitMapToMarkers();
   }
@@ -1113,6 +1141,81 @@ const App = (() => {
     return positions;
   }
 
+  function clearStoreMarkers_() {
+    mapMarkers.forEach(marker => mapCluster.removeLayer(marker));
+    mapMarkers.clear();
+  }
+
+  function clearAreaMarkers_() {
+    mapAreaMarkers.forEach(marker => mapCluster.removeLayer(marker));
+    mapAreaMarkers.clear();
+  }
+
+  function buildAreaClusterIcon_(name, count) {
+    return L.divIcon({
+      className: '',
+      html: `<div class="map-area-cluster" aria-hidden="true"><span>${esc(name)}</span><strong>${count}</strong></div>`,
+      iconSize: [76, 54],
+      iconAnchor: [38, 27],
+    });
+  }
+
+  function renderAreaClusters_(visibleStores) {
+    clearStoreMarkers_();
+    const useBroadRegions = mapInstance.getZoom() <= 9;
+    const getClusterKey = store => {
+      const areaId = getArea(store);
+      if (!useBroadRegions) return areaId;
+      if (areaId === 'yamagata') return 'region:yamagata';
+      if (areaId === 'ishinomaki') return 'region:ishinomaki';
+      if (areaId === 'furukawa') return 'region:kenpoku';
+      if (['natori', 'iwanuma', 'ogawara', 'shiroishi'].includes(areaId)) return 'region:kennan';
+      return 'region:sendai';
+    };
+    const broadRegionNames = {
+      'region:yamagata': '山形方面',
+      'region:ishinomaki': '石巻方面',
+      'region:kenpoku': '県北',
+      'region:kennan': '県南',
+      'region:sendai': '仙台周辺',
+    };
+    const grouped = MapUtils.groupStoresByArea(visibleStores, getClusterKey);
+
+    const wantedAreas = new Set(grouped.keys());
+    mapAreaMarkers.forEach((marker, areaId) => {
+      if (wantedAreas.has(areaId)) return;
+      mapCluster.removeLayer(marker);
+      mapAreaMarkers.delete(areaId);
+    });
+
+    grouped.forEach((areaStores, areaId) => {
+      const area = AREAS.find(item => item.id === areaId);
+      const name = broadRegionNames[areaId] || (area ? area.name : 'その他');
+      const latLngs = areaStores.map(s => [Number(s.lat), Number(s.lng)]);
+      const center = MapUtils.meanCenter(areaStores);
+      const existing = mapAreaMarkers.get(areaId);
+      if (existing) {
+        existing.setLatLng(center);
+        existing.setIcon(buildAreaClusterIcon_(name, areaStores.length));
+        existing._areaBounds = L.latLngBounds(latLngs);
+        return;
+      }
+      const marker = L.marker(center, {
+        icon: buildAreaClusterIcon_(name, areaStores.length),
+        keyboard: true,
+        title: `${name} ${areaStores.length}店舗`,
+      });
+      marker._areaBounds = L.latLngBounds(latLngs);
+      marker.on('click', () => {
+        const bounds = marker._areaBounds;
+        if (!bounds || !mapInstance) return;
+        mapInstance.fitBounds(bounds, { padding: [36, 36], maxZoom: 13 });
+      });
+      mapCluster.addLayer(marker);
+      mapAreaMarkers.set(areaId, marker);
+    });
+  }
+
   function refreshMapMarkers() {
     if (!mapInstance || !mapCluster) return;
 
@@ -1127,8 +1230,17 @@ const App = (() => {
       const lng = Number(s.lng);
       if (!lat || !lng) return;
       if (mapChainFilter !== 'all' && getChain(s) !== mapChainFilter && !patrolIdSet.has(s.store_id)) return;
+      if (mapBoundsFilter && !patrolIdSet.has(s.store_id) && !mapInstance.getBounds().contains([lat, lng])) return;
       wanted.set(s.store_id, s);
     });
+
+    const shouldClusterByArea = mapInstance.getZoom() <= 10 && !patrolState && selectedStoreIds.length === 0;
+    if (shouldClusterByArea) {
+      renderAreaClusters_([...wanted.values()]);
+      drawPatrolPolyline();
+      return;
+    }
+    clearAreaMarkers_();
 
     const markerPositions = buildMarkerPositions([...wanted.values()]);
 
@@ -1929,48 +2041,55 @@ const App = (() => {
         return;
       }
       toast('メモを保存しました');
-      API.addMemo({
+      syncWrite(API.addMemo({
         store_id: store.store_id,
         type,
         content,
         date: today_()
-      }).then(() => loadPatrolStoreContext(store)).catch(() => {});
+      }), 'メモ').then(result => { if (result) loadPatrolStoreContext(store); });
     });
   }
 
-  function startPatrol() {
+  async function startPatrol() {
     if (!optimizedRoute) return;
     const storeIds = optimizedRoute.orderedStores.map(s => s.store_id);
-
-    // 即座にUI遷移（API応答を待たない）
-    patrolState = {
-      routeId: 'pending',
-      startTime: Date.now(),
-      stops: optimizedRoute.orderedStores.map(s => ({
-        ...s,
-        status: 'planned',
-        arrivalTime: null,
-        departureTime: null,
-        purchaseAmount: 0,
-        purchaseItems: 0
-      })),
-      currentIdx: 0
-    };
-    Storage.saveCurrentRoute(patrolState);
-    Router.navigate('patrol');
-
-    // バックグラウンドでAPI同期 & route_id取得
-    API.startRoute({
-      store_ids: storeIds,
-      total_distance_km: optimizedRoute.totalDistanceKm
-    }).then(() =>
-      API.getRouteHistory({ limit: 1 })
-    ).then(history => {
-      if (history && history.length > 0) {
-        patrolState.routeId = history[0].route_id;
-        Storage.saveCurrentRoute(patrolState);
+    const startButton = document.getElementById('btn-start-patrol');
+    if (startButton?.disabled) return;
+    if (startButton) {
+      startButton.disabled = true;
+      startButton.textContent = '巡回を開始しています...';
+    }
+    const operationId = API.createOperationId('startRoute');
+    try {
+      const result = await API.startRoute({
+        store_ids: storeIds,
+        total_distance_km: optimizedRoute.totalDistanceKm,
+        operation_id: operationId
+      });
+      if (!result?.route_id) throw new Error('巡回IDを確認できませんでした');
+      patrolState = {
+        routeId: result.route_id,
+        startOperationId: operationId,
+        startTime: Date.now(),
+        stops: optimizedRoute.orderedStores.map(s => ({
+          ...s,
+          status: 'planned',
+          arrivalTime: null,
+          departureTime: null,
+          purchaseAmount: 0,
+          purchaseItems: 0
+        })),
+        currentIdx: 0
+      };
+      await Storage.saveCurrentRoute(patrolState);
+      Router.navigate('patrol');
+    } catch (error) {
+      toast(`巡回を開始できませんでした: ${error.message}`, 5000);
+      if (startButton) {
+        startButton.disabled = false;
+        startButton.textContent = '巡回開始';
       }
-    }).catch(() => {});
+    }
   }
 
   function renderPatrol(container) {
@@ -2052,13 +2171,13 @@ const App = (() => {
     document.getElementById('btn-depart')?.addEventListener('click', () => {
       current.status = 'visited';
       // バックグラウンドでAPI同期
-      API.updateStop({
+      syncWrite(API.updateStop({
         route_id: patrolState.routeId,
         store_id: current.store_id,
         status: 'visited',
         purchase_amount: current.purchaseAmount,
         purchase_items: current.purchaseItems
-      }).catch(() => {});
+      }), '訪問状態');
       patrolState.currentIdx++;
       Storage.saveCurrentRoute(patrolState);
       if (patrolState.currentIdx >= stops.length) {
@@ -2071,11 +2190,11 @@ const App = (() => {
     document.getElementById('btn-skip')?.addEventListener('click', () => {
       current.status = 'skipped';
       // バックグラウンドでAPI同期
-      API.updateStop({
+      syncWrite(API.updateStop({
         route_id: patrolState.routeId,
         store_id: current.store_id,
         status: 'skipped'
-      }).catch(() => {});
+      }), 'スキップ状態');
       patrolState.currentIdx++;
       Storage.saveCurrentRoute(patrolState);
       if (patrolState.currentIdx >= stops.length) {
@@ -2096,13 +2215,13 @@ const App = (() => {
           current.purchaseAmount = (Number(current.purchaseAmount) || 0) + amount;
           current.purchaseItems = (Number(current.purchaseItems) || 0) + 1;
           Storage.saveCurrentRoute(patrolState);
-          API.updateStop({
+          syncWrite(API.updateStop({
             route_id: patrolState.routeId,
             store_id: current.store_id,
             status: current.status || 'planned',
             purchase_amount: current.purchaseAmount,
             purchase_items: current.purchaseItems
-          }).catch(() => {});
+          }), '仕入れ集計');
         }
       });
     });
@@ -2124,10 +2243,10 @@ const App = (() => {
         toast(`${store.name} を追加しました`);
         Router.navigate('patrol');
         // バックグラウンドでAPI同期
-        API.addStopToRoute({
+        syncWrite(API.addStopToRoute({
           route_id: patrolState.routeId,
           store_id: store.store_id
-        }).catch(() => {});
+        }), '追加店舗');
       });
     });
 
@@ -2150,18 +2269,33 @@ const App = (() => {
     patrolTimerInterval = setInterval(updateTimer, 1000);
   }
 
-  function endPatrol() {
+  async function endPatrol() {
+    if (patrolEnding || !patrolState) return;
+    patrolEnding = true;
     if (patrolTimerInterval) { clearInterval(patrolTimerInterval); patrolTimerInterval = null; }
-    if (patrolState) {
+    try {
       const summary = { ...patrolState };
       const routeId = patrolState.routeId;
+      if (!routeId || routeId === 'pending') throw new Error('巡回IDが確定していません');
+      const operationId = patrolState.endOperationId || API.createOperationId('endRoute');
+      patrolState.endOperationId = operationId;
+      await Storage.saveCurrentRoute(patrolState);
+      toast('巡回終了を保存しています...', 1500);
+      await API.endRoute({ route_id: routeId, operation_id: operationId });
       patrolState = null;
-      Storage.clearCurrentRoute();
+      await Storage.clearCurrentRoute();
       Router.navigate('summary', { summary });
-      // バックグラウンドでAPI同期 & データ再取得
-      API.endRoute({ route_id: routeId }).catch(() => {});
       invalidateHistoryApiCache();
-      loadData();
+      await loadData();
+    } catch (error) {
+      if (patrolState && patrolState.currentIdx >= patrolState.stops.length) {
+        patrolState.currentIdx = Math.max(0, patrolState.stops.length - 1);
+        await Storage.saveCurrentRoute(patrolState);
+        Router.navigate('patrol');
+      }
+      toast(`巡回終了を保存できませんでした: ${error.message}`, 5000);
+    } finally {
+      patrolEnding = false;
     }
   }
 
@@ -2269,11 +2403,11 @@ const App = (() => {
       toast(`${amount.toLocaleString()}円 記録しました`);
       Router.navigate('patrol');
       // バックグラウンドでAPI同期
-      API.addPurchase({
+      syncWrite(API.addPurchase({
         store_id: stop.store_id,
         route_id: patrolState.routeId,
         amount, items_count: items, genre, note
-      }).catch(() => {});
+      }), '仕入れ記録');
     });
   }
 
@@ -2633,7 +2767,6 @@ const App = (() => {
       optimizedRoute = null;
       selectedStoreIds = [];
       Router.navigate('home');
-      setNavActive('home');
     });
   }
 
@@ -2641,6 +2774,7 @@ const App = (() => {
 
   // 分析タブのセッションキャッシュ（TTL 5分、タブ切替では瞬時表示）
   let analyticsCache = null;
+  let analyticsRankingState = { filter: 'store', query: '', chain: 'all', area: 'all', limit: 10 };
   const ANALYTICS_CACHE_TTL_MS = 60 * 60 * 1000; // 60分
 
   // スケルトンUIを描画する（ロード中の骨格表示）
@@ -2670,7 +2804,7 @@ const App = (() => {
   }
 
   // 分析データからHTMLを構築して container に描画する（キャッシュ・API共通）
-  function renderAnalyticsContent(container, inventoryItems, routes) {
+  function renderAnalyticsContent(container, inventoryItems, routes, updatedAt = 0) {
     if (!inventoryItems || inventoryItems.length === 0) {
       container.innerHTML = `
         <div class="text-center mt-12">
@@ -2687,7 +2821,11 @@ const App = (() => {
     let html = '';
 
     // タブ切り替え
+    const updatedLabel = updatedAt
+      ? new Date(updatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : '未確認';
     html += `
+      <div class="analytics-updated">最終更新 ${updatedLabel}</div>
       <div class="analytics-tabs">
         <button class="btn btn-sm analytics-tab active" data-tab="ranking">利益ランキング</button>
         <button class="btn btn-sm btn-outline analytics-tab" data-tab="efficiency">効率分析</button>
@@ -2714,13 +2852,12 @@ const App = (() => {
 
   async function renderAnalytics(container) {
     setTitle('店舗分析');
-    setNavActive('analytics');
 
     const now = Date.now();
 
     // セッションキャッシュがTTL内 → 即表示して終わり
     if (analyticsCache && (now - analyticsCache.ts) < ANALYTICS_CACHE_TTL_MS) {
-      renderAnalyticsContent(container, analyticsCache.inventoryItems, analyticsCache.routes);
+      renderAnalyticsContent(container, analyticsCache.inventoryItems, analyticsCache.routes, analyticsCache.ts);
       return;
     }
 
@@ -2731,9 +2868,9 @@ const App = (() => {
     } catch (e) { /* ignore */ }
 
     if (dbCache && dbCache.data) {
-      renderAnalyticsContent(container, dbCache.data.inventoryItems, dbCache.data.routes);
       // セッションキャッシュにも復元（同一セッション内の再訪でAPI不要にする）
       analyticsCache = { ts: dbCache.savedAt || 0, inventoryItems: dbCache.data.inventoryItems, routes: dbCache.data.routes };
+      renderAnalyticsContent(container, dbCache.data.inventoryItems, dbCache.data.routes, analyticsCache.ts);
     } else {
       renderAnalyticsSkeleton(container);
     }
@@ -2744,10 +2881,9 @@ const App = (() => {
       const toStr = d.toISOString().slice(0, 10);
       const from = '2026-04-21'; // アプリで店舗記録を開始した日
 
-      const [inventoryItems, routes] = await Promise.all([
-        API.getInventoryPurchases({ from, to: toStr }),
-        API.getRouteHistory({ limit: 100, include_stops: 'true' }),
-      ]);
+      const analyticsData = await API.getAnalyticsData({ from, to: toStr, limit: 100 });
+      const inventoryItems = analyticsData.inventoryItems || [];
+      const routes = analyticsData.routes || [];
 
       analyticsCache = { ts: Date.now(), inventoryItems, routes };
       // IndexedDB に永続化（次回起動時の即表示に使う）
@@ -2755,7 +2891,7 @@ const App = (() => {
 
       if (Router.getCurrentView() !== 'analytics') return;
       // APIで取得した最新データで画面を差し替え
-      renderAnalyticsContent(container, inventoryItems, routes);
+      renderAnalyticsContent(container, inventoryItems, routes, analyticsCache.ts);
 
     } catch (e) {
       // 前回キャッシュが表示できていればエラー上書きしない（既存画面を維持）
@@ -2778,6 +2914,7 @@ const App = (() => {
           name: s ? s.name : storeId,
           category: s ? s.category : '',
           chain: s ? getChain(s) : '',
+          area: s ? getArea(s) : '',
           kind: 'store',
           totalExpectedProfit: 0,
           totalExpectedSale: 0,
@@ -2799,6 +2936,7 @@ const App = (() => {
           name: displayName,
           category: '',
           chain: kind === 'chain' ? displayName : '',
+          area: '',
           kind,
           totalExpectedProfit: 0,
           totalExpectedSale: 0,
@@ -2906,11 +3044,46 @@ const App = (() => {
       return;
     }
 
-    let html = '';
-    const topProfit = sortedStats[0].totalExpectedProfit;
-    sortedStats.forEach((st, i) => {
+    const unresolvedCount = sortedStats.filter(stat => stat.kind !== 'store').length;
+    const chainOptions = [...new Set(sortedStats.filter(stat => stat.kind === 'store' && stat.chain).map(stat => stat.chain))]
+      .sort((a, b) => a.localeCompare(b, 'ja'));
+    const areaOptions = AREA_DISPLAY_ORDER
+      .filter(areaId => sortedStats.some(stat => stat.kind === 'store' && stat.area === areaId))
+      .map(areaId => ({ id: areaId, name: AREAS.find(area => area.id === areaId)?.name || areaId }));
+    const query = analyticsRankingState.query.toLowerCase();
+    const filtered = sortedStats.filter(stat => {
+      if (analyticsRankingState.filter === 'store' && stat.kind !== 'store') return false;
+      if (analyticsRankingState.filter === 'unresolved' && stat.kind === 'store') return false;
+      if (analyticsRankingState.chain !== 'all' && stat.chain !== analyticsRankingState.chain) return false;
+      if (analyticsRankingState.area !== 'all' && stat.area !== analyticsRankingState.area) return false;
+      if (query && !`${stat.name} ${stat.chain}`.toLowerCase().includes(query)) return false;
+      return true;
+    });
+    const visible = filtered.slice(0, analyticsRankingState.limit);
+    const topProfit = visible.length ? visible[0].totalExpectedProfit : 0;
+    let html = `
+      <div class="analytics-ranking-tools">
+        <div class="segmented-control" role="group" aria-label="ランキング対象">
+          <button type="button" data-ranking-filter="store" class="${analyticsRankingState.filter === 'store' ? 'active' : ''}">実店舗</button>
+          <button type="button" data-ranking-filter="unresolved" class="${analyticsRankingState.filter === 'unresolved' ? 'active' : ''}">未確定 ${unresolvedCount}</button>
+          <button type="button" data-ranking-filter="all" class="${analyticsRankingState.filter === 'all' ? 'active' : ''}">すべて</button>
+        </div>
+        <input class="form-input" id="analytics-ranking-search" type="search" value="${esc(analyticsRankingState.query)}" placeholder="店舗名・チェーンを検索" aria-label="店舗名・チェーンを検索">
+        <div class="analytics-ranking-selects">
+          <select class="form-select" id="analytics-chain-filter" aria-label="チェーンで絞り込み">
+            <option value="all">全チェーン</option>
+            ${chainOptions.map(chain => `<option value="${esc(chain)}" ${analyticsRankingState.chain === chain ? 'selected' : ''}>${esc(chain)}</option>`).join('')}
+          </select>
+          <select class="form-select" id="analytics-area-filter" aria-label="地域で絞り込み">
+            <option value="all">全地域</option>
+            ${areaOptions.map(area => `<option value="${esc(area.id)}" ${analyticsRankingState.area === area.id ? 'selected' : ''}>${esc(area.name)}</option>`).join('')}
+          </select>
+        </div>
+      </div>`;
+
+    if (!visible.length) html += '<div class="text-center text-dim mt-12">条件に合うデータがありません</div>';
+    visible.forEach((st, i) => {
       const profitPerVisit = st.visitCount > 0 ? Math.round(st.totalExpectedProfit / st.visitCount) : 0;
-      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
       const barWidth = topProfit > 0
         ? Math.max(5, Math.round(st.totalExpectedProfit / topProfit * 100))
         : 0;
@@ -2919,25 +3092,56 @@ const App = (() => {
                   : st.kind === 'supplier' ? '<span class="badge" style="background:#fef3c7;color:#92400e">ルート外</span>'
                   : '';
       const visitInfo = st.kind === 'store'
-        ? `${st.visitCount}回訪問${profitPerVisit > 0 ? ` / 1回あたり ${profitPerVisit.toLocaleString()}円` : ''}`
+        ? `${st.visitCount}回訪問${profitPerVisit > 0 ? ` / 1回あたり ${formatYen_(profitPerVisit)}` : ''}`
         : '';
 
       html += `
         <div class="card mt-8">
           <div class="flex-between">
-            <span><b>${medal} ${esc(st.name)}</b> ${label}</span>
-            <span style="color:${profitColor};font-weight:bold">${st.totalExpectedProfit.toLocaleString()}円</span>
+            <span><span class="rank-badge">${i + 1}</span> <b>${esc(st.name)}</b> ${label}</span>
+            <span style="color:${profitColor};font-weight:bold">${formatYen_(st.totalExpectedProfit)}</span>
           </div>
           <div style="background:var(--border);border-radius:4px;height:6px;margin:6px 0">
             <div style="background:${profitColor};border-radius:4px;height:6px;width:${barWidth}%"></div>
           </div>
           <div class="text-sm text-dim">
-            仕入 ${st.totalPurchaseAmount.toLocaleString()}円 → 販売予定 ${st.totalExpectedSale.toLocaleString()}円 / ${st.itemCount}点
+            仕入 ${formatYen_(st.totalPurchaseAmount)} → 販売予定 ${formatYen_(st.totalExpectedSale)} / ${st.itemCount}点
             ${visitInfo ? ' / ' + visitInfo : ''}
           </div>
         </div>`;
     });
+    if (filtered.length > visible.length) {
+      html += `<button class="btn btn-outline btn-block mt-12" id="analytics-show-more">さらに${Math.min(10, filtered.length - visible.length)}件表示</button>`;
+    }
     container.innerHTML = html;
+
+    container.querySelectorAll('[data-ranking-filter]').forEach(button => {
+      button.addEventListener('click', () => {
+        analyticsRankingState.filter = button.dataset.rankingFilter;
+        analyticsRankingState.limit = 10;
+        renderRankingTab(container, sortedStats);
+      });
+    });
+    document.getElementById('analytics-ranking-search')?.addEventListener('input', event => {
+      analyticsRankingState.query = event.target.value;
+      analyticsRankingState.limit = 10;
+      renderRankingTab(container, sortedStats);
+      document.getElementById('analytics-ranking-search')?.focus();
+    });
+    document.getElementById('analytics-chain-filter')?.addEventListener('change', event => {
+      analyticsRankingState.chain = event.target.value;
+      analyticsRankingState.limit = 10;
+      renderRankingTab(container, sortedStats);
+    });
+    document.getElementById('analytics-area-filter')?.addEventListener('change', event => {
+      analyticsRankingState.area = event.target.value;
+      analyticsRankingState.limit = 10;
+      renderRankingTab(container, sortedStats);
+    });
+    document.getElementById('analytics-show-more')?.addEventListener('click', () => {
+      analyticsRankingState.limit += 10;
+      renderRankingTab(container, sortedStats);
+    });
   }
 
   // 効率分析タブ
@@ -2971,9 +3175,9 @@ const App = (() => {
         <div class="card mt-8">
           <div class="flex-between">
             <span>${i + 1}. <b>${esc(st.name)}</b></span>
-            <span style="font-weight:bold">${ppv.toLocaleString()}円/回</span>
+            <span style="font-weight:bold">${formatYen_(ppv)}/回</span>
           </div>
-          <div class="text-sm text-dim">${st.visitCount}回訪問 / 合計 ${st.totalExpectedProfit.toLocaleString()}円</div>
+          <div class="text-sm text-dim">${st.visitCount}回訪問 / 合計 ${formatYen_(st.totalExpectedProfit)}</div>
         </div>`;
     });
 
@@ -2986,7 +3190,7 @@ const App = (() => {
           <div class="card mt-8">
             <div class="flex-between">
               <span>${i + 1}. <b>${esc(st.name)}</b></span>
-              <span style="font-weight:bold">${pph.toLocaleString()}円/時</span>
+              <span style="font-weight:bold">${formatYen_(pph)}/時</span>
             </div>
             <div class="text-sm text-dim">平均滞在 ${avgStay}分 / ${st.visitCount}回訪問</div>
           </div>`;
@@ -3023,7 +3227,7 @@ const App = (() => {
         <div class="card mt-8">
           <div class="flex-between">
             <span><b>${esc(genre)}</b></span>
-            <span style="font-weight:bold">${profit.toLocaleString()}円</span>
+            <span style="font-weight:bold">${formatYen_(profit)}</span>
           </div>
           <div style="background:var(--border);border-radius:4px;height:6px;margin:4px 0">
             <div style="background:var(--primary);border-radius:4px;height:6px;width:${barWidth}%"></div>
@@ -3040,19 +3244,13 @@ const App = (() => {
           <div><b>${esc(st.name)}</b></div>
           <div class="text-sm mt-4">
             ${topGenre.slice(0, 3).map(([g, p]) =>
-              `<span class="badge" style="margin-right:4px">${esc(g)} ${p.toLocaleString()}円</span>`
+              `<span class="badge" style="margin-right:4px">${esc(g)} ${formatYen_(p)}</span>`
             ).join('')}
           </div>
         </div>`;
     });
 
     container.innerHTML = html;
-  }
-
-  function setNavActive(view) {
-    document.querySelectorAll('.nav-item').forEach(b => {
-      b.classList.toggle('active', b.dataset.view === view);
-    });
   }
 
   function showAddStoreModal() {
@@ -3215,6 +3413,7 @@ const App = (() => {
   function renderHistoryContent(container, routes) {
     // キャッシュ経由でも必ず日付降順（直近が上）
     routes = [...routes].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    historyCache = routes;
     let html = `
       <div class="card mb-12" style="background:var(--bg-card);padding:12px 16px;">
         <div class="flex-between" style="align-items:center">
@@ -3228,36 +3427,35 @@ const App = (() => {
       routes.forEach((r, idx) => {
         const dateStr = formatRouteDate_(r.date);
         html += `
-          <div class="history-item" data-idx="${idx}" role="button" tabindex="0" aria-label="${esc(dateStr)}の巡回履歴を開く">
-            <div class="flex-between">
-              <span class="history-date">${dateStr}</span>
-              <span class="history-card-side">
-                <span class="badge badge-primary">${r.store_count || 0}店舗</span>
-                <span class="history-detail-chevron" aria-hidden="true">›</span>
+          <article class="history-item">
+            <button class="history-open" type="button" data-idx="${idx}" aria-label="${esc(dateStr)}の巡回履歴を開く">
+              <span class="flex-between">
+                <span class="history-date">${dateStr}</span>
+                <span class="history-card-side">
+                  <span class="badge badge-primary">${r.store_count || 0}店舗</span>
+                  <span class="history-detail-chevron" aria-hidden="true">›</span>
+                </span>
               </span>
-            </div>
+            </button>
             ${renderHistoryAreas_(r)}
-            <div class="history-meta">
-              距離: ${r.total_distance_km || 0}km |
-              仕入れ: ${Number(r.total_purchase || 0).toLocaleString()}円 (${r.total_items || 0}点)
-            </div>
-            ${Number(r.expected_profit || 0) > 0
-              ? `<div class="history-profit">見込み利益: ${formatHistoryProfitYen_(r.expected_profit)}円</div>`
-              : ''
-            }
-            ${r.note ? `<div class="text-sm mt-8">${esc(r.note)}</div>` : ''}
-          </div>`;
+            <button class="history-open history-open-meta" type="button" data-idx="${idx}" aria-label="${esc(dateStr)}の巡回履歴を開く">
+              <span class="history-meta">
+                距離: ${r.total_distance_km || 0}km |
+                仕入れ: ${Number(r.total_purchase || 0).toLocaleString()}円 (${r.total_items || 0}点)
+              </span>
+              ${Number(r.expected_profit || 0) > 0
+                ? `<span class="history-profit">見込み利益: ${formatHistoryProfitYen_(r.expected_profit)}円</span>`
+                : ''
+              }
+              ${r.aggregation_warning ? `<span class="history-warning">${esc(r.aggregation_warning)}</span>` : ''}
+              ${r.note ? `<span class="text-sm mt-8">${esc(r.note)}</span>` : ''}
+            </button>
+          </article>`;
       });
     }
     container.innerHTML = html;
-    container.querySelectorAll('.history-item').forEach(el => {
+    container.querySelectorAll('.history-open').forEach(el => {
       el.addEventListener('click', () => {
-        const idx = Number(el.dataset.idx);
-        Router.navigate('history-detail', { route: historyCache[idx] });
-      });
-      el.addEventListener('keydown', (ev) => {
-        if (ev.key !== 'Enter' && ev.key !== ' ') return;
-        ev.preventDefault();
         const idx = Number(el.dataset.idx);
         Router.navigate('history-detail', { route: historyCache[idx] });
       });
@@ -3525,7 +3723,7 @@ const App = (() => {
         // L列が空の場合はGASに自動書き戻し（分析タブで店舗未確定になるのを防ぐ）
         if (!it.shop && it.row) {
           it.shop = candidates[0].name;
-          API.updateInventoryShop({ row: it.row, shop: candidates[0].name }).catch(() => {});
+          syncWrite(API.updateInventoryShop({ row: it.row, shop: candidates[0].name }), '店舗の自動紐付け');
         }
       } else if (candidates.length > 1) {
         ambiguous.push({ item: it, candidates });
@@ -3544,15 +3742,15 @@ const App = (() => {
     }
 
     // この巡回の合計（店舗資産化の中核指標を一目でわかる位置に）
-    const relatedItems = Object.values(byStore).flat();
+    const relatedItems = Object.values(byStore).flat().concat(ambiguous.map(entry => entry.item));
     const totalProfit = relatedItems.reduce((n, x) => n + (Number(x.expected_profit) || 0), 0);
     const totalCost = relatedItems.reduce((n, x) => n + (Number(x.purchase_price) || 0), 0);
     const profitColor = totalProfit >= 0 ? 'var(--success)' : 'var(--accent)';
     html += `
       <div class="card" style="background:var(--primary-light)">
         <div class="summary-grid">
-          <div class="summary-item"><div class="value" style="color:${profitColor}">${totalProfit.toLocaleString()}円</div><div class="label">見込み利益</div></div>
-          <div class="summary-item"><div class="value">${totalCost.toLocaleString()}円</div><div class="label">仕入合計</div></div>
+          <div class="summary-item"><div class="value" style="color:${profitColor}">${formatYen_(totalProfit)}</div><div class="label">見込み利益</div></div>
+          <div class="summary-item"><div class="value">${formatYen_(totalCost)}</div><div class="label">仕入合計</div></div>
           <div class="summary-item"><div class="value">${relatedItems.length}</div><div class="label">点数</div></div>
         </div>
       </div>`;
@@ -3569,8 +3767,8 @@ const App = (() => {
           <div class="flex-between">
             <div><b>${esc(vs.name)}</b> <span class="badge badge-success">${arr.length}点</span></div>
             <div style="text-align:right">
-              <div class="text-sm text-dim">仕入 ${sumCost.toLocaleString()}円</div>
-              <div style="color:${profitColor};font-weight:bold">見込利益 ${sumProfit.toLocaleString()}円</div>
+              <div class="text-sm text-dim">仕入 ${formatYen_(sumCost)}</div>
+              <div style="color:${profitColor};font-weight:bold">見込利益 ${formatYen_(sumProfit)}</div>
             </div>
           </div>`;
       arr.forEach(it => {
@@ -3581,9 +3779,32 @@ const App = (() => {
 
     // 曖昧（複数候補）
     if (ambiguous.length > 0) {
+      const duplicateCounts = {};
+      ambiguous.forEach(({ item }) => {
+        const key = String(item.product_name || '').trim();
+        if (key) duplicateCounts[key] = (duplicateCounts[key] || 0) + 1;
+      });
+      const ambiguousGroups = new Map();
+      ambiguous.forEach(entry => {
+        const supplier = String(entry.item.supplier || entry.item.alias || '仕入先未記入').trim();
+        const candidateKey = entry.candidates.map(candidate => candidate.name).join('|');
+        const key = `${supplier}::${candidateKey}`;
+        if (!ambiguousGroups.has(key)) ambiguousGroups.set(key, { supplier, entries: [], candidates: entry.candidates });
+        ambiguousGroups.get(key).entries.push(entry);
+      });
       html += `<div class="card mt-8" style="background:#fff7e6;border:1px solid #ffb74d">
         <div class="card-title" style="color:var(--accent)">⚠️ 店舗未確定（${ambiguous.length}件）</div>
-        <div class="text-sm text-dim mb-8">同じ日に同チェーンの複数店舗を訪問しました。正しい店舗を選んでください。</div>`;
+        <div class="text-sm text-dim mb-8">同じ日に同チェーンの複数店舗を訪問しました。仕入先ごとにまとめて設定できます。</div>`;
+      ambiguousGroups.forEach(group => {
+        const rows = group.entries.map(entry => Number(entry.item.row)).filter(Boolean);
+        const options = ['<option value="">-- 一括設定する店舗 --</option>']
+          .concat(group.candidates.map(candidate => `<option value="${esc(candidate.name)}">${esc(candidate.name)}</option>`))
+          .join('');
+        html += `<div class="ambiguous-bulk">
+          <div><b>${esc(group.supplier)}</b> <span class="badge badge-primary">${rows.length}件</span></div>
+          <select class="form-select js-ambig-bulk" data-rows="${rows.join(',')}">${options}</select>
+        </div>`;
+      });
       ambiguous.forEach((amb, idx) => {
         const it = amb.item;
         const cost = Number(it.purchase_price) || 0;
@@ -3595,10 +3816,12 @@ const App = (() => {
         html += `
           <div class="card" data-ambig-idx="${idx}">
             <div class="text-sm text-dim">仕入先: ${esc(it.supplier || it.alias || '')}</div>
-            <div style="font-weight:600;margin:4px 0">${esc(it.product_name || '(商品名なし)')}</div>
+            <div style="font-weight:600;margin:4px 0">${esc(it.product_name || '(商品名なし)')}
+              ${duplicateCounts[String(it.product_name || '').trim()] > 1 ? `<span class="badge badge-warning">同一商品 ${duplicateCounts[String(it.product_name || '').trim()]}件</span>` : ''}
+            </div>
             <div class="text-sm">
-              <span style="color:${pc};font-weight:bold">見込利益 ${profit.toLocaleString()}円</span>
-              <span class="text-dim" style="margin-left:8px">仕入 ${cost.toLocaleString()}円</span>
+              <span style="color:${pc};font-weight:bold">見込利益 ${formatYen_(profit)}</span>
+              <span class="text-dim" style="margin-left:8px">仕入 ${formatYen_(cost)}</span>
             </div>
             <select class="form-select mt-8 js-ambig-sel" data-row="${it.row}">${options}</select>
           </div>`;
@@ -3645,6 +3868,24 @@ const App = (() => {
         Storage.saveViewCache('inventory_' + date, { data: cached }).catch(() => {});
       }
     };
+
+    section.querySelectorAll('.js-ambig-bulk').forEach(select => {
+      select.addEventListener('change', async () => {
+        const shop = select.value;
+        const rows = String(select.dataset.rows || '').split(',').map(Number).filter(Boolean);
+        if (!shop || !rows.length) return;
+        select.disabled = true;
+        try {
+          await API.bulkUpdateInventoryShop({ items: rows.map(row => ({ row, shop })) });
+          rows.forEach(row => updateCachedShop(row, shop));
+          toast(`${shop} に${rows.length}件を一括設定しました`);
+          loadInventoryForRoute(route, { backgroundRefresh: false });
+        } catch (error) {
+          select.disabled = false;
+          toast(`一括設定に失敗しました: ${error.message}`, 5000);
+        }
+      });
+    });
 
     // 曖昧選択のイベント
     section.querySelectorAll('.js-ambig-sel').forEach(sel => {
@@ -3916,7 +4157,7 @@ const App = (() => {
     // 基本情報
     html += `
       <div class="settings-section-title">基本情報</div>
-      <div class="card settings-card">
+      <div class="card settings-card history-summary-sticky">
         <div class="card-title">${dateStr} の巡回</div>
         <div class="history-date-editor">
           <label for="history-date-input">履歴の日付</label>
@@ -3928,14 +4169,16 @@ const App = (() => {
         <div class="summary-grid">
           <div class="summary-item"><div class="value">${route.store_count || 0}</div><div class="label">店舗数</div></div>
           <div class="summary-item"><div class="value">${route.total_distance_km || 0}km</div><div class="label">距離</div></div>
-          <div class="summary-item"><div class="value">${Number(route.total_purchase || 0).toLocaleString()}円</div><div class="label">仕入れ</div></div>
+          <div class="summary-item"><div class="value">${formatYen_(route.total_purchase)}</div><div class="label">仕入れ</div></div>
           <div class="summary-item"><div class="value">${route.total_items || 0}</div><div class="label">点数</div></div>
         </div>
       </div>`;
 
     // 各店舗の詳細
     if (route.stops && route.stops.length > 0) {
-      html += '<div class="card-title">訪問店舗</div>';
+      html += `<details class="history-stops" open>
+        <summary><span>訪問店舗</span><span class="history-stops-count">${route.stops.length}店舗</span></summary>
+        <div class="history-stops-list">`;
       route.stops.forEach((s, i) => {
         const storeObj = stores.find(st => st.store_id === s.store_id);
         const storeName = (storeObj && storeObj.name) || s.store_name || s.store_id;
@@ -3948,12 +4191,13 @@ const App = (() => {
               <span>${i + 1}. ${esc(storeName)}</span>
               ${statusBadge}
             </div>
-            ${purchase > 0 ? `<div class="text-sm mt-8">仕入れ: ${purchase.toLocaleString()}円</div>` : ''}
+            ${purchase > 0 ? `<div class="text-sm mt-8">仕入れ: ${formatYen_(purchase)}</div>` : ''}
             ${s.arrival_time ? `<div class="text-sm text-dim">到着: ${new Date(s.arrival_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</div>` : ''}
             ${s.departure_time ? `<div class="text-sm text-dim">出発: ${new Date(s.departure_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</div>` : ''}
             <button class="btn btn-sm btn-outline btn-block mt-8 inventory-add-from-history" data-stop-index="${i}">この店の商品を在庫に登録</button>
           </div>`;
       });
+      html += '</div></details>';
     }
 
     if (route.note) {
@@ -4064,10 +4308,10 @@ const App = (() => {
         invalidateHistoryApiCache();
         Router.navigate('history-detail', { route });
         // API同期
-        API.addStopToRoute({
+        syncWrite(API.addStopToRoute({
           route_id: route.route_id,
           store_id: store.store_id
-        }).catch(() => {});
+        }), '履歴への店舗追加');
       });
     });
 
@@ -4075,14 +4319,22 @@ const App = (() => {
       Router.navigate('history');
     });
 
-    document.getElementById('btn-delete-route')?.addEventListener('click', () => {
+    document.getElementById('btn-delete-route')?.addEventListener('click', async event => {
       if (!confirm('この履歴を消去しますか？')) return;
-      toast('履歴を消去しました');
-      Router.navigate('history');
-      // バックグラウンドでAPI同期
-      API.deleteRoute({ route_id: route.route_id }).catch(() => {});
-      invalidateHistoryApiCache();
-      loadData();
+      const button = event.currentTarget;
+      button.disabled = true;
+      button.textContent = '消去しています...';
+      try {
+        await API.deleteRoute({ route_id: route.route_id });
+        invalidateHistoryApiCache();
+        await loadData();
+        toast('履歴を消去しました');
+        Router.navigate('history');
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = 'この履歴を消去';
+        toast(`履歴を消去できませんでした: ${error.message}`, 5000);
+      }
     });
   }
 
@@ -4093,6 +4345,15 @@ const App = (() => {
     const url = API.getUrl();
     let html = `
       <div class="settings-section-title">基本設定</div>
+      <div class="card settings-card">
+        <div class="card-title">端末接続コード</div>
+        <div class="text-sm text-dim mb-8">この端末からだけ安全にデータを読み書きするためのコードです。</div>
+        <div class="form-group">
+          <input type="password" class="form-input" id="set-auth-token" value="${API.hasToken() ? 'configured' : ''}" placeholder="接続コードを入力" autocomplete="off">
+        </div>
+        <button class="btn btn-primary btn-sm" id="btn-save-auth-token">保存して接続確認</button>
+        <div id="auth-token-result" class="text-sm mt-8">${API.hasToken() ? '設定済み' : '未設定'}</div>
+      </div>
       <div class="card settings-card">
         <div class="card-title">API URL</div>
         <div class="form-group">
@@ -4180,6 +4441,29 @@ const App = (() => {
       storeListEl.innerHTML = storeHtml;
     }
 
+    document.getElementById('btn-save-auth-token')?.addEventListener('click', async () => {
+      const input = document.getElementById('set-auth-token');
+      const result = document.getElementById('auth-token-result');
+      const value = input.value.trim();
+      if (!value || value === 'configured') {
+        result.textContent = '新しい接続コードを入力してください';
+        return;
+      }
+      API.setToken(value);
+      input.value = 'configured';
+      result.textContent = '接続確認中...';
+      try {
+        await API.getConfig();
+        await loadData();
+        result.innerHTML = '<span style="color:var(--success)">接続OK</span>';
+        toast('接続コードを保存しました');
+      } catch (error) {
+        API.setToken('');
+        input.value = '';
+        result.textContent = `接続できません: ${error.message}`;
+      }
+    });
+
     document.getElementById('btn-save-url')?.addEventListener('click', async () => {
       const v = document.getElementById('set-url').value.trim();
       API.setUrl(v);
@@ -4188,7 +4472,6 @@ const App = (() => {
       setupNav();
       toast('API URLを保存しました');
       Router.navigate('home');
-      setNavActive('home');
     });
 
     document.getElementById('btn-save-home')?.addEventListener('click', async () => {
@@ -4324,6 +4607,16 @@ const App = (() => {
     el.textContent = msg;
     el.classList.add('show');
     setTimeout(() => el.classList.remove('show'), duration);
+  }
+
+  function syncWrite(promise, label) {
+    return Promise.resolve(promise).then(result => {
+      if (result?._queued) toast(`${label}は通信復旧後に自動保存します`, 4000);
+      return result;
+    }).catch(error => {
+      toast(`${label}を保存できませんでした: ${error.message}`, 5000);
+      return null;
+    });
   }
 
   function esc(s) {

@@ -74,6 +74,16 @@ const Storage = (() => {
     });
   }
 
+  async function putWithKey(storeName, key, item) {
+    const d = await open();
+    const tx = d.transaction(storeName, 'readwrite');
+    tx.objectStore(storeName).put(item, key);
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = e => reject(e.target.error);
+    });
+  }
+
   async function get(storeName, key) {
     const d = await open();
     const tx = d.transaction(storeName, 'readonly');
@@ -106,6 +116,13 @@ const Storage = (() => {
 
   // 同期キュー
   async function addPendingAction(actionObj) {
+    const operationId = String(actionObj?.operation_id || actionObj?.body?.operation_id || '');
+    if (operationId) {
+      const existing = await getPendingActions();
+      if (existing.some(item => String(item.operation_id || item.body?.operation_id || '') === operationId)) {
+        return existing.find(item => String(item.operation_id || item.body?.operation_id || '') === operationId)._queueKey;
+      }
+    }
     const d = await open();
     const tx = d.transaction('pendingActions', 'readwrite');
     tx.objectStore('pendingActions').add(actionObj);
@@ -116,7 +133,20 @@ const Storage = (() => {
   }
 
   async function getPendingActions() {
-    return getAll('pendingActions');
+    const d = await open();
+    const tx = d.transaction('pendingActions', 'readonly');
+    const store = tx.objectStore('pendingActions');
+    return new Promise((resolve, reject) => {
+      const rows = [];
+      const req = store.openCursor();
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) return resolve(rows);
+        rows.push({ ...cursor.value, _queueKey: cursor.primaryKey });
+        cursor.continue();
+      };
+      req.onerror = e => reject(e.target.error);
+    });
   }
 
   async function clearPendingActions() {
@@ -128,20 +158,25 @@ const Storage = (() => {
     const actions = await getPendingActions();
     if (actions.length === 0) return 0;
     let synced = 0;
-    const failed = [];
     for (const act of actions) {
       try {
-        await API.post(act.action, act.body);
+        await API.post(act.action, {
+          ...(act.body || {}),
+          operation_id: act.operation_id || act.body?.operation_id
+        }, { queueOnFailure: false });
+        await del('pendingActions', act._queueKey);
         synced++;
       } catch (e) {
         console.warn('Sync failed:', e);
-        failed.push(act);
+        const attempts = Number(act.attempts || 0) + 1;
+        await putWithKey('pendingActions', act._queueKey, {
+          ...act,
+          _queueKey: undefined,
+          attempts,
+          last_error: String(e.message || e),
+          last_attempt_at: Date.now()
+        });
       }
-    }
-    // 全てクリアし、失敗分だけ再登録
-    await clearPendingActions();
-    for (const act of failed) {
-      await addPendingAction(act);
     }
     return synced;
   }

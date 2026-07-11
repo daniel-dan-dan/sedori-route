@@ -1324,6 +1324,59 @@ a.stop-address:active { color: var(--primary); }
   box-shadow: 0 4px 10px rgba(var(--primary-rgb), .16);
 }
 
+.analytics-ranking-tools {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.analytics-ranking-selects {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.analytics-updated {
+  margin: 0 0 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: right;
+}
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #d5e7ea;
+  border-radius: 8px;
+  background: #edf6f7;
+}
+.segmented-control button {
+  min-height: 34px;
+  padding: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+.segmented-control button.active {
+  background: #fff;
+  color: var(--primary-dark);
+  box-shadow: 0 2px 7px rgba(6, 24, 31, .08);
+}
+.rank-badge {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 /* ---- Patrol mode ---- */
 .patrol-current {
   background: var(--surface);
@@ -1564,12 +1617,40 @@ a.stop-address:active { color: var(--primary); }
   border-radius: var(--radius);
   margin-bottom: 8px;
   box-shadow: var(--shadow);
+  cursor: default;
+}
+.history-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
-.history-item:active { transform: translateY(1px); }
+.history-open:active { transform: translateY(1px); }
+.history-open:focus-visible {
+  outline: 3px solid rgba(var(--primary-rgb), .28);
+  outline-offset: 4px;
+}
+.history-open-meta { margin-top: 4px; }
 .history-date { font-size: 13px; font-weight: 600; }
-.history-meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.history-meta { display: block; font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 .history-profit { font-size: 12px; color: #2e7d32; font-weight: 600; margin-top: 4px; }
+.history-warning { display: block; color: #9a5b00; font-size: 11px; margin-top: 5px; }
+.ambiguous-bulk {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  margin: 8px 0;
+  padding: 10px;
+  border: 1px solid #f4c678;
+  border-radius: 8px;
+  background: #fffdf6;
+}
+.badge-warning { background: #fff0cf; color: #925300; }
 .history-card-side {
   display: inline-flex;
   align-items: center;
@@ -1762,6 +1843,49 @@ a.stop-address:active { color: var(--primary); }
 .map-recommend-btn {
   color: var(--primary-dark);
   font-weight: 800;
+}
+.map-bottom-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.map-bottom-actions .btn.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary-dark);
+}
+.map-area-cluster {
+  width: 76px;
+  min-height: 52px;
+  padding: 6px 8px;
+  border: 2px solid #fff;
+  border-radius: 8px;
+  background: #087f89;
+  color: #fff;
+  box-shadow: 0 5px 14px rgba(15, 23, 42, .28);
+  font: inherit;
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+.map-area-cluster span,
+.map-area-cluster strong {
+  display: block;
+}
+.map-area-cluster span {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.map-area-cluster strong {
+  margin-top: 4px;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.map-area-cluster:focus-visible {
+  outline: 3px solid #fbbf24;
+  outline-offset: 2px;
 }
 
 /* ---- 次に回る候補 ---- */
@@ -2563,6 +2687,59 @@ body {
 .history-date-editor-row .form-input {
   min-width: 0;
 }
+
+.history-summary-sticky {
+  position: sticky;
+  top: 8px;
+  z-index: 12;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, .13);
+}
+
+.history-stops {
+  margin: 14px 0;
+  border: 1px solid #d8e7ea;
+  border-radius: 8px;
+  background: #f7fbfc;
+}
+
+.history-stops > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 48px;
+  padding: 10px 12px;
+  color: #143840;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+}
+
+.history-stops > summary::-webkit-details-marker { display: none; }
+
+.history-stops > summary::after {
+  content: '開く';
+  color: var(--primary-dark);
+  font-size: 11px;
+}
+
+.history-stops[open] > summary::after { content: '閉じる'; }
+
+.history-stops-count {
+  margin-left: auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-size: 11px;
+}
+
+.history-stops-list {
+  padding: 0 8px 8px;
+}
+
+.history-stops-list .card:last-child { margin-bottom: 0; }
 
 .route-correction-result {
   margin-top: 10px;
