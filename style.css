@@ -31,6 +31,88 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* ---- Device pairing ---- */
+.pairing-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+.pairing-main {
+  width: min(100%, 420px);
+  padding: 32px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-align: center;
+  box-shadow: var(--shadow);
+}
+
+.pairing-main h1 {
+  margin: 16px 0 12px;
+  font-size: 24px;
+}
+
+.pairing-mark {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.pairing-mark svg {
+  width: 36px;
+  height: 36px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pairing-status {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--surface2);
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.pairing-status.success {
+  background: #e5f6ef;
+  color: var(--success);
+}
+
+.pairing-status.error {
+  background: #fff0ef;
+  color: var(--danger);
+}
+
+.pairing-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.pairing-actions[hidden],
+.pairing-help[hidden] {
+  display: none;
+}
+
+.pairing-help {
+  margin-top: 16px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: left;
+}
+
 /* ---- Header ---- */
 .header {
   background: var(--surface);

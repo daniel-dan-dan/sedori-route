@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#087f8c">
+  <title>店舗アプリを接続</title>
+  <link rel="stylesheet" href="style.css?v=186">
+</head>
+<body class="pairing-page">
+  <main class="pairing-main">
+    <div class="pairing-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M12 21s7-4.4 7-11a7 7 0 1 0-14 0c0 6.6 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/></svg>
+    </div>
+    <h1>店舗アプリを接続</h1>
+    <p id="pair-status" class="pairing-status" role="status" aria-live="polite">接続コードを確認しています...</p>
+    <div id="pair-actions" class="pairing-actions" hidden>
+      <a class="btn btn-primary btn-block" href="./#settings">店舗アプリを開く</a>
+      <button id="pair-copy" class="btn btn-outline btn-block" type="button">接続コードをコピー</button>
+    </div>
+    <p id="pair-help" class="pairing-help" hidden>
+      ホーム画面の店舗アプリが未接続の場合は、接続コードをコピーし、店舗アプリの「設定」から貼り付けてください。
+    </p>
+  </main>
+  <script>
+    (() => {
+      const key = 'daniel_api_auth_token';
+      const status = document.getElementById('pair-status');
+      const actions = document.getElementById('pair-actions');
+      const help = document.getElementById('pair-help');
+      const copy = document.getElementById('pair-copy');
+      const params = new URLSearchParams(location.hash.slice(1));
+      const token = String(params.get('token') || '').trim();
+
+      if (token.length < 24) {
+        status.textContent = '接続コードが見つかりません。店舗アプリ専用のQRコードを読み取ってください。';
+        status.classList.add('error');
+        return;
+      }
+
+      localStorage.setItem(key, token);
+      history.replaceState(null, '', location.pathname);
+      status.textContent = 'この端末を店舗アプリへ接続しました。';
+      status.classList.add('success');
+      actions.hidden = false;
+      help.hidden = false;
+
+      function legacyCopy(value) {
+        const field = document.createElement('textarea');
+        field.value = value;
+        field.setAttribute('readonly', '');
+        field.style.position = 'fixed';
+        field.style.opacity = '0';
+        document.body.appendChild(field);
+        field.select();
+        field.setSelectionRange(0, value.length);
+        const copied = document.execCommand('copy');
+        field.remove();
+        return copied;
+      }
+
+      async function copyToken(value) {
+        if (navigator.clipboard && window.isSecureContext) {
+          const copied = await Promise.race([
+            navigator.clipboard.writeText(value).then(() => true).catch(() => false),
+            new Promise(resolve => setTimeout(() => resolve(false), 1200)),
+          ]);
+          if (copied) return true;
+        }
+        return legacyCopy(value);
+      }
+
+      copy.addEventListener('click', async () => {
+        status.textContent = '接続コードをコピーしています...';
+        try {
+          if (!await copyToken(token)) throw new Error('copy_failed');
+          status.textContent = '接続コードをコピーしました。店舗アプリの設定欄へ貼り付けてください。';
+        } catch (_error) {
+          status.textContent = 'コピーできませんでした。このページを同じブラウザで開き直してください。';
+          status.classList.remove('success');
+          status.classList.add('error');
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
