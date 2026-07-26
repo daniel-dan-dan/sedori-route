@@ -210,7 +210,10 @@ const Storage = (() => {
 
   // 予定ルート（タイマー未開始で保存するプラン）
   async function savePlannedRoute(routeData) {
-    return put('currentRoute', { id: 'planned', ...routeData, savedAt: Date.now() });
+    const savedAt = Number(routeData?.savedAt) || Date.now();
+    const record = { id: 'planned', ...routeData, savedAt };
+    await put('currentRoute', record);
+    return record;
   }
   async function getPlannedRoute() {
     return get('currentRoute', 'planned');

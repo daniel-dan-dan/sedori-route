@@ -39,6 +39,7 @@ const App = (() => {
   const RECOMMENDATION_TIMEOUT_MS = 12000;
   const RECOMMENDATION_INVENTORY_LIMIT = 1000;
   const MAP_VISIT_INFO_TTL_MS = 60 * 60 * 1000;
+  const PLANNED_ROUTE_CONFIG_KEY = 'planned_route_v1';
 
   // チェーン別ブランドカラー（ピン・チップの色分け）
   const CHAIN_COLORS = {
@@ -301,6 +302,156 @@ const App = (() => {
     );
   }
 
+  // ---------- 予定ルートの端末間同期 ----------
+
+  function parsePlannedRouteRecord_(value) {
+    if (!value) return null;
+    try {
+      const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+      if (!parsed || Number(parsed.version) !== 1) return null;
+      const storeIds = Array.isArray(parsed.storeIds)
+        ? parsed.storeIds.map(id => String(id || '').trim()).filter(Boolean)
+        : [];
+      const updatedAt = Number(parsed.updatedAt);
+      if (!Number.isFinite(updatedAt) || updatedAt <= 0) return null;
+      return {
+        version: 1,
+        storeIds,
+        totalDistanceKm: Number(parsed.totalDistanceKm) || 0,
+        updatedAt,
+        deleted: Boolean(parsed.deleted) || storeIds.length === 0,
+      };
+    } catch (error) {
+      console.warn('予定ルートの同期データを読み取れませんでした:', error);
+      return null;
+    }
+  }
+
+  function buildPlannedRouteRecord_(route, updatedAt = Date.now()) {
+    const storeIds = (route?.orderedStores || [])
+      .map(store => String(store?.store_id || '').trim())
+      .filter(Boolean);
+    return {
+      version: 1,
+      storeIds,
+      totalDistanceKm: Number(route?.totalDistanceKm) || 0,
+      updatedAt: Number(updatedAt) || Date.now(),
+      deleted: Boolean(route?.deleted) || storeIds.length === 0,
+    };
+  }
+
+  function plannedRouteSignature_(route) {
+    if (!route || route.deleted || !route.orderedStores?.length) return '';
+    return JSON.stringify({
+      storeIds: route.orderedStores.map(store => String(store.store_id || '')),
+      totalDistanceKm: Number(route.totalDistanceKm) || 0,
+      savedAt: Number(route.savedAt) || 0,
+    });
+  }
+
+  async function writePlannedRouteRecord_(record) {
+    const serialized = JSON.stringify(record);
+    const result = await API.updateConfig({ [PLANNED_ROUTE_CONFIG_KEY]: serialized });
+    config[PLANNED_ROUTE_CONFIG_KEY] = serialized;
+    await Storage.cacheConfig(config);
+    return result;
+  }
+
+  async function savePlannedRouteEverywhere_(route) {
+    const savedAt = Date.now();
+    const localRoute = await Storage.savePlannedRoute({ ...route, savedAt, deleted: false });
+    plannedRoute = localRoute;
+    const result = await writePlannedRouteRecord_(buildPlannedRouteRecord_(localRoute, savedAt));
+    return { localRoute, queued: Boolean(result?._queued) };
+  }
+
+  async function deletePlannedRouteEverywhere_() {
+    const savedAt = Date.now();
+    const tombstone = await Storage.savePlannedRoute({
+      orderedStores: [],
+      totalDistanceKm: 0,
+      deleted: true,
+      savedAt,
+    });
+    plannedRoute = null;
+    const result = await writePlannedRouteRecord_(buildPlannedRouteRecord_(tombstone, savedAt));
+    return { queued: Boolean(result?._queued) };
+  }
+
+  async function reconcilePlannedRoute_(allowServerWrite) {
+    const before = plannedRouteSignature_(plannedRoute);
+    let localState = null;
+    try {
+      localState = await Storage.getPlannedRoute();
+    } catch (error) {
+      console.warn('端末内の予定ルートを読み取れませんでした:', error);
+    }
+
+    const serverRecord = parsePlannedRouteRecord_(config[PLANNED_ROUTE_CONFIG_KEY]);
+    const localRecord = localState
+      ? buildPlannedRouteRecord_(localState, localState.savedAt)
+      : null;
+
+    // v187以前の端末内プランを、初回だけ共有設定へ移行する。
+    if (!serverRecord) {
+      if (localRecord) {
+        plannedRoute = localRecord.deleted ? null : localState;
+        if (allowServerWrite) {
+          try {
+            await writePlannedRouteRecord_(localRecord);
+          } catch (error) {
+            console.warn('予定ルートの初回同期に失敗しました:', error);
+          }
+        }
+      }
+      return before !== plannedRouteSignature_(plannedRoute);
+    }
+
+    // 同期済みデータより端末内の編集が新しい場合は、端末側を共有設定へ反映する。
+    if (localRecord && localRecord.updatedAt > serverRecord.updatedAt) {
+      plannedRoute = localRecord.deleted ? null : localState;
+      if (allowServerWrite) {
+        try {
+          await writePlannedRouteRecord_(localRecord);
+        } catch (error) {
+          console.warn('端末内の予定ルートを同期できませんでした:', error);
+        }
+      }
+      return before !== plannedRouteSignature_(plannedRoute);
+    }
+
+    // サーバー側の削除情報を端末にも残し、古い予定が復活しないようにする。
+    if (serverRecord.deleted) {
+      await Storage.savePlannedRoute({
+        orderedStores: [],
+        totalDistanceKm: 0,
+        deleted: true,
+        savedAt: serverRecord.updatedAt,
+      });
+      plannedRoute = null;
+      return before !== '';
+    }
+
+    const storeById = new Map(stores.map(store => [String(store.store_id || ''), store]));
+    const orderedStores = serverRecord.storeIds.map(id => storeById.get(id)).filter(Boolean);
+    if (orderedStores.length !== serverRecord.storeIds.length) {
+      const missingIds = serverRecord.storeIds.filter(id => !storeById.has(id));
+      console.warn('予定ルートの店舗データが不足しています:', missingIds);
+      return false;
+    }
+
+    const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
+    const reconstructed = {
+      orderedStores,
+      totalDistanceKm: serverRecord.totalDistanceKm,
+      _mapsUrl: RouteOptimizer.generateMapsUrl(home, orderedStores),
+      savedAt: serverRecord.updatedAt,
+      deleted: false,
+    };
+    plannedRoute = await Storage.savePlannedRoute(reconstructed);
+    return before !== plannedRouteSignature_(plannedRoute);
+  }
+
   // ---------- 初期化 ----------
 
   async function init() {
@@ -323,35 +474,34 @@ const App = (() => {
       return;
     }
 
-    // GASウォームアップ & データ更新を最速で並行スタート（await しない）
-    // IDB読み込みと並行してGASが起動するためコールドスタートを実質ゼロにする
-    const loadDataPromise = loadData();
-
-    // 巡回中データ・予定ルートをIDBから復元
-    const saved = await Storage.getCurrentRoute();
+    // 巡回中データ・予定ルート・表示キャッシュを端末から先に復元する。
+    const [saved, planned, cachedStores, cachedConfig] = await Promise.all([
+      Storage.getCurrentRoute(),
+      Storage.getPlannedRoute().catch(() => null),
+      Storage.getCachedStores(),
+      Storage.getCachedConfig(),
+    ]);
     if (saved && saved.routeId) {
       patrolState = saved;
     }
-    try {
-      const planned = await Storage.getPlannedRoute();
-      if (planned && planned.orderedStores && planned.orderedStores.length) {
-        plannedRoute = planned;
-      }
-    } catch (e) { /* ignore */ }
-
-    // IDBキャッシュから即ロード（ローカル読み込みなので高速）
-    const cachedStores = await Storage.getCachedStores();
+    if (planned && !planned.deleted && planned.orderedStores?.length) {
+      plannedRoute = planned;
+    }
     stores = normalizeStores(cachedStores);
-    config = await Storage.getCachedConfig();
+    config = cachedConfig;
 
     if (stores.length > 0) {
       // 2回目以降：キャッシュで即ナビゲート（体感0秒）
       Router.navigate(patrolState ? 'patrol' : 'home');
-      // バックグラウンドでstores/configを最新に更新
-      loadDataPromise.catch(e => console.warn('background refresh failed:', e));
+      // バックグラウンドでstores/configと共有予定を最新に更新
+      loadData().then(result => {
+        if (result.plannedRouteChanged && Router.getCurrentView() === 'home') {
+          Router.navigate('home');
+        }
+      }).catch(e => console.warn('background refresh failed:', e));
     } else {
       // 初回起動のみAPIを待つ（キャッシュがない場合）
-      await loadDataPromise;
+      await loadData();
       Router.navigate(patrolState ? 'patrol' : 'home');
     }
 
@@ -362,8 +512,10 @@ const App = (() => {
   }
 
   async function loadData() {
+    let fetchedFromApi = false;
     try {
       [stores, config] = await Promise.all([API.getStores(), API.getConfig()]);
+      fetchedFromApi = true;
       stores = normalizeStores(stores);
       await Storage.cacheStores(stores);
       await Storage.cacheConfig(config);
@@ -376,6 +528,8 @@ const App = (() => {
         toast('データ取得に失敗しました');
       }
     }
+    const plannedRouteChanged = await reconcilePlannedRoute_(fetchedFromApi);
+    return { fetchedFromApi, plannedRouteChanged };
   }
 
   function setupNav() {
@@ -652,14 +806,16 @@ const App = (() => {
     document.getElementById('btn-planned-start')?.addEventListener('click', () => {
       if (!plannedRoute) return;
       optimizedRoute = plannedRoute;
-      plannedRoute = null;
-      Storage.clearPlannedRoute().catch(() => {});
-      startPatrol();
+      startPatrol({ clearPlannedOnSuccess: true });
     });
     document.getElementById('btn-planned-delete')?.addEventListener('click', async () => {
       if (!confirm('保存した予定ルートを削除しますか？')) return;
-      plannedRoute = null;
-      try { await Storage.clearPlannedRoute(); } catch (e) {}
+      try {
+        const result = await deletePlannedRouteEverywhere_();
+        toast(result.queued ? '削除を保存しました（通信復旧後に同期）' : '予定ルートを削除しました');
+      } catch (error) {
+        toast('この端末では削除しましたが、他端末への同期に失敗しました', 5000);
+      }
       Router.navigate('home');
     });
   }
@@ -1820,22 +1976,21 @@ const App = (() => {
 
     document.getElementById('btn-confirm-route')?.addEventListener('click', () => {
       optimizedRoute = pickRoute();
-      // 今すぐ開始するので、既存の予定ルートは消しておく
-      plannedRoute = null;
-      Storage.clearPlannedRoute().catch(() => {});
-      startPatrol();
+      // 巡回開始が成功した後で、保存済みの予定を全端末から消す。
+      startPatrol({ clearPlannedOnSuccess: true });
     });
 
     document.getElementById('btn-save-planned')?.addEventListener('click', async () => {
       const chosen = pickRoute();
-      plannedRoute = chosen;
       optimizedRoute = null;
       selectedStoreIds = [];
       try {
-        await Storage.savePlannedRoute(chosen);
-        toast('予定として保存しました');
-      } catch (e) {
-        toast('保存に失敗しました');
+        const result = await savePlannedRouteEverywhere_(chosen);
+        toast(result.queued ? '予定を保存しました（通信復旧後に同期）' : '予定として保存しました（端末間同期済み）');
+      } catch (error) {
+        plannedRoute = { ...chosen, savedAt: Date.now() };
+        try { await Storage.savePlannedRoute(plannedRoute); } catch (e) {}
+        toast('この端末には保存しましたが、他端末への同期に失敗しました', 5000);
       }
       Router.navigate('home');
     });
@@ -1964,7 +2119,7 @@ const App = (() => {
     });
   }
 
-  async function startPatrol() {
+  async function startPatrol({ clearPlannedOnSuccess = false } = {}) {
     if (!optimizedRoute) return;
     const storeIds = optimizedRoute.orderedStores.map(s => s.store_id);
     const startButton = document.getElementById('btn-start-patrol');
@@ -1996,6 +2151,13 @@ const App = (() => {
         currentIdx: 0
       };
       await Storage.saveCurrentRoute(patrolState);
+      if (clearPlannedOnSuccess) {
+        try {
+          await deletePlannedRouteEverywhere_();
+        } catch (error) {
+          console.warn('開始済み予定ルートの削除同期に失敗しました:', error);
+        }
+      }
       Router.navigate('patrol');
     } catch (error) {
       toast(`巡回を開始できませんでした: ${error.message}`, 5000);
