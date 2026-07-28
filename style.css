@@ -1226,6 +1226,107 @@ body {
 .planned-route-card {
   border-color: rgba(var(--primary-rgb), .34);
   box-shadow: 0 10px 24px rgba(var(--primary-rgb), .08);
+  padding: 14px;
+}
+.planned-route-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.planned-route-kicker {
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  line-height: 1.2;
+  margin-bottom: 2px;
+}
+.planned-route-saved {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.planned-route-card .route-stats {
+  background: var(--primary-light);
+  border: 1px solid rgba(var(--primary-rgb), .16);
+  border-radius: 8px;
+  margin: 10px 0;
+  padding: 8px 0;
+}
+.planned-route-card .route-stat + .route-stat {
+  border-left: 1px solid rgba(var(--primary-rgb), .16);
+}
+.planned-route-path {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+}
+.planned-route-path > span:not(.planned-route-path-arrow) {
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.planned-route-path b {
+  display: block;
+  color: var(--primary);
+  font-size: 9px;
+  letter-spacing: .04em;
+  margin-bottom: 2px;
+}
+.planned-route-path-arrow {
+  color: var(--primary);
+  font-weight: 800;
+}
+.planned-route-details {
+  border-bottom: 1px solid var(--border);
+  margin-top: 4px;
+}
+.planned-route-details summary {
+  align-items: center;
+  color: var(--primary-dark);
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  font-weight: 800;
+  justify-content: space-between;
+  list-style: none;
+  min-height: 44px;
+  padding: 0 4px;
+}
+.planned-route-details summary::-webkit-details-marker {
+  display: none;
+}
+.planned-route-details summary::after {
+  content: '＋';
+  font-size: 17px;
+  font-weight: 500;
+}
+.planned-route-details[open] summary::after {
+  content: '－';
+}
+.planned-route-stop-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 4px;
+}
+.planned-route-card .btn-group > .btn-compact {
+  flex: 0 0 78px;
+}
+.planned-route-card .btn-group > .btn-success {
+  flex: 1 1 auto;
 }
 .route-stats {
   display: flex;

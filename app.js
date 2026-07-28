@@ -9,6 +9,8 @@ const App = (() => {
   let optimizedRoute = null;
   let patrolState = null; // { routeId, stops, currentIdx }
   let plannedRoute = null; // 予定として保存されたルート（startTime 未打刻）
+  let plannedRouteRefreshInFlight = null;
+  let plannedRouteRefreshedAt = 0;
   let patrolTimerInterval = null;
   let patrolEnding = false;
   let mapInstance = null;
@@ -40,6 +42,7 @@ const App = (() => {
   const RECOMMENDATION_INVENTORY_LIMIT = 1000;
   const MAP_VISIT_INFO_TTL_MS = 60 * 60 * 1000;
   const PLANNED_ROUTE_CONFIG_KEY = 'planned_route_v1';
+  const PLANNED_ROUTE_REFRESH_INTERVAL_MS = 15 * 1000;
 
   // チェーン別ブランドカラー（ピン・チップの色分け）
   const CHAIN_COLORS = {
@@ -452,6 +455,38 @@ const App = (() => {
     return before !== plannedRouteSignature_(plannedRoute);
   }
 
+  async function refreshPlannedRouteFromServer_(force = false) {
+    if (!API.hasToken()) return false;
+    if (plannedRouteRefreshInFlight) return plannedRouteRefreshInFlight;
+    if (!force && Date.now() - plannedRouteRefreshedAt < PLANNED_ROUTE_REFRESH_INTERVAL_MS) {
+      return false;
+    }
+
+    plannedRouteRefreshInFlight = (async () => {
+      try {
+        const latestConfig = await API.getConfig();
+        config = latestConfig || {};
+        await Storage.cacheConfig(config);
+        plannedRouteRefreshedAt = Date.now();
+        return await reconcilePlannedRoute_(false);
+      } catch (error) {
+        console.warn('予定ルートの再取得に失敗しました:', error);
+        return false;
+      } finally {
+        plannedRouteRefreshInFlight = null;
+      }
+    })();
+    return plannedRouteRefreshInFlight;
+  }
+
+  async function refreshPlannedRouteOnHome_(force = false) {
+    const changed = await refreshPlannedRouteFromServer_(force);
+    if (changed && Router.getCurrentView() === 'home') {
+      Router.navigate('home');
+    }
+    return changed;
+  }
+
   // ---------- 初期化 ----------
 
   async function init() {
@@ -465,6 +500,14 @@ const App = (() => {
 
     setupNav();
     registerViews();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && Router.getCurrentView() === 'home') {
+        refreshPlannedRouteOnHome_(true);
+      }
+    });
+    window.addEventListener('online', () => {
+      if (Router.getCurrentView() === 'home') refreshPlannedRouteOnHome_(true);
+    });
 
     if (!API.hasToken()) {
       stores = normalizeStores(await Storage.getCachedStores());
@@ -537,6 +580,7 @@ const App = (() => {
       btn.addEventListener('click', () => {
         const view = btn.dataset.view;
         Router.navigate(view);
+        if (view === 'home') refreshPlannedRouteOnHome_(true);
       });
     });
   }
@@ -777,14 +821,30 @@ const App = (() => {
   function buildPlannedRouteBanner() {
     if (!plannedRoute || !plannedRoute.orderedStores || !plannedRoute.orderedStores.length) return '';
     const pr = plannedRoute;
+    const firstStore = pr.orderedStores[0];
+    const lastStore = pr.orderedStores[pr.orderedStores.length - 1];
     const savedStr = pr.savedAt ? new Date(pr.savedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
     let html = `
-      <div class="route-result planned-route-card">
-        <div class="card-title">予定ルート${savedStr ? `<span class="text-dim text-sm" style="font-weight:normal;margin-left:8px;">(${esc(savedStr)} 保存)</span>` : ''}</div>
+      <div class="route-result planned-route-card" id="planned-route-card">
+        <div class="planned-route-heading">
+          <div>
+            <div class="planned-route-kicker">保存済み</div>
+            <div class="card-title">予定ルート</div>
+          </div>
+          ${savedStr ? `<span class="planned-route-saved">${esc(savedStr)} 保存</span>` : ''}
+        </div>
         <div class="route-stats">
           <div class="route-stat"><div class="value">${pr.totalDistanceKm}</div><div class="label">km</div></div>
           <div class="route-stat"><div class="value">${pr.orderedStores.length}</div><div class="label">店舗</div></div>
-        </div>`;
+        </div>
+        <div class="planned-route-path" aria-label="予定ルートの開始店と最終店">
+          <span><b>開始</b>${esc(firstStore.name)}</span>
+          <span class="planned-route-path-arrow" aria-hidden="true">→</span>
+          <span><b>最後</b>${esc(lastStore.name)}</span>
+        </div>
+        <details class="planned-route-details">
+          <summary>店舗順を表示（${pr.orderedStores.length}店舗）</summary>
+          <div class="planned-route-stop-list">`;
     pr.orderedStores.forEach((s, i) => {
       html += `
         <div class="route-stop">
@@ -794,6 +854,8 @@ const App = (() => {
         </div>`;
     });
     html += `
+          </div>
+        </details>
         <div class="btn-group mt-8">
           <button class="btn btn-outline btn-compact" id="btn-planned-delete">削除</button>
           <button class="btn btn-success" id="btn-planned-start">この予定で巡回開始</button>
@@ -850,7 +912,8 @@ const App = (() => {
 
   function renderHome(container) {
     setTitle('巡回ルート');
-    return renderMapView(container);
+    renderMapView(container);
+    refreshPlannedRouteOnHome_();
   }
 
   function doOptimize() {
@@ -1299,7 +1362,11 @@ const App = (() => {
 
     // 巡回中は巡回ルートの店舗を必ず表示しフィルター無視
     const patrolIds = patrolState ? patrolState.stops.map(s => s.store_id) : [];
-    const patrolIdSet = new Set(patrolIds);
+    // 巡回前は保存済み予定の店舗を順番付きで必ず表示する
+    const plannedIds = !patrolState && plannedRoute
+      ? plannedRoute.orderedStores.map(s => s.store_id)
+      : [];
+    const routeIdSet = new Set([...patrolIds, ...plannedIds]);
 
     // 差分更新: 既存markerを使いまわし、不要分だけ削除・新規だけ追加
     const wanted = new Map();
@@ -1307,8 +1374,8 @@ const App = (() => {
       const lat = Number(s.lat);
       const lng = Number(s.lng);
       if (!lat || !lng) return;
-      if (mapChainFilter !== 'all' && getChain(s) !== mapChainFilter && !patrolIdSet.has(s.store_id)) return;
-      if (mapBoundsFilter && !patrolIdSet.has(s.store_id) && !mapInstance.getBounds().contains([lat, lng])) return;
+      if (mapChainFilter !== 'all' && getChain(s) !== mapChainFilter && !routeIdSet.has(s.store_id)) return;
+      if (mapBoundsFilter && !routeIdSet.has(s.store_id) && !mapInstance.getBounds().contains([lat, lng])) return;
       wanted.set(s.store_id, s);
     });
 
@@ -1324,18 +1391,25 @@ const App = (() => {
     wanted.forEach((s, sid) => {
       const lat = Number(s.lat);
       const lng = Number(s.lng);
-      // 巡回中は巡回順を優先、なければ通常の選択順
+      // 巡回中は巡回順、次に手動選択順、最後に保存済み予定順を表示
       const patrolIdx = patrolIds.indexOf(sid);
-      const selIdx = patrolIdx >= 0 ? patrolIdx : selectedStoreIds.indexOf(sid);
+      const selectedIdx = selectedStoreIds.indexOf(sid);
+      const plannedIdx = plannedIds.indexOf(sid);
+      const displayIdx = patrolIdx >= 0
+        ? patrolIdx
+        : selectedIdx >= 0
+          ? selectedIdx
+          : plannedIdx;
+      const popupSelectionIdx = patrolIdx >= 0 ? patrolIdx : selectedIdx;
       const existing = mapMarkers.get(sid);
       const markerLatLng = markerPositions.get(sid) || [lat, lng];
       if (existing) {
         existing.setLatLng(markerLatLng);
-        existing.setIcon(buildPinIcon(s, selIdx));
-        existing.setPopupContent(buildMapPopupHtml(s, selIdx));
+        existing.setIcon(buildPinIcon(s, displayIdx));
+        existing.setPopupContent(buildMapPopupHtml(s, popupSelectionIdx));
       } else {
-        const marker = L.marker(markerLatLng, { icon: buildPinIcon(s, selIdx) });
-        marker.bindPopup(buildMapPopupHtml(s, selIdx));
+        const marker = L.marker(markerLatLng, { icon: buildPinIcon(s, displayIdx) });
+        marker.bindPopup(buildMapPopupHtml(s, popupSelectionIdx));
         mapCluster.addLayer(marker);
         mapMarkers.set(sid, marker);
       }
@@ -1349,8 +1423,11 @@ const App = (() => {
   function drawPatrolPolyline() {
     if (!mapInstance) return;
     if (patrolPolyline) { mapInstance.removeLayer(patrolPolyline); patrolPolyline = null; }
-    if (!patrolState || !patrolState.stops || patrolState.stops.length < 2) return;
-    const latlngs = patrolState.stops
+    const routeStores = patrolState?.stops?.length
+      ? patrolState.stops
+      : (plannedRoute?.orderedStores || []);
+    if (routeStores.length < 2) return;
+    const latlngs = routeStores
       .map(s => {
         const store = stores.find(st => st.store_id === s.store_id) || s;
         const lat = Number(store.lat), lng = Number(store.lng);
@@ -1359,15 +1436,32 @@ const App = (() => {
       .filter(Boolean);
     if (latlngs.length < 2) return;
     patrolPolyline = L.polyline(latlngs, {
-      color: '#22c55e',
-      weight: 4,
-      opacity: 0.75,
-      dashArray: '8 6',
+      color: patrolState ? '#22c55e' : '#07818b',
+      weight: patrolState ? 4 : 3,
+      opacity: patrolState ? 0.75 : 0.65,
+      dashArray: patrolState ? '8 6' : '5 7',
     }).addTo(mapInstance);
   }
 
   function fitMapToMarkers() {
     if (!mapInstance || !mapCluster) return;
+    const plannedFocusStores = !patrolState && plannedRoute?.orderedStores?.length
+      ? plannedRoute.orderedStores
+      : null;
+    if (plannedFocusStores) {
+      const plannedLatLngs = plannedFocusStores
+        .map(s => [Number(s.lat), Number(s.lng)])
+        .filter(([lat, lng]) => lat && lng);
+      if (plannedLatLngs.length > 0) {
+        mapInstance.invalidateSize(false);
+        mapInstance.fitBounds(L.latLngBounds(plannedLatLngs), {
+          padding: [28, 28],
+          maxZoom: 12,
+          animate: false,
+        });
+        return;
+      }
+    }
     // ズームは「全て」の店舗の境界で統一（チェーン絞込でも同じ縮尺）
     const allLatLngs = [];
     stores.forEach(s => {
