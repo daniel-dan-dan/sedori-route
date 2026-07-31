@@ -95,6 +95,8 @@ function createAppConcurrencyHarness({ startRoute, updateStop, endRoute } = {}) 
     setPlannedRoute(value) { plannedRoute = value; optimizedRoute = value; },
     setPatrolState(value) { patrolState = value; },
     getPatrolState() { return patrolState; },
+    getPendingStartState() { return pendingStartState; },
+    getPlannedRoute() { return plannedRoute; },
     startPatrol,
     completeCurrentStop_,
     endPatrol,
@@ -128,6 +130,8 @@ function createAppConcurrencyHarness({ startRoute, updateStop, endRoute } = {}) 
     buttons,
     navigations,
     getSavedCurrentRoute: () => savedCurrentRoute,
+    setSavedCurrentRoute: value => { savedCurrentRoute = value; },
+    getToastText: () => toastElement.textContent,
   };
 }
 
@@ -197,6 +201,111 @@ test('予定ルート開始を並行実行してもstartRouteは1回だけ呼ぶ
   assert.equal(harness.buttons.get('btn-planned-start').disabled, false);
 });
 
+test('巡回開始の確定エラーは保留を消し、予定ルートを残す', async () => {
+  const rejected = new Error('Unknown or inactive store_id: s1');
+  rejected.code = 'API_ERROR';
+  const harness = createAppConcurrencyHarness({ startRoute: async () => { throw rejected; } });
+  const planned = {
+    orderedStores: [{ store_id: 's1', name: '休止中の店舗' }],
+    totalDistanceKm: 8.5,
+  };
+  harness.app.setPlannedRoute(planned);
+
+  await harness.app.startPatrol({ clearPlannedOnSuccess: true });
+
+  assert.equal(harness.calls.startRoute.length, 1);
+  assert.equal(harness.app.getPendingStartState(), null);
+  assert.equal(harness.getSavedCurrentRoute(), null);
+  assert.equal(harness.app.getPlannedRoute(), planned);
+  assert.match(harness.getToastText(), /巡回を開始できませんでした/);
+  assert.match(harness.getToastText(), /予定ルートは残しています/);
+
+  await harness.app.startPatrol({ clearPlannedOnSuccess: true });
+  assert.equal(harness.calls.startRoute.length, 2);
+  assert.notEqual(
+    harness.calls.startRoute[0].operation_id,
+    harness.calls.startRoute[1].operation_id,
+    '利用者が改めて開始した場合は新しいIDを使います'
+  );
+});
+
+test('巡回開始の一時エラーは同じoperationIdで結果を再確認する', async () => {
+  let attempt = 0;
+  const harness = createAppConcurrencyHarness({
+    startRoute: async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        const busy = new Error('別の更新処理が実行中です');
+        busy.code = 'BUSY';
+        throw busy;
+      }
+      return { route_id: 'route-1', start_time: '2026-08-01 06:00:00' };
+    },
+  });
+  harness.app.setPlannedRoute({
+    orderedStores: [{ store_id: 's1', name: '確認店舗' }],
+    totalDistanceKm: 9.2,
+  });
+
+  await harness.app.startPatrol({ clearPlannedOnSuccess: true });
+  const pending = harness.getSavedCurrentRoute();
+  assert.equal(pending.routeId, 'pending');
+  assert.equal(harness.app.getPendingStartState().startOperationId, pending.startOperationId);
+  assert.match(harness.getToastText(), /同じ内容で再確認できます/);
+
+  await harness.app.startPatrol({ clearPlannedOnSuccess: true });
+  assert.equal(harness.calls.startRoute.length, 2);
+  assert.equal(harness.calls.startRoute[0].operation_id, harness.calls.startRoute[1].operation_id);
+  assert.equal(harness.app.getPatrolState().routeId, 'route-1');
+});
+
+test('Safari系の通信エラーも同じoperationIdで結果を再確認する', async () => {
+  let attempt = 0;
+  const harness = createAppConcurrencyHarness({
+    startRoute: async () => {
+      attempt += 1;
+      if (attempt === 1) throw new TypeError('The Internet connection appears to be offline.');
+      return { route_id: 'route-1', start_time: '2026-08-01 06:00:00' };
+    },
+  });
+  harness.app.setPlannedRoute({
+    orderedStores: [{ store_id: 's1', name: '確認店舗' }],
+    totalDistanceKm: 9.2,
+  });
+
+  await harness.app.startPatrol({ clearPlannedOnSuccess: true });
+  const pending = harness.getSavedCurrentRoute();
+  assert.equal(pending.routeId, 'pending');
+
+  await harness.app.startPatrol({ clearPlannedOnSuccess: true });
+  assert.equal(harness.calls.startRoute.length, 2);
+  assert.equal(harness.calls.startRoute[0].operation_id, harness.calls.startRoute[1].operation_id);
+  assert.equal(harness.app.getPatrolState().routeId, 'route-1');
+});
+
+test('他タブで開始済みの巡回は新しい保留データで上書きしない', async () => {
+  const harness = createAppConcurrencyHarness();
+  const existingPatrol = {
+    routeId: 'route-existing',
+    startTime: Date.now(),
+    currentIdx: 0,
+    stops: [{ store_id: 's-existing', name: '開始済み店舗', status: 'visiting' }],
+  };
+  harness.setSavedCurrentRoute(existingPatrol);
+  harness.app.setPlannedRoute({
+    orderedStores: [{ store_id: 's-new', name: '新しい予定店舗' }],
+    totalDistanceKm: 5.4,
+  });
+
+  await harness.app.startPatrol({ clearPlannedOnSuccess: true });
+
+  assert.equal(harness.calls.startRoute.length, 0);
+  assert.equal(harness.getSavedCurrentRoute(), existingPatrol);
+  assert.equal(harness.app.getPatrolState(), existingPatrol);
+  assert.equal(harness.navigations.at(-1).view, 'patrol');
+  assert.match(harness.getToastText(), /開始済みの巡回を開きました/);
+});
+
 test('店舗保存中のスキップと手動終了はAPIを追加で呼ばない', async () => {
   const response = createDeferred();
   const harness = createAppConcurrencyHarness({ updateStop: () => response.promise });
@@ -260,6 +369,18 @@ test('GASはstartRouteの全検証後に追加し、履歴変更後に統計と�
   const daily = functionSource(gas, 'dailyProfitImport', 'setupDailyProfitImport');
   assert.match(daily, /recomputeAllStoreVisitStats_\(\)/);
   assert.match(daily, /clearStoresCache_\(\)/);
+});
+
+test('GASの店舗訪問集計はvisitedだけを数える', () => {
+  const predicate = functionSource(gas, 'isStopCountedAsStoreVisit_', 'normalizeStopStatus_');
+  const normalize = functionSource(gas, 'normalizeStopStatus_', 'backupStoresSheetForVisitRepair_');
+  const context = {};
+  vm.runInNewContext(`${predicate}\n${normalize}\nglobalThis.isCounted = isStopCountedAsStoreVisit_;`, context);
+
+  assert.equal(context.isCounted({ status: 'visited' }), true);
+  ['planned', 'visiting', 'skipped', '', null, undefined].forEach(status => {
+    assert.equal(context.isCounted({ status }), false, `${String(status)} が訪問として数えられました`);
+  });
 });
 
 test('全チェーン画像をService Workerへ登録する', () => {

@@ -89,7 +89,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v191';
+  const ASSET_VER = 'v192';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -2324,7 +2324,11 @@ const App = (() => {
       ...pending.startRequest,
       operation_id: pending.startOperationId,
     });
-    if (!result?.route_id) throw new Error('巡回IDを確認できませんでした');
+    if (!result?.route_id) {
+      const error = new Error('巡回IDを確認できませんでした');
+      error.code = 'UNKNOWN_RESPONSE';
+      throw error;
+    }
 
     const confirmed = {
       ...pending,
@@ -2345,6 +2349,31 @@ const App = (() => {
     return confirmed;
   }
 
+  function isRetryableRouteStartError_(error, duringStartRequest) {
+    if (!duringStartRequest) return false;
+    const code = String(error?.code || '').toUpperCase();
+    if (['TIMEOUT', 'UNKNOWN_RESPONSE', 'BUSY'].includes(code)) return true;
+    if (error?.name === 'AbortError') return true;
+    // fetchの通信失敗はSafariを含む各ブラウザでTypeErrorになる。
+    if (error?.name === 'TypeError') return true;
+    return /load failed|failed to fetch|networkerror|network request failed|connection was lost|appears to be offline|could not connect/i
+      .test(String(error?.message || error || ''));
+  }
+
+  async function clearRejectedPendingRouteStart_(pending) {
+    // 他のタブで開始済みの巡回を上書きしないよう、同じ開始IDの保留データだけを消す。
+    pendingStartState = null;
+    if (patrolState?.routeId === 'pending'
+        && patrolState.startOperationId === pending?.startOperationId) {
+      patrolState = null;
+    }
+    const saved = await Storage.getCurrentRoute().catch(() => null);
+    if (saved?.routeId === 'pending'
+        && saved.startOperationId === pending?.startOperationId) {
+      await Storage.clearCurrentRoute();
+    }
+  }
+
   function startPatrol({ clearPlannedOnSuccess = false } = {}) {
     if (!optimizedRoute) return Promise.resolve(null);
     if (patrolStartInProgress) return patrolStartPromise || Promise.resolve(null);
@@ -2359,9 +2388,18 @@ const App = (() => {
     updatePatrolStartControls_();
 
     const taskPromise = (async () => {
+      let confirmingStart = false;
       try {
         const storeIds = routeToStart.orderedStores.map(s => s.store_id);
         let pending = await Storage.getCurrentRoute().catch(() => null);
+        if (pending?.routeId && pending.routeId !== 'pending') {
+          // 別タブで開始済みの巡回を、新しい保留データで上書きしない。
+          patrolState = pending;
+          pendingStartState = null;
+          toast('すでに開始済みの巡回を開きました', 4000);
+          Router.navigate('patrol');
+          return patrolState;
+        }
         if (pending?.routeId !== 'pending') {
           const operationId = API.createOperationId('startRoute');
           pending = {
@@ -2391,11 +2429,22 @@ const App = (() => {
           };
         }
         pendingStartState = pending;
+        confirmingStart = true;
         await confirmPendingRouteStart_(pending);
+        confirmingStart = false;
         Router.navigate('patrol');
         return patrolState;
       } catch (error) {
-        toast(`巡回開始の結果を確認できませんでした。同じ内容で再確認できます: ${error.message}`, 6000);
+        if (isRetryableRouteStartError_(error, confirmingStart)) {
+          toast(`巡回開始の結果を確認できませんでした。同じ内容で再確認できます: ${error.message}`, 6000);
+        } else {
+          try {
+            await clearRejectedPendingRouteStart_(pendingStartState);
+          } catch (clearError) {
+            console.warn('却下された巡回開始データの破棄に失敗しました:', clearError);
+          }
+          toast(`巡回を開始できませんでした: ${error.message}。予定ルートは残しています`, 6000);
+        }
         return null;
       }
     })();

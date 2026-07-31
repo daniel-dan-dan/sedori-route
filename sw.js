@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'sedori-route-';
-const CACHE_NAME = 'sedori-route-v191';
+const CACHE_NAME = 'sedori-route-v192';
 const ASSETS = [
   './',
   './index.html',
