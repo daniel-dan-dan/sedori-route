@@ -8,11 +8,18 @@ const App = (() => {
   let selectedStoreIds = []; // 選択順を保持する配列
   let optimizedRoute = null;
   let patrolState = null; // { routeId, stops, currentIdx }
+  let pendingStartState = null; // startRouteの応答喪失時に同じoperationIdで再確認する
+  let patrolStartInProgress = false;
+  let patrolStartPromise = null;
   let plannedRoute = null; // 予定として保存されたルート（startTime 未打刻）
   let plannedRouteRefreshInFlight = null;
   let plannedRouteRefreshedAt = 0;
   let patrolTimerInterval = null;
   let patrolEnding = false;
+  let patrolStopSaving = false;
+  let patrolStopSavingStatus = null;
+  let authFailureHandling = false;
+  let authFailureListenerReady = false;
   let mapInstance = null;
   let mapCluster = null;
   let mapMarkers = new Map(); // store_id → L.marker（差分更新用）
@@ -82,7 +89,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v100';
+  const ASSET_VER = 'v191';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -500,6 +507,10 @@ const App = (() => {
 
     setupNav();
     registerViews();
+    if (!authFailureListenerReady) {
+      window.addEventListener('api-auth-error', handleApiAuthError_);
+      authFailureListenerReady = true;
+    }
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && Router.getCurrentView() === 'home') {
         refreshPlannedRouteOnHome_(true);
@@ -524,7 +535,13 @@ const App = (() => {
       Storage.getCachedStores(),
       Storage.getCachedConfig(),
     ]);
-    if (saved && saved.routeId) {
+    if (saved?.routeId === 'pending' && saved.startOperationId && saved.startRequest) {
+      pendingStartState = saved;
+      optimizedRoute = {
+        orderedStores: saved.stops || [],
+        totalDistanceKm: Number(saved.startRequest.total_distance_km) || 0,
+      };
+    } else if (saved && saved.routeId) {
       patrolState = saved;
     }
     if (planned && !planned.deleted && planned.orderedStores?.length) {
@@ -533,9 +550,28 @@ const App = (() => {
     stores = normalizeStores(cachedStores);
     config = cachedConfig;
 
+    // 起動時にも未送信キューを順番どおり再送する。
+    await Storage.syncPending().catch(error => console.warn('startup sync failed:', error));
+
+    if (pendingStartState && navigator.onLine) {
+      await startPatrol({
+        clearPlannedOnSuccess: Boolean(pendingStartState.clearPlannedOnSuccess),
+      });
+    }
+
+    const navigateInitial = () => {
+      if (patrolState) {
+        Router.navigate('patrol');
+      } else if (pendingStartState && optimizedRoute) {
+        Router.navigate('route-select', { selRoute: optimizedRoute });
+      } else {
+        Router.navigate('home');
+      }
+    };
+
     if (stores.length > 0) {
       // 2回目以降：キャッシュで即ナビゲート（体感0秒）
-      Router.navigate(patrolState ? 'patrol' : 'home');
+      navigateInitial();
       // バックグラウンドでstores/configと共有予定を最新に更新
       loadData().then(result => {
         if (result.plannedRouteChanged && Router.getCurrentView() === 'home') {
@@ -545,7 +581,7 @@ const App = (() => {
     } else {
       // 初回起動のみAPIを待つ（キャッシュがない場合）
       await loadData();
-      Router.navigate(patrolState ? 'patrol' : 'home');
+      navigateInitial();
     }
 
     // GASコールドスタート防止: 15分おきにpingを送ってウォームアップ維持
@@ -563,6 +599,11 @@ const App = (() => {
       await Storage.cacheStores(stores);
       await Storage.cacheConfig(config);
     } catch (e) {
+      if (e?.code === 'UNAUTHORIZED' || e?.code === 'AUTH_TOKEN_REQUIRED') {
+        stores = [];
+        config = {};
+        return { fetchedFromApi: false, plannedRouteChanged: false, authFailed: true };
+      }
       console.warn('API fetch failed, using cache:', e);
       stores = await Storage.getCachedStores();
       stores = normalizeStores(stores);
@@ -573,6 +614,26 @@ const App = (() => {
     }
     const plannedRouteChanged = await reconcilePlannedRoute_(fetchedFromApi);
     return { fetchedFromApi, plannedRouteChanged };
+  }
+
+  async function handleApiAuthError_() {
+    if (authFailureHandling) return;
+    authFailureHandling = true;
+    try {
+      API.setToken('');
+      stores = [];
+      config = {};
+      historyCache = [];
+      historyApiCache = null;
+      analyticsCache = null;
+      mapVisitInfoByStoreId = new Map();
+      mapVisitInfoLoaded = false;
+      await Storage.clearRemoteCaches();
+      if (Router.getCurrentView() !== 'settings') Router.navigate('settings');
+      toast('接続コードの有効期限が切れました。設定し直してください', 5000);
+    } finally {
+      authFailureHandling = false;
+    }
   }
 
   function setupNav() {
@@ -818,6 +879,25 @@ const App = (() => {
 
   // ---------- 予定ルートバナー（ホーム共通） ----------
 
+  const PATROL_START_BUTTON_LABELS = {
+    'btn-start-patrol': '巡回開始',
+    'btn-confirm-route': '今すぐ巡回開始',
+    'btn-planned-start': 'この予定で巡回開始',
+  };
+
+  function updatePatrolStartControls_() {
+    const retrying = pendingStartState?.routeId === 'pending';
+    Object.entries(PATROL_START_BUTTON_LABELS).forEach(([id, defaultLabel]) => {
+      const button = document.getElementById(id);
+      if (!button) return;
+      button.disabled = patrolStartInProgress;
+      button.setAttribute('aria-busy', patrolStartInProgress ? 'true' : 'false');
+      button.textContent = patrolStartInProgress
+        ? '巡回を開始しています...'
+        : retrying ? '巡回開始を再確認' : defaultLabel;
+    });
+  }
+
   function buildPlannedRouteBanner() {
     if (!plannedRoute || !plannedRoute.orderedStores || !plannedRoute.orderedStores.length) return '';
     const pr = plannedRoute;
@@ -865,6 +945,7 @@ const App = (() => {
   }
 
   function wirePlannedRouteHandlers() {
+    updatePatrolStartControls_();
     document.getElementById('btn-planned-start')?.addEventListener('click', () => {
       if (!plannedRoute) return;
       optimizedRoute = plannedRoute;
@@ -1472,9 +1553,11 @@ const App = (() => {
     if (allLatLngs.length === 0) return;
     mapInstance.invalidateSize(false);
     const bounds = L.latLngBounds(allLatLngs);
-    const fitZoom = mapInstance.getBoundsZoom(bounds, false, [40, 40]);
-    const target = Math.min(fitZoom + 2, mapInstance.getMaxZoom() || 19);
-    mapInstance.setView(SENDAI_STATION, target, { animate: false });
+    mapInstance.fitBounds(bounds, {
+      padding: [40, 40],
+      maxZoom: 13,
+      animate: false,
+    });
   }
 
   function toggleMapSelection(sid) {
@@ -2013,6 +2096,7 @@ const App = (() => {
     container.insertAdjacentHTML('beforeend', html);
 
     document.getElementById('btn-start-patrol')?.addEventListener('click', startPatrol);
+    updatePatrolStartControls_();
   }
 
   // ---------- ルート選択画面 ----------
@@ -2020,6 +2104,8 @@ const App = (() => {
   function renderRouteSelect(container, { selRoute } = {}) {
     if (!selRoute) { Router.navigate('home'); return; }
     setTitle('ルート確認');
+    const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
+    const mapsSegments = RouteOptimizer.generateMapsSegments(home, selRoute.orderedStores);
 
     function buildStopList(orderedStores) {
       let html = '';
@@ -2051,6 +2137,20 @@ const App = (() => {
         ${buildStopList(selRoute.orderedStores)}
       </div>`;
 
+    if (mapsSegments.length > 0) {
+      html += `
+        <div class="card maps-segment-card">
+          <div class="card-title">Google Mapsで開く</div>
+          ${mapsSegments.length > 1 ? '<div class="text-sm text-dim mb-8">スマートフォンの上限に合わせ、4店舗ずつ順番に開きます。</div>' : ''}
+          <div class="btn-group maps-segment-actions">
+            ${mapsSegments.map((segment, index) => `
+              <a class="btn btn-outline" href="${segment.url}" target="_blank" rel="noopener">
+                ${mapsSegments.length > 1 ? `${index + 1}区間目（${segment.startIndex + 1}〜${segment.endIndex + 1}店舗）` : 'Google Maps'}
+              </a>`).join('')}
+          </div>
+        </div>`;
+    }
+
     // アクションボタン
     html += `
       <div class="route-confirm-actions">
@@ -2060,10 +2160,10 @@ const App = (() => {
       </div>`;
 
     container.innerHTML = html;
+    updatePatrolStartControls_();
 
     function pickRoute() {
       const chosen = selRoute;
-      const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
       chosen._mapsUrl = RouteOptimizer.generateMapsUrl(home, chosen.orderedStores);
       return chosen;
     }
@@ -2196,70 +2296,141 @@ const App = (() => {
         <label class="form-label">内容</label>
         <textarea class="form-textarea" id="memo-content" placeholder="例: ワゴンと季節家電を先に見る"></textarea>
       </div>`;
-    showModal('店舗メモを追加', body, (el) => {
+    showModal('店舗メモを追加', body, async (el) => {
       const type = el.querySelector('#memo-type').value;
       const content = el.querySelector('#memo-content').value.trim();
       if (!content) {
         toast('メモ内容を入力してください');
-        return;
+        return false;
       }
-      toast('メモを保存しました');
-      syncWrite(API.addMemo({
+      const result = await API.addMemo({
         store_id: store.store_id,
         type,
         content,
         date: today_()
-      }), 'メモ').then(result => { if (result) loadPatrolStoreContext(store); });
+      });
+      if (result?._queued) {
+        toast('メモは通信復旧後に自動保存します', 4000);
+      } else {
+        toast('メモを保存しました');
+        await loadPatrolStoreContext(store);
+      }
+      return true;
     });
   }
 
-  async function startPatrol({ clearPlannedOnSuccess = false } = {}) {
-    if (!optimizedRoute) return;
-    const storeIds = optimizedRoute.orderedStores.map(s => s.store_id);
-    const startButton = document.getElementById('btn-start-patrol');
-    if (startButton?.disabled) return;
-    if (startButton) {
-      startButton.disabled = true;
-      startButton.textContent = '巡回を開始しています...';
+  async function confirmPendingRouteStart_(pending) {
+    const result = await API.startRoute({
+      ...pending.startRequest,
+      operation_id: pending.startOperationId,
+    });
+    if (!result?.route_id) throw new Error('巡回IDを確認できませんでした');
+
+    const confirmed = {
+      ...pending,
+      routeId: result.route_id,
+      startTime: parseServerTimestamp_(result.start_time) || pending.startTime || Date.now(),
+    };
+    delete confirmed.startRequest;
+    patrolState = confirmed;
+    pendingStartState = null;
+    await Storage.saveCurrentRoute(confirmed);
+    if (confirmed.clearPlannedOnSuccess) {
+      try {
+        await deletePlannedRouteEverywhere_();
+      } catch (error) {
+        console.warn('開始済み予定ルートの削除同期に失敗しました:', error);
+      }
     }
-    const operationId = API.createOperationId('startRoute');
-    try {
-      const result = await API.startRoute({
-        store_ids: storeIds,
-        total_distance_km: optimizedRoute.totalDistanceKm,
-        operation_id: operationId
-      });
-      if (!result?.route_id) throw new Error('巡回IDを確認できませんでした');
-      patrolState = {
-        routeId: result.route_id,
-        startOperationId: operationId,
-        startTime: Date.now(),
-        stops: optimizedRoute.orderedStores.map(s => ({
-          ...s,
-          status: 'planned',
-          arrivalTime: null,
-          departureTime: null,
-          purchaseAmount: 0,
-          purchaseItems: 0
-        })),
-        currentIdx: 0
-      };
-      await Storage.saveCurrentRoute(patrolState);
-      if (clearPlannedOnSuccess) {
-        try {
-          await deletePlannedRouteEverywhere_();
-        } catch (error) {
-          console.warn('開始済み予定ルートの削除同期に失敗しました:', error);
+    return confirmed;
+  }
+
+  function startPatrol({ clearPlannedOnSuccess = false } = {}) {
+    if (!optimizedRoute) return Promise.resolve(null);
+    if (patrolStartInProgress) return patrolStartPromise || Promise.resolve(null);
+    if (patrolState?.routeId && patrolState.routeId !== 'pending') {
+      toast('すでに巡回中です。巡回中の画面から続けてください', 4000);
+      return Promise.resolve(null);
+    }
+
+    // 入口ごとにoptimizedRouteを書き換えられても、最初に取得したルートだけを開始する。
+    const routeToStart = optimizedRoute;
+    patrolStartInProgress = true;
+    updatePatrolStartControls_();
+
+    const taskPromise = (async () => {
+      try {
+        const storeIds = routeToStart.orderedStores.map(s => s.store_id);
+        let pending = await Storage.getCurrentRoute().catch(() => null);
+        if (pending?.routeId !== 'pending') {
+          const operationId = API.createOperationId('startRoute');
+          pending = {
+            routeId: 'pending',
+            startOperationId: operationId,
+            startTime: Date.now(),
+            startRequest: {
+              store_ids: storeIds,
+              total_distance_km: routeToStart.totalDistanceKm,
+            },
+            clearPlannedOnSuccess,
+            stops: routeToStart.orderedStores.map(s => ({
+              ...s,
+              status: 'planned',
+              arrivalTime: null,
+              departureTime: null,
+              purchaseAmount: 0,
+              purchaseItems: 0
+            })),
+            currentIdx: 0,
+          };
+          await Storage.saveCurrentRoute(pending);
+        } else {
+          optimizedRoute = {
+            orderedStores: pending.stops || [],
+            totalDistanceKm: Number(pending.startRequest?.total_distance_km) || 0,
+          };
         }
+        pendingStartState = pending;
+        await confirmPendingRouteStart_(pending);
+        Router.navigate('patrol');
+        return patrolState;
+      } catch (error) {
+        toast(`巡回開始の結果を確認できませんでした。同じ内容で再確認できます: ${error.message}`, 6000);
+        return null;
       }
-      Router.navigate('patrol');
-    } catch (error) {
-      toast(`巡回を開始できませんでした: ${error.message}`, 5000);
-      if (startButton) {
-        startButton.disabled = false;
-        startButton.textContent = '巡回開始';
+    })();
+
+    let sharedPromise;
+    sharedPromise = taskPromise.finally(() => {
+      if (patrolStartPromise !== sharedPromise) return;
+      patrolStartInProgress = false;
+      patrolStartPromise = null;
+      updatePatrolStartControls_();
+    });
+    patrolStartPromise = sharedPromise;
+    return sharedPromise;
+  }
+
+  function updatePatrolStopControls_() {
+    const disabled = patrolStopSaving || patrolEnding;
+    const labels = {
+      'btn-depart': '完了して次へ',
+      'btn-skip': 'スキップ',
+      'btn-end': '巡回終了',
+    };
+    Object.entries(labels).forEach(([id, defaultLabel]) => {
+      const button = document.getElementById(id);
+      if (!button) return;
+      button.disabled = disabled;
+      button.setAttribute('aria-busy', disabled ? 'true' : 'false');
+      if (patrolStopSaving && id === (patrolStopSavingStatus === 'visited' ? 'btn-depart' : 'btn-skip')) {
+        button.textContent = '保存中...';
+      } else if (patrolEnding && id === 'btn-end') {
+        button.textContent = '終了を保存中...';
+      } else {
+        button.textContent = defaultLabel;
       }
-    }
+    });
   }
 
   function renderPatrol(container) {
@@ -2269,6 +2440,11 @@ const App = (() => {
     const { stops, currentIdx } = patrolState;
     const current = stops[currentIdx];
     if (!current) { endPatrol(); return; }
+    if (current.status === 'planned') {
+      current.status = 'visiting';
+      current.arrivalTime = current.arrivalTime || new Date().toISOString();
+      Storage.saveCurrentRoute(patrolState).catch(error => console.warn('arrival save failed:', error));
+    }
     const mapsUrl = getStoreMapsUrl(current);
     const remainingCount = Math.max(0, stops.length - currentIdx - 1);
     const doneCount = stops.filter(s => s.status === 'visited').length;
@@ -2337,44 +2513,11 @@ const App = (() => {
     startPatrolTimer();
     loadPatrolStoreContext(current);
 
-    // イベント（UIを即更新、API同期はバックグラウンド）
-    document.getElementById('btn-depart')?.addEventListener('click', () => {
-      current.status = 'visited';
-      // バックグラウンドでAPI同期
-      syncWrite(API.updateStop({
-        route_id: patrolState.routeId,
-        store_id: current.store_id,
-        status: 'visited',
-        purchase_amount: current.purchaseAmount,
-        purchase_items: current.purchaseItems
-      }), '訪問状態');
-      patrolState.currentIdx++;
-      Storage.saveCurrentRoute(patrolState);
-      if (patrolState.currentIdx >= stops.length) {
-        endPatrol();
-      } else {
-        Router.navigate('patrol');
-      }
-    });
-
-    document.getElementById('btn-skip')?.addEventListener('click', () => {
-      current.status = 'skipped';
-      // バックグラウンドでAPI同期
-      syncWrite(API.updateStop({
-        route_id: patrolState.routeId,
-        store_id: current.store_id,
-        status: 'skipped'
-      }), 'スキップ状態');
-      patrolState.currentIdx++;
-      Storage.saveCurrentRoute(patrolState);
-      if (patrolState.currentIdx >= stops.length) {
-        endPatrol();
-      } else {
-        Router.navigate('patrol');
-      }
-    });
+    document.getElementById('btn-depart')?.addEventListener('click', () => completeCurrentStop_('visited'));
+    document.getElementById('btn-skip')?.addEventListener('click', () => completeCurrentStop_('skipped'));
 
     document.getElementById('btn-end')?.addEventListener('click', () => endPatrol());
+    updatePatrolStopControls_();
 
     document.getElementById('btn-add-inventory-current')?.addEventListener('click', () => {
       showInventoryPurchaseModal(current, {
@@ -2423,6 +2566,56 @@ const App = (() => {
     document.getElementById('btn-add-memo')?.addEventListener('click', () => showStoreMemoModal(current));
   }
 
+  async function completeCurrentStop_(status) {
+    if (!patrolState || patrolEnding || patrolStopSaving) return;
+    const current = patrolState.stops[patrolState.currentIdx];
+    if (!current) return;
+    const previous = {
+      status: current.status,
+      arrivalTime: current.arrivalTime,
+      departureTime: current.departureTime,
+      currentIdx: patrolState.currentIdx,
+    };
+    patrolStopSaving = true;
+    patrolStopSavingStatus = status;
+    updatePatrolStopControls_();
+
+    const nowIso = new Date().toISOString();
+    current.status = status;
+    current.arrivalTime = current.arrivalTime || nowIso;
+    current.departureTime = nowIso;
+    try {
+      // 最終店舗も含め、GASへの保存完了を確認してから次へ進む。
+      await API.updateStop({
+        route_id: patrolState.routeId,
+        store_id: current.store_id,
+        status,
+        arrival_time: current.arrivalTime,
+        departure_time: current.departureTime,
+        purchase_amount: current.purchaseAmount,
+        purchase_items: current.purchaseItems,
+      }, { queueOnFailure: false });
+      patrolState.currentIdx += 1;
+      await Storage.saveCurrentRoute(patrolState);
+      if (patrolState.currentIdx >= patrolState.stops.length) {
+        await endPatrol({ allowWhileStopSaving: true });
+      } else {
+        Router.navigate('patrol');
+      }
+    } catch (error) {
+      current.status = previous.status;
+      current.arrivalTime = previous.arrivalTime;
+      current.departureTime = previous.departureTime;
+      patrolState.currentIdx = previous.currentIdx;
+      await Storage.saveCurrentRoute(patrolState).catch(() => {});
+      toast(`店舗の保存に失敗したため次へ進みません: ${error.message}`, 5000);
+    } finally {
+      patrolStopSaving = false;
+      patrolStopSavingStatus = null;
+      updatePatrolStopControls_();
+    }
+  }
+
   function startPatrolTimer() {
     if (patrolTimerInterval) clearInterval(patrolTimerInterval);
     const startTime = patrolState?.startTime || Date.now();
@@ -2439,9 +2632,10 @@ const App = (() => {
     patrolTimerInterval = setInterval(updateTimer, 1000);
   }
 
-  async function endPatrol() {
-    if (patrolEnding || !patrolState) return;
+  async function endPatrol({ allowWhileStopSaving = false } = {}) {
+    if (patrolEnding || !patrolState || (patrolStopSaving && !allowWhileStopSaving)) return;
     patrolEnding = true;
+    updatePatrolStopControls_();
     if (patrolTimerInterval) { clearInterval(patrolTimerInterval); patrolTimerInterval = null; }
     try {
       const summary = { ...patrolState };
@@ -2462,10 +2656,13 @@ const App = (() => {
         patrolState.currentIdx = Math.max(0, patrolState.stops.length - 1);
         await Storage.saveCurrentRoute(patrolState);
         Router.navigate('patrol');
+      } else if (patrolState) {
+        startPatrolTimer();
       }
       toast(`巡回終了を保存できませんでした: ${error.message}`, 5000);
     } finally {
       patrolEnding = false;
+      updatePatrolStopControls_();
     }
   }
 
@@ -2507,7 +2704,7 @@ const App = (() => {
 
     patrolState = {
       routeId: route.route_id,
-      startTime: route.date ? new Date(route.date).getTime() : Date.now(),
+      startTime: parseServerTimestamp_(route.start_time || route.started_at || route.date) || Date.now(),
       stops: reconstructed,
       currentIdx,
     };
@@ -2534,9 +2731,22 @@ const App = (() => {
 
     overlay.querySelector('#modal-cancel').addEventListener('click', () => overlay.remove());
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-    overlay.querySelector('#modal-submit').addEventListener('click', () => {
-      onSubmit(overlay);
-      overlay.remove();
+    overlay.querySelector('#modal-submit').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = '保存中...';
+      try {
+        const result = await onSubmit(overlay);
+        if (result !== false) overlay.remove();
+      } catch (error) {
+        toast(`保存できませんでした: ${error.message}`, 5000);
+      } finally {
+        if (button.isConnected) {
+          button.disabled = false;
+          button.textContent = originalText;
+        }
+      }
     });
   }
 
@@ -2689,8 +2899,33 @@ const App = (() => {
   }
 
   function today_() {
-    const d = new Date();
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    return formatJstDate_(new Date());
+  }
+
+  function formatJstDate_(date) {
+    const parts = new Intl.DateTimeFormat('ja-JP', {
+      timeZone: 'Asia/Tokyo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+  }
+
+  function parseServerTimestamp_(value) {
+    if (!value) return 0;
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const text = String(value).trim();
+    const jstDateTime = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})$/);
+    const normalized = jstDateTime
+      ? `${jstDateTime[1]}T${jstDateTime[2]}+09:00`
+      : /^\d{4}-\d{2}-\d{2}$/.test(text)
+        ? `${text}T00:00:00+09:00`
+        : text;
+    const timestamp = Date.parse(normalized);
+    return Number.isFinite(timestamp) ? timestamp : 0;
   }
 
   function clamp_(value, min, max) {
@@ -3047,8 +3282,7 @@ const App = (() => {
 
     // バックグラウンドでAPIを取得して差し替え
     try {
-      const d = new Date();
-      const toStr = d.toISOString().slice(0, 10);
+      const toStr = today_();
       const from = '2026-04-21'; // アプリで店舗記録を開始した日
 
       const analyticsData = await API.getAnalyticsData({ from, to: toStr, limit: 100 });
@@ -3500,10 +3734,17 @@ const App = (() => {
 
   function invalidateHistoryApiCache() {
     historyApiCache = null;
+    historyCache = [];
+    Object.keys(stopsCacheByRouteId).forEach(routeId => delete stopsCacheByRouteId[routeId]);
     analyticsCache = null; // 履歴更新は分析の集計にも影響するため一緒に無効化
+    mapVisitInfoByStoreId = new Map();
+    mapVisitInfoLoaded = false;
+    mapVisitInfoFetchedAt = 0;
     // IndexedDB キャッシュも無効化
     Storage.clearViewCache('history').catch(() => {});
     Storage.clearViewCache('analytics').catch(() => {});
+    Storage.clearViewCache(MAP_VISIT_INFO_CACHE_ID).catch(() => {});
+    Storage.clearViewCache(RECOMMENDATION_CACHE_ID).catch(() => {});
   }
 
   function isValidRouteDate_(dateText) {
@@ -3650,8 +3891,10 @@ const App = (() => {
       const btn = document.getElementById('btn-import-profit');
       if (btn) { btn.textContent = '更新中...'; btn.disabled = true; }
       try {
-        await API.get('importRouteProfit');
-        invalidateHistoryCache();
+        await API.importRouteProfit();
+        invalidateHistoryApiCache();
+        const loadResult = await loadData();
+        if (loadResult?.authFailed) throw new Error('接続コードを確認してください');
         toast('利益データを更新しました');
       } catch (e) {
         toast('更新に失敗しました');
@@ -4120,7 +4363,7 @@ const App = (() => {
   function normalizeRouteDate_(d) {
     if (!d) return '';
     if (d instanceof Date) {
-      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      return formatJstDate_(d);
     }
     const s = String(d).trim();
     const m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
@@ -4619,6 +4862,10 @@ const App = (() => {
         result.textContent = '新しい接続コードを入力してください';
         return;
       }
+      if (value.length < 24 || value.length > 512 || /\s/.test(value)) {
+        result.textContent = '接続コードの形式が正しくありません';
+        return;
+      }
       API.setToken(value);
       input.value = 'configured';
       result.textContent = '接続確認中...';
@@ -4636,12 +4883,25 @@ const App = (() => {
 
     document.getElementById('btn-save-url')?.addEventListener('click', async () => {
       const v = document.getElementById('set-url').value.trim();
-      API.setUrl(v);
-      await loadData();
-      registerViews();
-      setupNav();
-      toast('API URLを保存しました');
-      Router.navigate('home');
+      const oldUrl = API.getUrl();
+      if (!API.isValidUrl(v)) {
+        toast('Google Apps Scriptの正しいURLを入力してください', 5000);
+        return;
+      }
+      try {
+        API.setUrl(v);
+        const ping = await API.ping();
+        if (!ping?.pong) throw new Error('接続先を確認できませんでした');
+        const loadResult = await loadData();
+        if (loadResult?.authFailed) throw new Error('接続コードを確認してください');
+        toast('API URLを確認して保存しました');
+        Router.navigate('home');
+      } catch (error) {
+        const restoreUrl = API.isValidUrl(oldUrl) ? oldUrl : API.getCanonicalUrl();
+        API.setUrl(restoreUrl);
+        document.getElementById('set-url').value = restoreUrl;
+        toast(`API URLを保存できませんでした: ${error.message}`, 5000);
+      }
     });
 
     document.getElementById('btn-save-home')?.addEventListener('click', async () => {

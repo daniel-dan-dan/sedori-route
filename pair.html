@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#087f8c">
   <title>店舗アプリを接続</title>
-  <link rel="stylesheet" href="style.css?v=187">
+  <link rel="stylesheet" href="style.css?v=191">
 </head>
 <body class="pairing-page">
   <main class="pairing-main">
@@ -23,8 +23,9 @@
     </p>
   </main>
   <script>
-    (() => {
+    (async () => {
       const key = 'daniel_api_auth_token';
+      const apiUrl = 'https://script.google.com/macros/s/AKfycbwYfwDG7Kqplk2oVeX7kF_gsAKTlK087ToE4LGp5R7PglTFMARP2lrA6ZV9m3MD0LEs/exec';
       const status = document.getElementById('pair-status');
       const actions = document.getElementById('pair-actions');
       const help = document.getElementById('pair-help');
@@ -32,18 +33,32 @@
       const params = new URLSearchParams(location.hash.slice(1));
       const token = String(params.get('token') || '').trim();
 
-      if (token.length < 24) {
+      if (token.length < 24 || token.length > 512 || /\s/.test(token)) {
         status.textContent = '接続コードが見つかりません。店舗アプリ専用のQRコードを読み取ってください。';
         status.classList.add('error');
         return;
       }
 
-      localStorage.setItem(key, token);
-      history.replaceState(null, '', location.pathname);
-      status.textContent = 'この端末を店舗アプリへ接続しました。';
-      status.classList.add('success');
-      actions.hidden = false;
-      help.hidden = false;
+      try {
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'getConfig', auth_token: token }),
+          redirect: 'follow',
+        });
+        const payload = await response.json();
+        if (!payload?.success) throw new Error(payload?.error || '接続できませんでした');
+        localStorage.setItem(key, token);
+        history.replaceState(null, '', location.pathname);
+        status.textContent = '接続コードを確認し、この端末を店舗アプリへ接続しました。';
+        status.classList.add('success');
+        actions.hidden = false;
+        help.hidden = false;
+      } catch (_error) {
+        status.textContent = '接続コードを確認できませんでした。新しいQRコードを読み取ってください。';
+        status.classList.add('error');
+        return;
+      }
 
       function legacyCopy(value) {
         const field = document.createElement('textarea');

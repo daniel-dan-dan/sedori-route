@@ -6,6 +6,7 @@ const Storage = (() => {
   const DB_NAME = 'sedori-route';
   const DB_VERSION = 2;
   let db = null;
+  let syncInFlight = null;
 
   function open() {
     return new Promise((resolve, reject) => {
@@ -155,30 +156,49 @@ const Storage = (() => {
 
   // オンライン復帰時に同期
   async function syncPending() {
-    const actions = await getPendingActions();
-    if (actions.length === 0) return 0;
-    let synced = 0;
-    for (const act of actions) {
-      try {
-        await API.post(act.action, {
-          ...(act.body || {}),
-          operation_id: act.operation_id || act.body?.operation_id
-        }, { queueOnFailure: false });
-        await del('pendingActions', act._queueKey);
-        synced++;
-      } catch (e) {
-        console.warn('Sync failed:', e);
-        const attempts = Number(act.attempts || 0) + 1;
-        await putWithKey('pendingActions', act._queueKey, {
-          ...act,
-          _queueKey: undefined,
-          attempts,
-          last_error: String(e.message || e),
-          last_attempt_at: Date.now()
-        });
+    if (syncInFlight) return syncInFlight;
+    syncInFlight = (async () => {
+      if (!API.hasToken() || (typeof navigator !== 'undefined' && !navigator.onLine)) return 0;
+      const actions = await getPendingActions();
+      if (actions.length === 0) return 0;
+      let synced = 0;
+      for (const act of actions) {
+        try {
+          await API.post(act.action, {
+            ...(act.body || {}),
+            operation_id: act.operation_id || act.body?.operation_id
+          }, { queueOnFailure: false });
+          await del('pendingActions', act._queueKey);
+          synced++;
+        } catch (e) {
+          console.warn('Sync failed:', e);
+          const attempts = Number(act.attempts || 0) + 1;
+          await putWithKey('pendingActions', act._queueKey, {
+            ...act,
+            _queueKey: undefined,
+            attempts,
+            last_error: String(e.message || e),
+            last_attempt_at: Date.now()
+          });
+          // 順序依存の書き込みを追い越さない。残りは次回の起動・オンライン復帰時に再試行する。
+          break;
+        }
       }
+      return synced;
+    })();
+    try {
+      return await syncInFlight;
+    } finally {
+      syncInFlight = null;
     }
-    return synced;
+  }
+
+  async function clearRemoteCaches() {
+    await Promise.all([
+      clear('stores'),
+      clear('config'),
+      clear('viewCache'),
+    ]);
   }
 
   // 店舗キャッシュ
@@ -246,6 +266,6 @@ const Storage = (() => {
     cacheConfig, getCachedConfig,
     saveCurrentRoute, getCurrentRoute, clearCurrentRoute,
     savePlannedRoute, getPlannedRoute, clearPlannedRoute,
-    saveViewCache, getViewCache, clearViewCache,
+    saveViewCache, getViewCache, clearViewCache, clearRemoteCaches,
   };
 })();

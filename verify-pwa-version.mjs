@@ -1,10 +1,12 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sw = readFileSync(join(here, 'sw.js'), 'utf8');
 const html = readFileSync(join(here, 'index.html'), 'utf8');
+const pair = readFileSync(join(here, 'pair.html'), 'utf8');
+const app = readFileSync(join(here, 'app.js'), 'utf8');
 
 const cacheMatch = sw.match(/CACHE_NAME\s*=\s*['"][^'"]*?(v\d+)['"]/);
 const badgeMatch =
@@ -15,8 +17,10 @@ const cacheVersion = cacheMatch && cacheMatch[1];
 const badgeVersion = badgeMatch && badgeMatch[1];
 const errors = [];
 
-const cacheBustVersions = [...html.matchAll(/(?:style\.css|quiz\.js|app\.js)\?v=(\d+)/g)]
+const cacheBustVersions = [...html.matchAll(/(?:vendor\/leaflet\/leaflet\.(?:css|js)|style\.css|quiz\.js|app\.js)\?v=(\d+)/g)]
   .map((match) => `v${match[1]}`);
+const pairStyleVersion = (pair.match(/style\.css\?v=(\d+)/) || [])[1];
+const assetVersion = (app.match(/ASSET_VER\s*=\s*['"](v\d+)['"]/) || [])[1];
 
 if (!cacheVersion) errors.push('sw.js の CACHE_NAME から版数を読み取れません。');
 if (!badgeVersion) errors.push('index.html の app-version-badge から版数を読み取れません。');
@@ -35,9 +39,15 @@ if (!/CACHE_PREFIX\s*=\s*['"]sedori-route-['"]/.test(sw)) {
 if (!/\.filter\(k\s*=>\s*k\.startsWith\(CACHE_PREFIX\)\s*&&\s*k\s*!==\s*CACHE_NAME\)/.test(sw)) {
   errors.push('旧cache削除がsedori-route専用prefixへ限定されていません。');
 }
-if (cacheBustVersions.length !== 3 || cacheBustVersions.some((version) => version !== badgeVersion)) {
+if (cacheBustVersions.length !== 5 || cacheBustVersions.some((version) => version !== badgeVersion)) {
   errors.push(`CSS/JSのcache bustが画面版数(${badgeVersion})と一致していません。`);
 }
+if (`v${pairStyleVersion}` !== badgeVersion) errors.push('pair.html のcache bustが画面版数と一致していません。');
+if (assetVersion !== badgeVersion) errors.push('チェーン画像のcache bustが画面版数と一致していません。');
+
+const chainIcons = readdirSync(join(here, 'icons', 'chains')).filter(name => name.endsWith('.png'));
+const missingChainIcons = chainIcons.filter(name => !sw.includes(`./icons/chains/${name}`));
+if (missingChainIcons.length) errors.push(`Service Worker未登録のチェーン画像: ${missingChainIcons.join(', ')}`);
 
 if (errors.length) {
   console.error('[FAIL] PWA version check');

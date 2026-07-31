@@ -18,18 +18,36 @@ const API = (() => {
     localStorage.setItem('gas_api_url', CANONICAL_GAS_API_URL);
     localStorage.setItem(API_URL_MIGRATION_KEY, '1');
   }
-  let baseUrl = normalizeUrl_(localStorage.getItem('gas_api_url') || CANONICAL_GAS_API_URL);
+  const storedBaseUrl = normalizeUrl_(localStorage.getItem('gas_api_url') || CANONICAL_GAS_API_URL);
+  let baseUrl = isValidUrl(storedBaseUrl) ? storedBaseUrl : CANONICAL_GAS_API_URL;
+  if (baseUrl !== storedBaseUrl) localStorage.setItem('gas_api_url', baseUrl);
 
   function normalizeUrl_(url) {
     return String(url || '').trim().replace(/\/+$/, '');
   }
 
+  function isValidUrl(url) {
+    try {
+      const parsed = new URL(normalizeUrl_(url));
+      return parsed.protocol === 'https:'
+        && parsed.hostname === 'script.google.com'
+        && /^\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(parsed.pathname);
+    } catch (_error) {
+      return false;
+    }
+  }
+
   function setUrl(url) {
-    baseUrl = normalizeUrl_(url);
+    const normalized = normalizeUrl_(url);
+    if (!isValidUrl(normalized)) {
+      throw apiError_('Google Apps Scriptの正しいURLを入力してください', 'INVALID_URL');
+    }
+    baseUrl = normalized;
     localStorage.setItem('gas_api_url', baseUrl);
   }
 
   function getUrl() { return baseUrl; }
+  function getCanonicalUrl() { return CANONICAL_GAS_API_URL; }
   function getToken() { return String(localStorage.getItem(AUTH_TOKEN_KEY) || '').trim(); }
   function hasToken() { return Boolean(getToken()); }
   function setToken(value) {
@@ -67,6 +85,9 @@ const API = (() => {
       const code = message.startsWith('UNAUTHORIZED') ? 'UNAUTHORIZED'
         : message.startsWith('BUSY') ? 'BUSY'
           : 'API_ERROR';
+      if (code === 'UNAUTHORIZED') {
+        window.dispatchEvent(new CustomEvent('api-auth-error', { detail: { action } }));
+      }
       throw apiError_(message.replace(/^[A-Z_]+:\s*/, ''), code);
     }
     return data.data;
@@ -145,7 +166,7 @@ const API = (() => {
   }
 
   return {
-    setUrl, getUrl, setToken, getToken, hasToken, createOperationId, get, post,
+    setUrl, getUrl, getCanonicalUrl, isValidUrl, setToken, getToken, hasToken, createOperationId, get, post,
     ping:             ()          => request_('ping', {}, { queueOnFailure: false }),
     getStores:        ()          => get('getStores'),
     getConfig:        ()          => get('getConfig'),
@@ -160,10 +181,11 @@ const API = (() => {
     updateStore:      (b)         => post('updateStore', b),
     deleteStore:      (b)         => post('deleteStore', b),
     startRoute:       (b)         => post('startRoute', b, { queueOnFailure: false }),
-    updateStop:       (b)         => post('updateStop', b),
+    updateStop:       (b, o = {}) => post('updateStop', b, o),
     endRoute:         (b)         => post('endRoute', b, { queueOnFailure: false }),
     addStopToRoute:   (b)         => post('addStopToRoute', b),
     addPurchase:      (b)         => post('addPurchase', b),
+    addMemo:          (b)         => post('addMemo', b),
     addInventoryPurchase:(b)      => post('addInventoryPurchase', b),
     getInventoryPurchases:(p={})  => get('getInventoryPurchases', p),
     getAnalyticsData:  (p={})     => get('getAnalyticsData', p),
@@ -174,5 +196,6 @@ const API = (() => {
     updateRouteDate:  (b)         => post('updateRouteDate', b, { queueOnFailure: false }),
     deleteRoute:      (b)         => post('deleteRoute', b, { queueOnFailure: false }),
     clearHistory:     ()          => post('clearHistory', {}, { queueOnFailure: false }),
+    importRouteProfit:()          => post('importRouteProfit', {}, { queueOnFailure: false }),
   };
 })();

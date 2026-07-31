@@ -3129,6 +3129,16 @@ body {
   color: var(--danger);
 }
 
+.maps-segment-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.maps-segment-actions .btn {
+  min-height: 44px;
+}
+
 @media (max-width: 380px) {
   .nav-item {
     min-width: 50px;

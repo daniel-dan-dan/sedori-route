@@ -128,16 +128,39 @@ const RouteOptimizer = (() => {
     };
   }
 
-  // Google Maps ナビURL生成
-  function generateMapsUrl(home, orderedStores) {
+  // Google Maps URLはモバイルブラウザの上限（経由地3件）に合わせ、4店舗ずつ分割する。
+  const MAPS_MAX_STOPS_PER_SEGMENT = 4;
+
+  function buildMapsUrl_(orderedStores) {
     if (orderedStores.length === 0) return '';
-    // originを省略→Google Mapsが現在地を自動使用
+    // originを省略し、各区間を開いた時点の現在地を出発地にする。
     const lastStore = orderedStores[orderedStores.length - 1];
-    const dest = `${lastStore.lat},${lastStore.lng}`;
-    const waypoints = orderedStores.slice(0, -1).map(s => `${s.lat},${s.lng}`).join('|');
+    const dest = encodeURIComponent(`${lastStore.lat},${lastStore.lng}`);
+    const waypoints = orderedStores
+      .slice(0, -1)
+      .map(s => `${s.lat},${s.lng}`)
+      .join('|');
     let url = `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`;
-    if (waypoints) url += `&waypoints=${waypoints}`;
+    if (waypoints) url += `&waypoints=${encodeURIComponent(waypoints)}`;
     return url;
+  }
+
+  function generateMapsSegments(home, orderedStores) {
+    const segments = [];
+    for (let start = 0; start < orderedStores.length; start += MAPS_MAX_STOPS_PER_SEGMENT) {
+      const segmentStores = orderedStores.slice(start, start + MAPS_MAX_STOPS_PER_SEGMENT);
+      segments.push({
+        url: buildMapsUrl_(segmentStores),
+        startIndex: start,
+        endIndex: start + segmentStores.length - 1,
+        stores: segmentStores,
+      });
+    }
+    return segments;
+  }
+
+  function generateMapsUrl(home, orderedStores) {
+    return generateMapsSegments(home, orderedStores)[0]?.url || '';
   }
 
   // 選択順ルートの距離・時間を計算（最適化なし、選択順そのまま）
@@ -170,5 +193,5 @@ const RouteOptimizer = (() => {
     };
   }
 
-  return { optimize, calcSelectionOrder, generateMapsUrl, haversine };
+  return { optimize, calcSelectionOrder, generateMapsUrl, generateMapsSegments, haversine };
 })();
