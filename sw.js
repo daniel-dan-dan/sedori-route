@@ -1,18 +1,18 @@
 const CACHE_PREFIX = 'sedori-route-';
-const CACHE_NAME = 'sedori-route-v192';
+const CACHE_NAME = 'sedori-route-v193';
 const ASSETS = [
   './',
   './index.html',
   './pair.html',
-  './style.css',
-  './app.js',
-  './router.js',
-  './api.js',
-  './route-optimizer.js',
-  './storage.js',
-  './quiz.js',
-  './vendor/leaflet/leaflet.css',
-  './vendor/leaflet/leaflet.js',
+  './style.css?v=193',
+  './app.js?v=193',
+  './router.js?v=193',
+  './api.js?v=193',
+  './route-optimizer.js?v=193',
+  './storage.js?v=193',
+  './quiz.js?v=193',
+  './vendor/leaflet/leaflet.css?v=193',
+  './vendor/leaflet/leaflet.js?v=193',
   './vendor/leaflet/images/layers-2x.png',
   './vendor/leaflet/images/layers.png',
   './vendor/leaflet/images/marker-icon-2x.png',

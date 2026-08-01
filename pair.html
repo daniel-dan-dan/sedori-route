@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#087f8c">
   <title>店舗アプリを接続</title>
-  <link rel="stylesheet" href="style.css?v=192">
+  <link rel="stylesheet" href="style.css?v=193">
 </head>
 <body class="pairing-page">
   <main class="pairing-main">
@@ -14,6 +14,7 @@
     </div>
     <h1>店舗アプリを接続</h1>
     <p id="pair-status" class="pairing-status" role="status" aria-live="polite">接続コードを確認しています...</p>
+    <button id="pair-retry" class="btn btn-primary btn-block" type="button" hidden>もう一度接続</button>
     <div id="pair-actions" class="pairing-actions" hidden>
       <a class="btn btn-primary btn-block" href="./#settings">店舗アプリを開く</a>
       <button id="pair-copy" class="btn btn-outline btn-block" type="button">接続コードをコピー</button>
@@ -24,14 +25,20 @@
   </main>
   <script>
     (async () => {
-      const key = 'daniel_api_auth_token';
+      const pairingKey = 'daniel_api_auth_token';
+      const deviceTokenKey = 'daniel_route_device_auth_v1';
+      const deviceIdKey = 'daniel_route_device_id_v1';
+      const pendingTokenKey = 'daniel_route_pending_device_auth_v1';
       const apiUrl = 'https://script.google.com/macros/s/AKfycbwYfwDG7Kqplk2oVeX7kF_gsAKTlK087ToE4LGp5R7PglTFMARP2lrA6ZV9m3MD0LEs/exec';
       const status = document.getElementById('pair-status');
+      const retry = document.getElementById('pair-retry');
       const actions = document.getElementById('pair-actions');
       const help = document.getElementById('pair-help');
       const copy = document.getElementById('pair-copy');
       const params = new URLSearchParams(location.hash.slice(1));
       const token = String(params.get('token') || '').trim();
+      // 成否にかかわらず、接続コードをアドレス欄・履歴へ残さない。
+      history.replaceState(null, '', location.pathname);
 
       if (token.length < 24 || token.length > 512 || /\s/.test(token)) {
         status.textContent = '接続コードが見つかりません。店舗アプリ専用のQRコードを読み取ってください。';
@@ -39,26 +46,81 @@
         return;
       }
 
-      try {
-        const response = await fetch(apiUrl, {
+      function randomBase64Url(byteLength) {
+        if (!globalThis.crypto?.getRandomValues) throw new Error('secure_random_unavailable');
+        const bytes = new Uint8Array(byteLength);
+        globalThis.crypto.getRandomValues(bytes);
+        let binary = '';
+        bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+        return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+      }
+
+      function getOrCreate(key, pattern, prefix, byteLength) {
+        const existing = String(localStorage.getItem(key) || '').trim();
+        if (pattern.test(existing)) return existing;
+        const created = `${prefix}${randomBase64Url(byteLength)}`;
+        localStorage.setItem(key, created);
+        return created;
+      }
+
+      async function fetchWithTimeout(url, options, timeoutMs = 15000) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          return await fetch(url, { ...options, signal: controller.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      async function attemptPair() {
+        retry.hidden = true;
+        status.textContent = 'この端末を安全に接続しています...';
+        status.classList.remove('success', 'error');
+        try {
+        const deviceId = getOrCreate(deviceIdKey, /^[A-Za-z0-9._~-]{16,128}$/, 'route_', 24);
+        const deviceToken = getOrCreate(pendingTokenKey, /^[A-Za-z0-9._~-]{32,256}$/, 'route_dev_', 32);
+        const response = await fetchWithTimeout(apiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'getConfig', auth_token: token }),
+          body: JSON.stringify({
+            action: 'registerRouteDevice',
+            auth_token: token,
+            device_id: deviceId,
+            device_token: deviceToken,
+          }),
           redirect: 'follow',
-        });
+        }, 15000);
         const payload = await response.json();
-        if (!payload?.success) throw new Error(payload?.error || '接続できませんでした');
-        localStorage.setItem(key, token);
-        history.replaceState(null, '', location.pathname);
-        status.textContent = '接続コードを確認し、この端末を店舗アプリへ接続しました。';
+        if (!payload?.success || !payload?.data?.registered || payload.data.device_id !== deviceId) {
+          throw new Error(payload?.error || '接続できませんでした');
+        }
+        const previousToken = String(localStorage.getItem(deviceTokenKey) || '');
+        try {
+          localStorage.setItem(deviceTokenKey, deviceToken);
+          if (localStorage.getItem(deviceTokenKey) !== deviceToken) throw new Error('device_storage_failed');
+        } catch (error) {
+          if (previousToken) localStorage.setItem(deviceTokenKey, previousToken);
+          else localStorage.removeItem(deviceTokenKey);
+          throw error;
+        }
+        localStorage.removeItem(pendingTokenKey);
+        if (String(localStorage.getItem('mercari_device_auth_v1') || '').trim()) {
+          localStorage.removeItem(pairingKey);
+        }
+        status.textContent = '接続コードを確認し、この端末専用の接続情報を保存しました。今後の更新では再入力不要です。';
         status.classList.add('success');
         actions.hidden = false;
         help.hidden = false;
-      } catch (_error) {
-        status.textContent = '接続コードを確認できませんでした。新しいQRコードを読み取ってください。';
+      } catch (error) {
+        console.warn('端末接続に失敗しました:', error);
+        status.textContent = '接続を確認できませんでした。接続情報は消さず、もう一度試せます。';
         status.classList.add('error');
-        return;
+        retry.hidden = false;
       }
+      }
+      retry.addEventListener('click', attemptPair);
+      await attemptPair();
 
       function legacyCopy(value) {
         const field = document.createElement('textarea');

@@ -5,7 +5,10 @@
 const API = (() => {
   const CANONICAL_GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwYfwDG7Kqplk2oVeX7kF_gsAKTlK087ToE4LGp5R7PglTFMARP2lrA6ZV9m3MD0LEs/exec';
   const API_URL_MIGRATION_KEY = 'gas_api_url_migrated_v185';
-  const AUTH_TOKEN_KEY = 'daniel_api_auth_token';
+  const PAIRING_CODE_KEY = 'daniel_api_auth_token';
+  const DEVICE_TOKEN_KEY = 'daniel_route_device_auth_v1';
+  const DEVICE_ID_KEY = 'daniel_route_device_id_v1';
+  const PENDING_DEVICE_TOKEN_KEY = 'daniel_route_pending_device_auth_v1';
   const DEFAULT_TIMEOUT_MS = 25000;
   const READ_ACTIONS = new Set([
     'getStores', 'getConfig', 'getRouteHistory', 'getRouteStops',
@@ -48,12 +51,122 @@ const API = (() => {
 
   function getUrl() { return baseUrl; }
   function getCanonicalUrl() { return CANONICAL_GAS_API_URL; }
-  function getToken() { return String(localStorage.getItem(AUTH_TOKEN_KEY) || '').trim(); }
+  function getPairingCode_() { return String(localStorage.getItem(PAIRING_CODE_KEY) || '').trim(); }
+  function getDeviceToken_() { return String(localStorage.getItem(DEVICE_TOKEN_KEY) || '').trim(); }
+  function getToken() { return getDeviceToken_() || getPairingCode_(); }
   function hasToken() { return Boolean(getToken()); }
+  function hasDeviceCredential() { return Boolean(getDeviceToken_()); }
   function setToken(value) {
     const token = String(value || '').trim();
-    if (token) localStorage.setItem(AUTH_TOKEN_KEY, token);
-    else localStorage.removeItem(AUTH_TOKEN_KEY);
+    if (token) localStorage.setItem(PAIRING_CODE_KEY, token);
+    else localStorage.removeItem(PAIRING_CODE_KEY);
+  }
+
+  function randomBase64Url_(byteLength) {
+    if (!globalThis.crypto?.getRandomValues) {
+      throw apiError_('この端末では安全な接続情報を作成できません', 'SECURE_RANDOM_UNAVAILABLE');
+    }
+    const bytes = new Uint8Array(byteLength);
+    globalThis.crypto.getRandomValues(bytes);
+    let binary = '';
+    bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  }
+
+  function getOrCreateDeviceId_() {
+    const existing = String(localStorage.getItem(DEVICE_ID_KEY) || '').trim();
+    if (/^[A-Za-z0-9._~-]{16,128}$/.test(existing)) return existing;
+    const created = `route_${randomBase64Url_(24)}`;
+    localStorage.setItem(DEVICE_ID_KEY, created);
+    return created;
+  }
+
+  function getOrCreatePendingDeviceToken_() {
+    const existing = String(localStorage.getItem(PENDING_DEVICE_TOKEN_KEY) || '').trim();
+    if (/^[A-Za-z0-9._~-]{32,256}$/.test(existing)) return existing;
+    const created = `route_dev_${randomBase64Url_(32)}`;
+    localStorage.setItem(PENDING_DEVICE_TOKEN_KEY, created);
+    return created;
+  }
+
+  async function registerDevice_(pairingCode, deviceId, deviceToken) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    try {
+      const response = await fetch(baseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'registerRouteDevice',
+          auth_token: pairingCode,
+          device_id: deviceId,
+          device_token: deviceToken,
+        }),
+        redirect: 'follow',
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch (error) {
+        throw apiError_('端末の接続結果を確認できませんでした', 'UNKNOWN_RESPONSE', error);
+      }
+      if (!payload?.success || !payload?.data?.registered || payload.data.device_id !== deviceId) {
+        const message = String(payload?.error || '端末を接続できませんでした');
+        const code = message.startsWith('UNAUTHORIZED') ? 'UNAUTHORIZED' : 'DEVICE_REGISTRATION_FAILED';
+        throw apiError_(message.replace(/^[A-Z_]+:\s*/, ''), code);
+      }
+      return payload.data;
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw apiError_('端末の接続確認がタイムアウトしました', 'TIMEOUT', error);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function pairDevice(pairingCode) {
+    const normalized = String(pairingCode || '').trim();
+    if (normalized.length < 24 || normalized.length > 512 || /\s/.test(normalized)) {
+      throw apiError_('接続コードの形式が正しくありません', 'INVALID_PAIRING_CODE');
+    }
+    const deviceId = getOrCreateDeviceId_();
+    const deviceToken = getOrCreatePendingDeviceToken_();
+    await registerDevice_(normalized, deviceId, deviceToken);
+    const previousToken = String(localStorage.getItem(DEVICE_TOKEN_KEY) || '');
+    try {
+      localStorage.setItem(DEVICE_TOKEN_KEY, deviceToken);
+      if (localStorage.getItem(DEVICE_TOKEN_KEY) !== deviceToken) {
+        throw apiError_('端末専用の接続情報を保存できませんでした', 'DEVICE_STORAGE_FAILED');
+      }
+    } catch (error) {
+      if (previousToken) localStorage.setItem(DEVICE_TOKEN_KEY, previousToken);
+      else localStorage.removeItem(DEVICE_TOKEN_KEY);
+      throw error;
+    }
+    localStorage.removeItem(PENDING_DEVICE_TOKEN_KEY);
+    // 両PWAの移行が揃った時だけ旧共有コードを消す。メルカリ未移行なら移行元を残す。
+    if (String(localStorage.getItem('mercari_device_auth_v1') || '').trim()) {
+      localStorage.removeItem(PAIRING_CODE_KEY);
+    }
+    return true;
+  }
+
+  async function ensureDeviceCredential() {
+    if (hasDeviceCredential()) return true;
+    const pairingCode = getPairingCode_();
+    if (!pairingCode) return false;
+    await pairDevice(pairingCode);
+    return true;
+  }
+
+  function clearDeviceCredential() {
+    localStorage.removeItem(DEVICE_TOKEN_KEY);
+    localStorage.removeItem(PENDING_DEVICE_TOKEN_KEY);
+    localStorage.removeItem(PAIRING_CODE_KEY);
   }
 
   function createOperationId(action = 'op') {
@@ -166,7 +279,9 @@ const API = (() => {
   }
 
   return {
-    setUrl, getUrl, getCanonicalUrl, isValidUrl, setToken, getToken, hasToken, createOperationId, get, post,
+    setUrl, getUrl, getCanonicalUrl, isValidUrl,
+    setToken, getToken, hasToken, hasDeviceCredential, pairDevice, ensureDeviceCredential, clearDeviceCredential,
+    createOperationId, get, post,
     ping:             ()          => request_('ping', {}, { queueOnFailure: false }),
     getStores:        ()          => get('getStores'),
     getConfig:        ()          => get('getConfig'),

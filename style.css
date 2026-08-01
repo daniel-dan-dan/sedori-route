@@ -1731,7 +1731,7 @@ a.stop-address:active { color: var(--primary); }
 }
 .form-input, .form-select, .form-textarea {
   width: 100%;
-  min-height: 42px;
+  min-height: 44px;
   padding: 10px 12px;
   background: var(--surface2);
   border: 1px solid var(--border);

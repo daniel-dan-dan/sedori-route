@@ -20,6 +20,7 @@ const App = (() => {
   let patrolStopSavingStatus = null;
   let authFailureHandling = false;
   let authFailureListenerReady = false;
+  let legacyCredentialRecoveryAttempted = false;
   let mapInstance = null;
   let mapCluster = null;
   let mapMarkers = new Map(); // store_id → L.marker（差分更新用）
@@ -89,7 +90,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v192';
+  const ASSET_VER = 'v193';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -520,6 +521,15 @@ const App = (() => {
       if (Router.getCurrentView() === 'home') refreshPlannedRouteOnHome_(true);
     });
 
+    if (API.hasToken() && !API.hasDeviceCredential()) {
+      try {
+        await API.ensureDeviceCredential();
+      } catch (error) {
+        // オフラインや一時的な通信失敗では保存済みコードを消さず、次回起動で再試行する。
+        console.warn('端末専用の接続情報へ自動移行できませんでした:', error);
+      }
+    }
+
     if (!API.hasToken()) {
       stores = normalizeStores(await Storage.getCachedStores());
       config = await Storage.getCachedConfig();
@@ -600,8 +610,8 @@ const App = (() => {
       await Storage.cacheConfig(config);
     } catch (e) {
       if (e?.code === 'UNAUTHORIZED' || e?.code === 'AUTH_TOKEN_REQUIRED') {
-        stores = [];
-        config = {};
+        stores = normalizeStores(await Storage.getCachedStores());
+        config = await Storage.getCachedConfig();
         return { fetchedFromApi: false, plannedRouteChanged: false, authFailed: true };
       }
       console.warn('API fetch failed, using cache:', e);
@@ -620,17 +630,21 @@ const App = (() => {
     if (authFailureHandling) return;
     authFailureHandling = true;
     try {
-      API.setToken('');
-      stores = [];
-      config = {};
-      historyCache = [];
-      historyApiCache = null;
-      analyticsCache = null;
-      mapVisitInfoByStoreId = new Map();
-      mapVisitInfoLoaded = false;
-      await Storage.clearRemoteCaches();
+      if (!legacyCredentialRecoveryAttempted && API.hasToken() && !API.hasDeviceCredential()) {
+        legacyCredentialRecoveryAttempted = true;
+        try {
+          if (await API.ensureDeviceCredential()) {
+            toast('この端末の接続を自動更新しました');
+            await loadData();
+            if (Router.getCurrentView() === 'settings') Router.navigate('home');
+            return;
+          }
+        } catch (error) {
+          console.warn('接続の自動更新に失敗しました:', error);
+        }
+      }
       if (Router.getCurrentView() !== 'settings') Router.navigate('settings');
-      toast('接続コードの有効期限が切れました。設定し直してください', 5000);
+      toast('接続を確認できません。保存内容は消さずに残しています', 5000);
     } finally {
       authFailureHandling = false;
     }
@@ -4811,10 +4825,10 @@ const App = (() => {
         <div class="card-title">端末接続コード</div>
         <div class="text-sm text-dim mb-8">この端末からだけ安全にデータを読み書きするためのコードです。</div>
         <div class="form-group">
-          <input type="password" class="form-input" id="set-auth-token" value="${API.hasToken() ? 'configured' : ''}" placeholder="接続コードを入力" autocomplete="off">
+          <input type="password" class="form-input" id="set-auth-token" value="" placeholder="${API.hasDeviceCredential() ? 'この端末は接続済みです' : '接続コードを入力'}" autocomplete="off">
         </div>
-        <button class="btn btn-primary btn-sm" id="btn-save-auth-token">保存して接続確認</button>
-        <div id="auth-token-result" class="text-sm mt-8">${API.hasToken() ? '設定済み' : '未設定'}</div>
+        <button class="btn btn-primary" id="btn-save-auth-token">保存して接続確認</button>
+        <div id="auth-token-result" class="text-sm mt-8">${API.hasDeviceCredential() ? '端末専用の接続情報を保存済み' : (API.hasToken() ? '接続の自動更新待ち' : '未設定')}</div>
       </div>
       <div class="card settings-card">
         <div class="card-title">API URL</div>
@@ -4907,7 +4921,11 @@ const App = (() => {
       const input = document.getElementById('set-auth-token');
       const result = document.getElementById('auth-token-result');
       const value = input.value.trim();
-      if (!value || value === 'configured') {
+      if (!value) {
+        if (API.hasDeviceCredential()) {
+          result.textContent = 'この端末は接続済みです';
+          return;
+        }
         result.textContent = '新しい接続コードを入力してください';
         return;
       }
@@ -4915,18 +4933,22 @@ const App = (() => {
         result.textContent = '接続コードの形式が正しくありません';
         return;
       }
-      API.setToken(value);
-      input.value = 'configured';
       result.textContent = '接続確認中...';
+      let paired = false;
       try {
+        await API.pairDevice(value);
+        paired = true;
+        input.value = '';
+        input.placeholder = 'この端末は接続済みです';
         await API.getConfig();
         await loadData();
         result.innerHTML = '<span style="color:var(--success)">接続OK</span>';
-        toast('接続コードを保存しました');
+        toast('この端末を接続しました');
       } catch (error) {
-        API.setToken('');
-        input.value = '';
-        result.textContent = `接続できません: ${error.message}`;
+        // 新しいコードの確認に失敗しても、以前の端末接続情報は上書き・削除しない。
+        result.textContent = paired
+          ? `端末の接続は保存しました。通信確認だけ再実行してください: ${error.message}`
+          : `接続できません: ${error.message}`;
       }
     });
 

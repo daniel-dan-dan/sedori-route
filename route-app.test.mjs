@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = name => readFileSync(join(here, name), 'utf8');
@@ -11,6 +12,7 @@ const app = read('app.js');
 const api = read('api.js');
 const storage = read('storage.js');
 const sw = read('sw.js');
+const pair = read('pair.html');
 const gas = readFileSync(join(here, '..', 'gas', 'Code.gs'), 'utf8');
 
 function functionSource(source, name, nextName) {
@@ -29,6 +31,32 @@ function createDeferred() {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+function createApiHarness({ initial = {}, fetchImpl } = {}) {
+  const values = new Map(Object.entries(initial));
+  const localStorage = {
+    getItem(key) { return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { values.set(key, String(value)); },
+    removeItem(key) { values.delete(key); },
+  };
+  const context = {
+    localStorage,
+    crypto: webcrypto,
+    btoa: value => Buffer.from(value, 'binary').toString('base64'),
+    fetch: fetchImpl || (async () => { throw new Error('unexpected fetch'); }),
+    AbortController,
+    URL,
+    setTimeout,
+    clearTimeout,
+    Storage: { async addPendingAction() {} },
+    CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
+    window: { dispatchEvent() {} },
+    globalThis: null,
+  };
+  context.globalThis = context;
+  vm.runInNewContext(`${api}\nglobalThis.__api = API;`, context);
+  return { API: context.__api, values };
 }
 
 function createAppConcurrencyHarness({ startRoute, updateStop, endRoute } = {}) {
@@ -342,16 +370,96 @@ test('店舗保存中のスキップと手動終了はAPIを追加で呼ばな�
   assert.equal(harness.app.getPatrolState(), null);
 });
 
-test('メモAPIと認証失敗時の遠隔キャッシュ破棄が接続されている', () => {
+test('メモAPIと認証失敗時の保存内容維持が接続されている', () => {
   assert.match(api, /addMemo:\s*\(b\)\s*=>\s*post\('addMemo'/);
   assert.match(app, /const result = await API\.addMemo/);
   assert.ok(app.indexOf('const result = await API.addMemo') < app.indexOf("toast('メモを保存しました')"));
   assert.match(api, /api-auth-error/);
-  assert.match(app, /await Storage\.clearRemoteCaches\(\)/);
+  const authFailure = functionSource(app, 'handleApiAuthError_', 'setupNav');
+  assert.doesNotMatch(authFailure, /clearRemoteCaches|clearDeviceCredential|setToken\(['"]{2}\)/);
+  assert.match(authFailure, /保存内容は消さずに残しています/);
   assert.match(storage, /async function clearRemoteCaches/);
   assert.match(api, /getCanonicalUrl/);
   assert.match(api, /isValidUrl\(storedBaseUrl\) \? storedBaseUrl : CANONICAL_GAS_API_URL/);
   assert.match(app, /API\.isValidUrl\(oldUrl\) \? oldUrl : API\.getCanonicalUrl\(\)/);
+});
+
+test('旧共有コードは一度だけ端末鍵へ移行し、両PWA完了後だけ削除する', async () => {
+  let calls = 0;
+  const fetchImpl = async (_url, options) => {
+    calls += 1;
+    const body = JSON.parse(options.body);
+    return {
+      async text() {
+        return JSON.stringify({
+          success: true,
+          data: { registered: true, device_id: body.device_id },
+        });
+      },
+    };
+  };
+  const first = createApiHarness({
+    initial: { daniel_api_auth_token: 'p'.repeat(40) },
+    fetchImpl,
+  });
+  assert.equal(await first.API.ensureDeviceCredential(), true);
+  assert.equal(calls, 1);
+  assert.ok(first.values.get('daniel_route_device_auth_v1'));
+  assert.equal(first.values.get('daniel_api_auth_token'), 'p'.repeat(40));
+  assert.equal(await first.API.ensureDeviceCredential(), true);
+  assert.equal(calls, 1, '端末鍵がある起動では再登録しません');
+
+  const both = createApiHarness({
+    initial: {
+      daniel_api_auth_token: 'q'.repeat(40),
+      mercari_device_auth_v1: 'm'.repeat(40),
+    },
+    fetchImpl,
+  });
+  await both.API.ensureDeviceCredential();
+  assert.equal(both.values.has('daniel_api_auth_token'), false);
+});
+
+test('新しい接続コードの失敗は既存端末鍵と移行情報を消さない', async () => {
+  const previous = 'route_dev_' + 'a'.repeat(50);
+  const harness = createApiHarness({
+    initial: {
+      daniel_route_device_id_v1: 'route_existing_device_01',
+      daniel_route_device_auth_v1: previous,
+      daniel_api_auth_token: 'l'.repeat(40),
+    },
+    fetchImpl: async () => ({
+      async text() { return JSON.stringify({ success: false, error: 'UNAUTHORIZED: bad' }); },
+    }),
+  });
+  await assert.rejects(harness.API.pairDevice('x'.repeat(40)), /bad/);
+  assert.equal(harness.values.get('daniel_route_device_auth_v1'), previous);
+  assert.equal(harness.values.get('daniel_api_auth_token'), 'l'.repeat(40));
+  assert.ok(harness.values.get('daniel_route_pending_device_auth_v1'));
+});
+
+test('GASはpairing・service・deviceの用途を分離し、登録と回転を同じロックで守る', () => {
+  const register = functionSource(gas, 'registerDeviceCredential_', 'isRouteDeviceRegistrationAuthorized_');
+  assert.match(register, /LockService\.getScriptLock\(\)/);
+  assert.match(register, /isMercariDeviceRegistrationAuthorized_|isRouteDeviceRegistrationAuthorized_/);
+  assert.ok(register.indexOf('tryLock') < register.indexOf('isMercariDeviceRegistrationAuthorized_'));
+  assert.ok(register.indexOf('isRouteDeviceRegistrationAuthorized_') < register.indexOf('writeDeviceAuthRecords_'));
+  const normal = functionSource(gas, 'isAuthorized_', 'isMercariActionAuthorized_');
+  assert.match(normal, /API_DEVICE_AUTH_PROPERTY/);
+  assert.doesNotMatch(normal, /DEVICE_PAIRING|API_AUTH_HASH_PROPERTY/);
+  const mercari = functionSource(gas, 'isMercariActionAuthorized_', 'isAuthorizedForAction_');
+  assert.match(mercari, /MERCARI_SERVICE_ACTIONS[\s\S]*MERCARI_API_AUTH_HASH_PROPERTY/);
+  assert.match(mercari, /MERCARI_DEVICE_ACTIONS[\s\S]*MERCARI_DEVICE_AUTH_PROPERTY/);
+  assert.match(gas, /getMercariPairingConfig/);
+  assert.match(gas, /trycloudflare\\\.com/);
+  assert.match(gas, /previousExpiresAt/);
+});
+
+test('QR接続はコードを即時非表示にし、通信停止を15秒で打ち切って再試行できる', () => {
+  assert.match(pair, /history\.replaceState/);
+  assert.match(pair, /new AbortController\(\)/);
+  assert.match(pair, /timeoutMs = 15000/);
+  assert.match(pair, /id="pair-retry"/);
 });
 
 test('GASはstartRouteの全検証後に追加し、履歴変更後に統計とキャッシュを更新する', () => {
