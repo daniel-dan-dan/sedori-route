@@ -18,7 +18,7 @@ GitHub Pages (`daniel-dan-dan/sedori-route` → `https://daniel-dan-dan.github.i
 ### PWA内部構造（すべて素のJS、ビルドなし。`<script>`で順に読み込み）
 
 - `storage.js` — IndexedDB（`sedori-route` DB）でstores/config/currentRoute/pendingActionsをキャッシュ＆同期キュー。`online`イベントで自動flush。
-- `api.js` — GAS `doGet`/`doPost` へのfetchラッパー。URLは `localStorage['gas_api_url']` から取得。オフライン時はPOSTを`Storage.addPendingAction`へキュー。
+- `api.js` — GAS `doGet`/`doPost` へのfetchラッパー。URLだけは `localStorage['gas_api_url']`、接続コード・端末鍵は専用IndexedDBへ保存。オフライン時はPOSTを`Storage.addPendingAction`へキュー。
 - `route-optimizer.js` — Haversine距離 → 最近傍法 → 2-opt改善のクライアントサイドTSP。Google Maps ナビURL生成もここ。`calcSelectionOrder`は選択順そのままの距離計算。
 - `router.js` — hashベースSPAルーター（`#home`, `#patrol`, `#history`等）。
 - `app.js` — 全ビュー描画とイベント処理を一枚岩モジュールで実装。**95KB超・重要定数はトップに集約**:
@@ -53,7 +53,14 @@ git add <files> && git commit -m "..." && git push
 
 ## 開発
 
-ビルドツールなし・テストなし。ブラウザでローカル確認するときは:
+ビルドツールなし。Node回帰テストと版数/CSP検査は次で実行する:
+
+```bash
+node --test route-app.test.mjs
+node verify-pwa-version.mjs
+```
+
+ブラウザでローカル確認するときは:
 
 ```bash
 python3 -m http.server 8000

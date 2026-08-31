@@ -1,0 +1,12 @@
+.DS_Store
+.env
+.env.*
+*.log
+*.bak
+*.backup
+*.tmp
+backup/
+backups/
+output/
+.playwright-cli/
+node_modules/

@@ -715,6 +715,16 @@ const Quiz = (() => {
     return d.innerHTML;
   }
 
+  function safeHttpsUrl(value, allowedHosts) {
+    try {
+      const parsed = new URL(String(value || '').trim());
+      if (parsed.protocol !== 'https:' || !allowedHosts.includes(parsed.hostname)) return '';
+      return parsed.href;
+    } catch (_error) {
+      return '';
+    }
+  }
+
   // セッション状態（メモリ）
   let session = null;
 
@@ -1012,15 +1022,17 @@ const Quiz = (() => {
   }
 
   function buildItemCardHtml(item) {
-    const asin = String(item.ASIN || '').trim();
-    const imageFile = String(item['画像ファイル'] || '').trim();
+    const asinRaw = String(item.ASIN || '').trim().toUpperCase();
+    const asin = /^[A-Z0-9]{10}$/.test(asinRaw) ? asinRaw : '';
+    const imageFileRaw = String(item['画像ファイル'] || '').trim();
+    const imageFile = /^[A-Za-z0-9._-]{1,160}$/.test(imageFileRaw) ? imageFileRaw : '';
     const imgSrc = imageFile
       ? `https://m.media-amazon.com/images/I/${escHtml(imageFile)}`
       : asin
       ? `https://images-na.ssl-images-amazon.com/images/P/${escHtml(asin)}.09._SL200_.jpg`
       : '';
     const imgHtml = imgSrc
-      ? `<img class="quiz-item-img" src="${imgSrc}" alt="" loading="lazy" onerror="this.style.display='none'">`
+      ? `<img class="quiz-item-img" src="${imgSrc}" alt="" loading="lazy" data-image-error="hide-self">`
       : '';
     return `
       <div class="quiz-item-card">
@@ -1125,10 +1137,13 @@ const Quiz = (() => {
 
   function renderFeedback(container, item, isCorrect, detail) {
     const asin = String(item.ASIN || '').trim();
-    const amazonUrl = String(item.AmazonURL || '').trim() || (asin ? `https://www.amazon.co.jp/dp/${asin}` : '');
+    const amazonUrl = safeHttpsUrl(item.AmazonURL, ['amazon.co.jp', 'www.amazon.co.jp'])
+      || (asin ? `https://www.amazon.co.jp/dp/${asin}` : '');
     const keepaUrl  = asin ? `https://keepa.com/#!product/5-${asin}` : '';
-    const pre = String(item['プレ値スコア'] || '').trim();
-    const pur = String(item['仕入れスコア'] || '').trim();
+    const preRaw = String(item['プレ値スコア'] || '').trim();
+    const purRaw = String(item['仕入れスコア'] || '').trim();
+    const pre = ['A', 'B', 'C', 'D'].includes(preRaw) ? preRaw : '';
+    const pur = ['S', 'A', 'B', 'C'].includes(purRaw) ? purRaw : '';
     const price = item['最安値'] ? `¥${Number(item['最安値']).toLocaleString()}` : '価格未取得';
     const profit = item['月間期待利益'] ? `¥${Number(item['月間期待利益']).toLocaleString()}` : '';
 
@@ -1155,7 +1170,7 @@ const Quiz = (() => {
     }
 
     const graphHtml = asin
-      ? `<img class="quiz-keepa-graph" src="https://graph.keepa.com/pricehistory.png?asin=${escHtml(asin)}&domain=5&range=365" alt="Keepa 1年価格推移グラフ" loading="lazy" onerror="this.onerror=null; this.style.display='none'; const fb=document.getElementById('quiz-keepa-fallback'); if(fb) fb.style.display='block';">
+      ? `<img class="quiz-keepa-graph" src="https://graph.keepa.com/pricehistory.png?asin=${escHtml(asin)}&domain=5&range=365" alt="Keepa 1年価格推移グラフ" loading="lazy" data-image-error="quiz-keepa-fallback">
          <a id="quiz-keepa-fallback" class="quiz-keepa-fallback" href="${escHtml(keepaUrl)}" target="_blank" rel="noopener" style="display:none">&#x1f4ca; Keepaで確認</a>`
       : '';
 

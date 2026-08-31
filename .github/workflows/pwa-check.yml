@@ -1,0 +1,26 @@
+name: PWA checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check api.js
+      - run: node --check app.js
+      - run: node --check storage.js
+      - run: node --check quiz.js
+      - run: node --check pair.js
+      - run: node --check bootstrap.js
+      - run: node --check sw.js
+      - run: node --test route-app.test.mjs
+      - run: node verify-pwa-version.mjs

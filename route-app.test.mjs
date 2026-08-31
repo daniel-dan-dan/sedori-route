@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
@@ -13,7 +13,12 @@ const api = read('api.js');
 const storage = read('storage.js');
 const sw = read('sw.js');
 const pair = read('pair.html');
-const gas = readFileSync(join(here, '..', 'gas', 'Code.gs'), 'utf8');
+const pairScript = read('pair.js');
+const bootstrap = read('bootstrap.js');
+const index = read('index.html');
+const style = read('style.css');
+const gasPath = join(here, '..', 'gas', 'Code.gs');
+const gas = existsSync(gasPath) ? readFileSync(gasPath, 'utf8') : '';
 
 function functionSource(source, name, nextName) {
   const start = source.indexOf(`function ${name}`);
@@ -33,8 +38,44 @@ function createDeferred() {
   return { promise, resolve, reject };
 }
 
-function createApiHarness({ initial = {}, fetchImpl } = {}) {
+function createFakeIndexedDb(initial = {}) {
   const values = new Map(Object.entries(initial));
+  const database = {
+    objectStoreNames: { contains: () => true },
+    createObjectStore() {},
+    transaction() {
+      const transaction = { oncomplete: null, onerror: null, onabort: null };
+      const complete = () => queueMicrotask(() => transaction.oncomplete?.());
+      transaction.objectStore = () => ({
+        get(key) {
+          const request = { result: undefined, onsuccess: null, onerror: null };
+          queueMicrotask(() => {
+            request.result = values.has(key) ? { key, value: values.get(key) } : undefined;
+            request.onsuccess?.();
+          });
+          return request;
+        },
+        put(record) { values.set(record.key, String(record.value)); complete(); },
+        delete(key) { values.delete(key); complete(); },
+      });
+      return transaction;
+    },
+  };
+  return {
+    values,
+    indexedDB: {
+      open() {
+        const request = { result: database, onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null };
+        queueMicrotask(() => request.onsuccess?.({ target: { result: database } }));
+        return request;
+      },
+    },
+  };
+}
+
+function createApiHarness({ initial = {}, initialCredentials = {}, fetchImpl } = {}) {
+  const values = new Map(Object.entries(initial));
+  const credentialDb = createFakeIndexedDb(initialCredentials);
   const localStorage = {
     getItem(key) { return values.has(key) ? values.get(key) : null; },
     setItem(key, value) { values.set(key, String(value)); },
@@ -42,6 +83,7 @@ function createApiHarness({ initial = {}, fetchImpl } = {}) {
   };
   const context = {
     localStorage,
+    indexedDB: credentialDb.indexedDB,
     crypto: webcrypto,
     btoa: value => Buffer.from(value, 'binary').toString('base64'),
     fetch: fetchImpl || (async () => { throw new Error('unexpected fetch'); }),
@@ -56,7 +98,7 @@ function createApiHarness({ initial = {}, fetchImpl } = {}) {
   };
   context.globalThis = context;
   vm.runInNewContext(`${api}\nglobalThis.__api = API;`, context);
-  return { API: context.__api, values };
+  return { API: context.__api, values, credentials: credentialDb.values };
 }
 
 function createAppConcurrencyHarness({ startRoute, updateStop, endRoute } = {}) {
@@ -384,7 +426,7 @@ test('メモAPIと認証失敗時の保存内容維持が接続されている',
   assert.match(app, /API\.isValidUrl\(oldUrl\) \? oldUrl : API\.getCanonicalUrl\(\)/);
 });
 
-test('旧共有コードは一度だけ端末鍵へ移行し、両PWA完了後だけ削除する', async () => {
+test('旧localStorageの接続コードは端末鍵へ一度だけ移行して安全領域からも削除する', async () => {
   let calls = 0;
   const fetchImpl = async (_url, options) => {
     calls += 1;
@@ -404,27 +446,19 @@ test('旧共有コードは一度だけ端末鍵へ移行し、両PWA完了後�
   });
   assert.equal(await first.API.ensureDeviceCredential(), true);
   assert.equal(calls, 1);
-  assert.ok(first.values.get('daniel_route_device_auth_v1'));
-  assert.equal(first.values.get('daniel_api_auth_token'), 'p'.repeat(40));
+  assert.ok(first.credentials.get('daniel_route_device_auth_v1'));
+  assert.equal(first.credentials.has('daniel_api_auth_token'), false);
+  assert.equal(first.values.has('daniel_api_auth_token'), false);
+  assert.equal(first.values.has('daniel_route_device_auth_v1'), false);
   assert.equal(await first.API.ensureDeviceCredential(), true);
   assert.equal(calls, 1, '端末鍵がある起動では再登録しません');
-
-  const both = createApiHarness({
-    initial: {
-      daniel_api_auth_token: 'q'.repeat(40),
-      mercari_device_auth_v1: 'm'.repeat(40),
-    },
-    fetchImpl,
-  });
-  await both.API.ensureDeviceCredential();
-  assert.equal(both.values.has('daniel_api_auth_token'), false);
 });
 
 test('新しい接続コードの失敗は既存端末鍵と移行情報を消さない', async () => {
   const previous = 'route_dev_' + 'a'.repeat(50);
   const harness = createApiHarness({
-    initial: {
-      daniel_route_device_id_v1: 'route_existing_device_01',
+    initial: { daniel_route_device_id_v1: 'route_existing_device_01' },
+    initialCredentials: {
       daniel_route_device_auth_v1: previous,
       daniel_api_auth_token: 'l'.repeat(40),
     },
@@ -433,12 +467,12 @@ test('新しい接続コードの失敗は既存端末鍵と移行情報を消�
     }),
   });
   await assert.rejects(harness.API.pairDevice('x'.repeat(40)), /bad/);
-  assert.equal(harness.values.get('daniel_route_device_auth_v1'), previous);
-  assert.equal(harness.values.get('daniel_api_auth_token'), 'l'.repeat(40));
-  assert.ok(harness.values.get('daniel_route_pending_device_auth_v1'));
+  assert.equal(harness.credentials.get('daniel_route_device_auth_v1'), previous);
+  assert.equal(harness.credentials.get('daniel_api_auth_token'), 'l'.repeat(40));
+  assert.ok(harness.credentials.get('daniel_route_pending_device_auth_v1'));
 });
 
-test('GASはpairing・service・deviceの用途を分離し、登録と回転を同じロックで守る', () => {
+test('GASはpairing・service・deviceの用途を分離し、登録と回転を同じロックで守る', { skip: !gas }, () => {
   const register = functionSource(gas, 'registerDeviceCredential_', 'isRouteDeviceRegistrationAuthorized_');
   assert.match(register, /LockService\.getScriptLock\(\)/);
   assert.match(register, /isMercariDeviceRegistrationAuthorized_|isRouteDeviceRegistrationAuthorized_/);
@@ -456,13 +490,58 @@ test('GASはpairing・service・deviceの用途を分離し、登録と回転を
 });
 
 test('QR接続はコードを即時非表示にし、通信停止を15秒で打ち切って再試行できる', () => {
-  assert.match(pair, /history\.replaceState/);
-  assert.match(pair, /new AbortController\(\)/);
-  assert.match(pair, /timeoutMs = 15000/);
+  assert.match(pairScript, /history\.replaceState/);
+  assert.match(pairScript, /new AbortController\(\)/);
+  assert.match(pairScript, /timeoutMs = 15000/);
   assert.match(pair, /id="pair-retry"/);
 });
 
-test('GASはstartRouteの全検証後に追加し、履歴変更後に統計とキャッシュを更新する', () => {
+test('CSPは同一配信元の外部scriptだけを許可し、inline handlerを残さない', () => {
+  for (const [name, html] of [['index.html', index], ['pair.html', pair]]) {
+    const policy = (html.match(/Content-Security-Policy" content="([^"]+)"/) || [])[1] || '';
+    assert.match(policy, /script-src 'self'/, `${name} のscript-srcが厳格ではありません`);
+    const scriptDirective = (policy.match(/script-src ([^;]+)/) || [])[1] || '';
+    assert.doesNotMatch(scriptDirective, /unsafe-inline|unsafe-eval/);
+    assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/i, `${name} にinline scriptがあります`);
+  }
+  [app, read('quiz.js'), pairScript].forEach(source => {
+    assert.doesNotMatch(source, /\son(?:click|error)\s*=/i);
+  });
+  assert.match(bootstrap, /addEventListener\('error'/);
+  assert.match(style, /\[hidden\]\s*\{\s*display:\s*none\s*!important;/);
+});
+
+test('端末鍵はIndexedDBへ移しlocalStorageへ新規保存せず、外部APIにも公開しない', () => {
+  assert.match(api, /CREDENTIAL_DB_NAME = 'sedori-route-credentials'/);
+  assert.match(api, /initializeCredentials_/);
+  assert.doesNotMatch(api, /localStorage\.setItem\((?:PAIRING_CODE_KEY|DEVICE_TOKEN_KEY|PENDING_DEVICE_TOKEN_KEY)/);
+  assert.doesNotMatch(pairScript, /localStorage\.setItem\((?:pairingKey|deviceTokenKey|pendingTokenKey)/);
+  const apiSurface = api.slice(api.lastIndexOf('return {'));
+  assert.doesNotMatch(apiSurface, /\bgetToken\b/);
+});
+
+test('地図ポップアップはstore_idをHTML文字列やinline onclickへ埋め込まない', () => {
+  const popup = functionSource(app, 'buildMapPopupElement', 'buildStoreVisitInfoFromRoutes_');
+  assert.match(popup, /textContent = String\(s\.name/);
+  assert.match(popup, /button\.addEventListener\('click'/);
+  assert.doesNotMatch(popup, /innerHTML|onclick|`<|\$\{s\.store_id\}/);
+  assert.doesNotMatch(app, /buildMapPopupHtml/);
+});
+
+test('古い未送信操作は自動再送せず、後続も追い越さない', () => {
+  assert.match(storage, /MAX_AUTO_RETRY_AGE_MS = 7 \* 24 \* 60 \* 60 \* 1000/);
+  assert.match(storage, /MAX_AUTO_RETRY_ATTEMPTS = 12/);
+  const blocking = functionSource(storage, 'pendingActionBlockReason_', 'getPendingQueueStatus').replace(/\s*async\s*$/, '');
+  const context = {};
+  vm.runInNewContext(`const MAX_AUTO_RETRY_AGE_MS = 7 * 24 * 60 * 60 * 1000; const MAX_AUTO_RETRY_ATTEMPTS = 12;\n${blocking}\nglobalThis.reason = pendingActionBlockReason_;`, context);
+  assert.match(context.reason({ timestamp: Date.now() - 8 * 86400000, attempts: 0 }), /7日以上前/);
+  assert.match(context.reason({ timestamp: Date.now(), attempts: 12 }), /上限/);
+  assert.equal(context.reason({ timestamp: Date.now(), attempts: 0 }), '');
+  const sync = functionSource(storage, 'syncPending', 'clearRemoteCaches');
+  assert.match(sync, /if \(blockedReason\)[\s\S]*break;/);
+});
+
+test('GASはstartRouteの全検証後に追加し、履歴変更後に統計とキャッシュを更新する', { skip: !gas }, () => {
   const start = functionSource(gas, 'startRoute_', 'updateStop_');
   assert.ok(start.indexOf('operation_id is required') < start.indexOf('routeSheet.getRange(routeStartRow'));
   assert.ok(start.indexOf('Unknown or inactive store_id') < start.indexOf('routeSheet.getRange(routeStartRow'));
@@ -479,7 +558,7 @@ test('GASはstartRouteの全検証後に追加し、履歴変更後に統計と�
   assert.match(daily, /clearStoresCache_\(\)/);
 });
 
-test('GASの店舗訪問集計はvisitedだけを数える', () => {
+test('GASの店舗訪問集計はvisitedだけを数える', { skip: !gas }, () => {
   const predicate = functionSource(gas, 'isStopCountedAsStoreVisit_', 'normalizeStopStatus_');
   const normalize = functionSource(gas, 'normalizeStopStatus_', 'backupStoresSheetForVisitRepair_');
   const context = {};

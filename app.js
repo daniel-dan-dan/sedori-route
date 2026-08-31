@@ -20,6 +20,7 @@ const App = (() => {
   let patrolStopSavingStatus = null;
   let authFailureHandling = false;
   let authFailureListenerReady = false;
+  let pendingQueueListenerReady = false;
   let legacyCredentialRecoveryAttempted = false;
   let mapInstance = null;
   let mapCluster = null;
@@ -90,7 +91,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v193';
+  const ASSET_VER = 'v195';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -100,7 +101,7 @@ const App = (() => {
       const color = CHAIN_COLORS[chain] || '#6B7280';
       return `<span class="store-icon store-icon-logo" style="border-color:${color}"><img src="${withVer(logo)}" alt=""></span>`;
     }
-    return `<span class="store-icon">${store.icon || '&#x1f3ea;'}</span>`;
+    return `<span class="store-icon">${esc(safeStoreIcon_(store.icon))}</span>`;
   }
 
   // 営業状態判定 → { label, cls }
@@ -146,7 +147,7 @@ const App = (() => {
       const color = CHAIN_COLORS[chain] || '#6B7280';
       return `<span class="stop-icon-logo" style="border-color:${color}"><img src="${withVer(logo)}" alt=""></span>`;
     }
-    return `<span class="stop-icon-emoji">${store.icon || '&#x1f3ea;'}</span>`;
+    return `<span class="stop-icon-emoji">${esc(safeStoreIcon_(store.icon))}</span>`;
   }
 
   // チェーン別ロゴ（公式サイト/Wikimedia Commons/ユーザー提供画像由来）
@@ -512,6 +513,13 @@ const App = (() => {
       window.addEventListener('api-auth-error', handleApiAuthError_);
       authFailureListenerReady = true;
     }
+    if (!pendingQueueListenerReady) {
+      window.addEventListener('pending-action-blocked', event => {
+        const reason = String(event?.detail?.reason || '安全確認が必要です');
+        toast(`古い未送信データは自動送信を止めました: ${reason}`, 7000);
+      });
+      pendingQueueListenerReady = true;
+    }
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && Router.getCurrentView() === 'home') {
         refreshPlannedRouteOnHome_(true);
@@ -520,6 +528,16 @@ const App = (() => {
     window.addEventListener('online', () => {
       if (Router.getCurrentView() === 'home') refreshPlannedRouteOnHome_(true);
     });
+
+    try {
+      await API.ready();
+    } catch (error) {
+      stores = normalizeStores(await Storage.getCachedStores());
+      config = await Storage.getCachedConfig();
+      Router.navigate('settings');
+      toast(error.message, 7000);
+      return;
+    }
 
     if (API.hasToken() && !API.hasDeviceCredential()) {
       try {
@@ -814,14 +832,18 @@ const App = (() => {
         return;
       }
       listEl.innerHTML = items.map(it => {
-        const pre = String(it.プレ値スコア || '').trim();
-        const pur = String(it.仕入れスコア || '').trim();
+        const preRaw = String(it.プレ値スコア || '').trim();
+        const purRaw = String(it.仕入れスコア || '').trim();
+        const pre = ['A', 'B', 'C', 'D'].includes(preRaw) ? preRaw : '';
+        const pur = ['S', 'A', 'B', 'C'].includes(purRaw) ? purRaw : '';
         const price = it.最安値 ? `¥${Number(it.最安値).toLocaleString()}` : '価格未取得';
         const profit = it.月間期待利益 ? `月間利益 ¥${Number(it.月間期待利益).toLocaleString()}` : '';
-        const amazonUrl = it.AmazonURL || '';
-        const keepaUrl = it.KeepaURL || '';
-        const asin = String(it.ASIN || '').trim();
-        const imageFile = String(it.画像ファイル || '').trim();
+        const amazonUrl = safeHttpsUrl_(it.AmazonURL, ['amazon.co.jp', 'www.amazon.co.jp']);
+        const keepaUrl = safeHttpsUrl_(it.KeepaURL, ['keepa.com', 'www.keepa.com']);
+        const asinRaw = String(it.ASIN || '').trim().toUpperCase();
+        const asin = /^[A-Z0-9]{10}$/.test(asinRaw) ? asinRaw : '';
+        const imageFileRaw = String(it.画像ファイル || '').trim();
+        const imageFile = /^[A-Za-z0-9._-]{1,160}$/.test(imageFileRaw) ? imageFileRaw : '';
         // 画像: Keepa提供のimagesCSVファイル名があれば正確なURLを優先、無ければASINベースにフォールバック
         const imgSrc = imageFile
           ? `https://m.media-amazon.com/images/I/${esc(imageFile)}`
@@ -829,11 +851,11 @@ const App = (() => {
           ? `https://images-na.ssl-images-amazon.com/images/P/${esc(asin)}.09._SL200_.jpg`
           : '';
         const imgHtml = imgSrc
-          ? `<div class="haiban-thumb-wrap"><img class="haiban-thumb" src="${imgSrc}" alt="" loading="lazy" onerror="this.closest('.haiban-thumb-wrap').style.display='none'"></div>`
+          ? `<div class="haiban-thumb-wrap"><img class="haiban-thumb" src="${imgSrc}" alt="" loading="lazy" data-image-error="hide-parent"></div>`
           : '';
         // Keepa 180日(6ヶ月)価格推移グラフ
         const graphHtml = asin
-          ? `<img class="haiban-keepa-graph" src="https://graph.keepa.com/pricehistory.png?asin=${esc(asin)}&domain=co.jp&range=180&width=320&height=120&salesrank=1&used=1&new=1&amazon=1" alt="Keepa価格推移" loading="lazy" onerror="this.style.display='none'">`
+          ? `<img class="haiban-keepa-graph" src="https://graph.keepa.com/pricehistory.png?asin=${esc(asin)}&domain=co.jp&range=180&width=320&height=120&salesrank=1&used=1&new=1&amazon=1" alt="Keepa価格推移" loading="lazy" data-image-error="hide-self">`
           : '';
         return `
           <div class="haiban-item">
@@ -1037,7 +1059,7 @@ const App = (() => {
     } else if (abbr) {
       inner = `<span class="map-pin-text">${esc(abbr)}</span>`;
     } else {
-      inner = `<span class="map-pin-emoji">${store.icon || '&#x1f3ea;'}</span>`;
+      inner = `<span class="map-pin-emoji">${esc(safeStoreIcon_(store.icon))}</span>`;
     }
     const style = `border-color:${color}`;
     return L.divIcon({
@@ -1295,17 +1317,28 @@ const App = (() => {
     }, { enableHighAccuracy: true, timeout: 10000 });
   }
 
-  function buildMapPopupHtml(s, selIdx) {
+  function buildMapPopupElement(s, selIdx) {
     const categoryLabel = GENRE_DISPLAY[s.category] || s.category || '';
     const visitLabel = getMapPopupLastVisitLabel_(s);
-    return `<div class="map-popup">
-          <div class="map-popup-name">${esc(s.name)}</div>
-          <div class="map-popup-meta">${esc(categoryLabel)}</div>
-          <div class="map-popup-visit">${esc(visitLabel)}</div>
-          <button class="btn btn-primary map-popup-btn" data-sid="${s.store_id}" onclick="App.toggleMapSelection('${s.store_id}')">
-            ${selIdx >= 0 ? '選択解除' : '選択'}
-          </button>
-        </div>`;
+    const popup = document.createElement('div');
+    popup.className = 'map-popup';
+    const name = document.createElement('div');
+    name.className = 'map-popup-name';
+    name.textContent = String(s.name || '');
+    const meta = document.createElement('div');
+    meta.className = 'map-popup-meta';
+    meta.textContent = String(categoryLabel);
+    const visit = document.createElement('div');
+    visit.className = 'map-popup-visit';
+    visit.textContent = String(visitLabel);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn btn-primary map-popup-btn';
+    button.dataset.sid = String(s.store_id || '');
+    button.textContent = selIdx >= 0 ? '選択解除' : '選択';
+    button.addEventListener('click', () => toggleMapSelection(String(s.store_id || '')));
+    popup.append(name, meta, visit, button);
+    return popup;
   }
 
   function buildStoreVisitInfoFromRoutes_(routes) {
@@ -1501,10 +1534,10 @@ const App = (() => {
       if (existing) {
         existing.setLatLng(markerLatLng);
         existing.setIcon(buildPinIcon(s, displayIdx));
-        existing.setPopupContent(buildMapPopupHtml(s, popupSelectionIdx));
+        existing.setPopupContent(buildMapPopupElement(s, popupSelectionIdx));
       } else {
         const marker = L.marker(markerLatLng, { icon: buildPinIcon(s, displayIdx) });
-        marker.bindPopup(buildMapPopupHtml(s, popupSelectionIdx));
+        marker.bindPopup(buildMapPopupElement(s, popupSelectionIdx));
         mapCluster.addLayer(marker);
         mapMarkers.set(sid, marker);
       }
@@ -4841,9 +4874,9 @@ const App = (() => {
         <div class="card-title">自宅座標</div>
         <div class="flex gap-8">
           <div class="form-group" style="flex:1"><label class="form-label">緯度</label>
-            <input type="number" step="any" class="form-input" id="set-lat" value="${config.home_lat || ''}"></div>
+            <input type="number" step="any" class="form-input" id="set-lat" value="${esc(config.home_lat || '')}"></div>
           <div class="form-group" style="flex:1"><label class="form-label">経度</label>
-            <input type="number" step="any" class="form-input" id="set-lng" value="${config.home_lng || ''}"></div>
+            <input type="number" step="any" class="form-input" id="set-lng" value="${esc(config.home_lng || '')}"></div>
         </div>
         <div class="btn-group" style="margin-top:0">
           <button class="btn btn-primary btn-sm" id="btn-save-home">保存</button>
@@ -4854,9 +4887,9 @@ const App = (() => {
         <div class="card-title">パラメータ</div>
         <div class="flex gap-8">
           <div class="form-group" style="flex:1"><label class="form-label">平均速度 (km/h)</label>
-            <input type="number" class="form-input" id="set-speed" value="${config.avg_speed_kmh || 30}"></div>
+            <input type="number" class="form-input" id="set-speed" value="${esc(config.avg_speed_kmh || 30)}"></div>
           <div class="form-group" style="flex:1"><label class="form-label">デフォルト滞在 (分)</label>
-            <input type="number" class="form-input" id="set-stay" value="${config.default_stay_min || 30}"></div>
+            <input type="number" class="form-input" id="set-stay" value="${esc(config.default_stay_min || 30)}"></div>
         </div>
         <button class="btn btn-primary btn-sm" id="btn-save-params">保存</button>
       </div>
@@ -4870,6 +4903,10 @@ const App = (() => {
       <div class="card settings-card">
         <div class="card-title">データ</div>
         <button class="btn btn-outline btn-sm" id="btn-refresh">データ再取得</button>
+      </div>
+      <div class="card settings-card">
+        <div class="card-title">未送信データの安全確認</div>
+        <div id="pending-sync-status" class="text-sm text-dim">確認中...</div>
       </div>
       <div class="card settings-card">
         <div class="card-title">店舗管理</div>
@@ -4903,7 +4940,7 @@ const App = (() => {
       let storeHtml = '';
       stores.forEach(s => {
         storeHtml += `
-          <div class="store-item" data-sid="${s.store_id}" style="cursor:default">
+          <div class="store-item" data-sid="${esc(s.store_id)}" style="cursor:default">
             ${renderStoreIconHtml(s)}
             <div class="store-info">
               <div class="store-name">${esc(s.name)}</div>
@@ -4911,11 +4948,27 @@ const App = (() => {
                 ${esc(s.category)} | 訪問${s.visit_count}回 | 累計${Number(s.total_purchase).toLocaleString()}円
               </div>
             </div>
-            <button class="btn btn-sm btn-outline edit-store" data-sid="${s.store_id}">編集</button>
+            <button class="btn btn-sm btn-outline edit-store" data-sid="${esc(s.store_id)}">編集</button>
           </div>`;
       });
       storeListEl.innerHTML = storeHtml;
     }
+
+    Storage.getPendingQueueStatus().then(status => {
+      const element = document.getElementById('pending-sync-status');
+      if (!element) return;
+      if (status.blocked > 0) {
+        element.textContent = `安全確認が必要な未送信データが${status.blocked}件あります。古いため自動送信は停止しています。`;
+        element.classList.add('text-accent');
+      } else if (status.total > 0) {
+        element.textContent = `未送信データが${status.total}件あります。通信が戻ると作成順に送信します。`;
+      } else {
+        element.textContent = '未送信データはありません。';
+      }
+    }).catch(() => {
+      const element = document.getElementById('pending-sync-status');
+      if (element) element.textContent = '未送信データの状態を確認できませんでした。';
+    });
 
     document.getElementById('btn-save-auth-token')?.addEventListener('click', async () => {
       const input = document.getElementById('set-auth-token');
@@ -5125,6 +5178,22 @@ const App = (() => {
     const d = document.createElement('div');
     d.textContent = String(s);
     return d.innerHTML;
+  }
+
+  function safeStoreIcon_(value) {
+    const icon = String(value || '').trim();
+    if (!icon || icon.length > 8 || /[<>&"']/.test(icon)) return '🏪';
+    return icon;
+  }
+
+  function safeHttpsUrl_(value, allowedHosts) {
+    try {
+      const parsed = new URL(String(value || '').trim());
+      if (parsed.protocol !== 'https:' || !allowedHosts.includes(parsed.hostname)) return '';
+      return parsed.href;
+    } catch (_error) {
+      return '';
+    }
   }
 
   // ---------- 起動 ----------

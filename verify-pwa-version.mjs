@@ -17,10 +17,12 @@ const cacheVersion = cacheMatch && cacheMatch[1];
 const badgeVersion = badgeMatch && badgeMatch[1];
 const errors = [];
 
-const cacheBustVersions = [...html.matchAll(/(?:vendor\/leaflet\/leaflet\.(?:css|js)|style\.css|storage\.js|api\.js|route-optimizer\.js|router\.js|quiz\.js|app\.js)\?v=(\d+)/g)]
+const cacheBustVersions = [...html.matchAll(/(?:vendor\/leaflet\/leaflet\.(?:css|js)|style\.css|storage\.js|api\.js|route-optimizer\.js|router\.js|quiz\.js|app\.js|bootstrap\.js)\?v=(\d+)/g)]
   .map((match) => `v${match[1]}`);
 const pairStyleVersion = (pair.match(/style\.css\?v=(\d+)/) || [])[1];
+const pairScriptVersion = (pair.match(/pair\.js\?v=(\d+)/) || [])[1];
 const assetVersion = (app.match(/ASSET_VER\s*=\s*['"](v\d+)['"]/) || [])[1];
+const requiredCsp = /Content-Security-Policy" content="[^"]*script-src 'self'[^"]*object-src 'none'/;
 
 if (!cacheVersion) errors.push('sw.js の CACHE_NAME から版数を読み取れません。');
 if (!badgeVersion) errors.push('index.html の app-version-badge から版数を読み取れません。');
@@ -30,8 +32,8 @@ if (cacheVersion && badgeVersion && cacheVersion !== badgeVersion) {
 if (!sw.includes('GET_VERSION') || !sw.includes('SW_VERSION')) {
   errors.push('Service Worker の版数応答（GET_VERSION / SW_VERSION）が見つかりません。');
 }
-if (!html.includes('checkPwaVersion')) {
-  errors.push('index.html の版数チェック処理が見つかりません。');
+if (!html.includes('bootstrap.js')) {
+  errors.push('index.html の安全な外部bootstrapが見つかりません。');
 }
 if (!/CACHE_PREFIX\s*=\s*['"]sedori-route-['"]/.test(sw)) {
   errors.push('Service Worker の専用CACHE_PREFIXが見つかりません。');
@@ -39,11 +41,19 @@ if (!/CACHE_PREFIX\s*=\s*['"]sedori-route-['"]/.test(sw)) {
 if (!/\.filter\(k\s*=>\s*k\.startsWith\(CACHE_PREFIX\)\s*&&\s*k\s*!==\s*CACHE_NAME\)/.test(sw)) {
   errors.push('旧cache削除がsedori-route専用prefixへ限定されていません。');
 }
-if (cacheBustVersions.length !== 9 || cacheBustVersions.some((version) => version !== badgeVersion)) {
+if (cacheBustVersions.length !== 10 || cacheBustVersions.some((version) => version !== badgeVersion)) {
   errors.push(`CSS/JSのcache bustが画面版数(${badgeVersion})と一致していません。`);
 }
 if (`v${pairStyleVersion}` !== badgeVersion) errors.push('pair.html のcache bustが画面版数と一致していません。');
+if (`v${pairScriptVersion}` !== badgeVersion) errors.push('pair.js のcache bustが画面版数と一致していません。');
 if (assetVersion !== badgeVersion) errors.push('チェーン画像のcache bustが画面版数と一致していません。');
+if (!requiredCsp.test(html) || !requiredCsp.test(pair)) errors.push('index/pairの厳格なCSPが見つかりません。');
+if (/<script(?![^>]*\bsrc=)[^>]*>/i.test(html) || /<script(?![^>]*\bsrc=)[^>]*>/i.test(pair)) {
+  errors.push('inline scriptが残っています。');
+}
+['bootstrap.js?v=', 'pair.js?v='].forEach(asset => {
+  if (!sw.includes(`./${asset}${badgeVersion.slice(1)}`)) errors.push(`Service Worker未登録: ${asset}`);
+});
 
 const chainIcons = readdirSync(join(here, 'icons', 'chains')).filter(name => name.endsWith('.png'));
 const missingChainIcons = chainIcons.filter(name => !sw.includes(`./icons/chains/${name}`));

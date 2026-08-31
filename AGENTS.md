@@ -17,7 +17,7 @@
 ## PWA内部構造
 
 - `storage.js`: IndexedDBでstores/config/currentRoute/pendingActionsをキャッシュし、同期キューを管理する。
-- `api.js`: GAS `doGet`/`doPost` へのfetchラッパー。URLは `localStorage['gas_api_url']` から取得する。
+- `api.js`: GAS `doGet`/`doPost` へのfetchラッパー。URLだけを `localStorage['gas_api_url']` に保存し、接続コード・端末鍵は専用IndexedDBへ保存する。
 - `route-optimizer.js`: 距離計算、選択順ルート、Google MapsナビURL生成を扱う。
 - `router.js`: hashベースSPAルーター。
 - `app.js`: 全ビュー描画とイベント処理。既存パターンを優先して変更する。
@@ -34,6 +34,10 @@
 - ユーザーの現在方針は、到着時刻管理より巡回履歴と利益データ蓄積を優先すること。
 - ルート作成後は「選択順ルート」を中心に扱い、不要なカードや説明は増やさない。
 - PWA変更時は `CACHE_NAME`、cache bust、画面上のバージョン表示、ブラウザ/スマホ反映確認まで行う。
+- `script-src 'self'` のCSPを維持し、inline script、`onclick`、`onerror`を追加しない。外部データは `textContent` またはエスケープ済み属性だけで表示する。
+- 接続コード・端末鍵を `localStorage`、URL、ログへ保存しない。旧localStorage値の移行はIndexedDBへの読戻し成功後に削除する。
+- 7日超または12回失敗したオフライン書込は自動再送しない。設定画面の「未送信データの安全確認」で状態を表示する。
+- 公開前に `node --test route-app.test.mjs` と `node verify-pwa-version.mjs` を実行し、`MOBILE_RELEASE_CHECKLIST.md` に沿ってスマホ幅を確認する。
 - 店舗削除、履歴削除、GAS本番反映はユーザー確認後に行う。
 
 ## ローカル確認

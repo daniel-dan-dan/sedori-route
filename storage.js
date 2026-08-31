@@ -5,6 +5,8 @@
 const Storage = (() => {
   const DB_NAME = 'sedori-route';
   const DB_VERSION = 2;
+  const MAX_AUTO_RETRY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  const MAX_AUTO_RETRY_ATTEMPTS = 12;
   let db = null;
   let syncInFlight = null;
 
@@ -118,6 +120,7 @@ const Storage = (() => {
   // 同期キュー
   async function addPendingAction(actionObj) {
     const operationId = String(actionObj?.operation_id || actionObj?.body?.operation_id || '');
+    if (!operationId) throw new Error('operation_id is required for offline queue');
     if (operationId) {
       const existing = await getPendingActions();
       if (existing.some(item => String(item.operation_id || item.body?.operation_id || '') === operationId)) {
@@ -126,7 +129,12 @@ const Storage = (() => {
     }
     const d = await open();
     const tx = d.transaction('pendingActions', 'readwrite');
-    tx.objectStore('pendingActions').add(actionObj);
+    tx.objectStore('pendingActions').add({
+      ...actionObj,
+      operation_id: operationId,
+      timestamp: Number(actionObj?.timestamp) || Date.now(),
+      attempts: Math.max(0, Number(actionObj?.attempts) || 0),
+    });
     return new Promise((resolve, reject) => {
       tx.oncomplete = resolve;
       tx.onerror = e => reject(e.target.error);
@@ -154,6 +162,41 @@ const Storage = (() => {
     return clear('pendingActions');
   }
 
+  function pendingActionBlockReason_(action, now = Date.now()) {
+    const createdAt = Number(action?.timestamp);
+    if (!Number.isFinite(createdAt) || createdAt <= 0) return '作成時刻を確認できません';
+    if (now - createdAt > MAX_AUTO_RETRY_AGE_MS) return '7日以上前のため自動再送を停止しました';
+    if (Number(action?.attempts || 0) >= MAX_AUTO_RETRY_ATTEMPTS) return '再送回数が上限に達しました';
+    return '';
+  }
+
+  async function getPendingQueueStatus() {
+    const actions = await getPendingActions();
+    const now = Date.now();
+    const blocked = actions.filter(action => pendingActionBlockReason_(action, now));
+    const oldestAt = actions.reduce((oldest, action) => {
+      const value = Number(action?.timestamp);
+      if (!Number.isFinite(value) || value <= 0) return oldest;
+      return oldest === 0 ? value : Math.min(oldest, value);
+    }, 0);
+    return {
+      total: actions.length,
+      blocked: blocked.length,
+      oldestAt,
+      blockedReasons: [...new Set(blocked.map(action => pendingActionBlockReason_(action, now)))],
+    };
+  }
+
+  function notifyPendingBlocked_(action, reason) {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+    window.dispatchEvent(new CustomEvent('pending-action-blocked', {
+      detail: {
+        operationId: String(action?.operation_id || action?.body?.operation_id || ''),
+        reason,
+      },
+    }));
+  }
+
   // オンライン復帰時に同期
   async function syncPending() {
     if (syncInFlight) return syncInFlight;
@@ -163,6 +206,20 @@ const Storage = (() => {
       if (actions.length === 0) return 0;
       let synced = 0;
       for (const act of actions) {
+        const blockedReason = pendingActionBlockReason_(act);
+        if (blockedReason) {
+          if (act.blocked_reason !== blockedReason) {
+            await putWithKey('pendingActions', act._queueKey, {
+              ...act,
+              _queueKey: undefined,
+              blocked_reason: blockedReason,
+              blocked_at: Date.now(),
+            });
+          }
+          notifyPendingBlocked_(act, blockedReason);
+          // 書込順序を守るため、この項目より後も自動送信しない。
+          break;
+        }
         try {
           await API.post(act.action, {
             ...(act.body || {}),
@@ -261,7 +318,7 @@ const Storage = (() => {
   });
 
   return {
-    addPendingAction, getPendingActions, clearPendingActions, syncPending,
+    addPendingAction, getPendingActions, clearPendingActions, getPendingQueueStatus, syncPending,
     cacheStores, getCachedStores,
     cacheConfig, getCachedConfig,
     saveCurrentRoute, getCurrentRoute, clearCurrentRoute,
