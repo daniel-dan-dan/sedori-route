@@ -4,15 +4,58 @@
 
 const RouteOptimizer = (() => {
 
+  function finiteNumber_(value, label, min, max) {
+    if (value === null || value === undefined || !['number', 'string'].includes(typeof value) ||
+        (typeof value === 'string' && !value.trim())) throw new Error(`${label}を入力してください`);
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < min || number > max) {
+      throw new Error(`${label}が不正です`);
+    }
+    return number;
+  }
+
+  function coordinates_(value, label) {
+    return {
+      lat: finiteNumber_(value?.lat, `${label}の緯度`, -90, 90),
+      lng: finiteNumber_(value?.lng, `${label}の経度`, -180, 180),
+    };
+  }
+
+  function routeInputs_(home, stores, avgSpeedKmh) {
+    if (!Array.isArray(stores)) throw new Error('店舗一覧が不正です');
+    const speed = finiteNumber_(avgSpeedKmh, '平均速度', Number.MIN_VALUE, Infinity);
+    const normalized = stores.map((store, index) => {
+      const missingStay = store?.avg_stay_min === null || store?.avg_stay_min === undefined ||
+        (typeof store?.avg_stay_min === 'string' && !store.avg_stay_min.trim());
+      return {
+        ...store,
+        ...coordinates_(store, `${index + 1}店舗目`),
+        avg_stay_min: missingStay ? 30 : finiteNumber_(store.avg_stay_min, `${index + 1}店舗目の滞在時間`, 0, Infinity),
+      };
+    });
+    return { home: coordinates_(home, '出発地点'), stores: normalized, speed };
+  }
+
+  function estimatedMinutes_(driveMin, stayMin) {
+    const total = driveMin + stayMin;
+    if (!Number.isFinite(total)) throw new Error('移動時間と滞在時間を計算できません。速度・滞在時間を確認してください');
+    return Math.round(total);
+  }
+
   // Haversine距離（km）
   function haversine(lat1, lng1, lat2, lng2) {
+    const from = coordinates_({ lat: lat1, lng: lng1 }, '出発地点');
+    const to = coordinates_({ lat: lat2, lng: lng2 }, '目的地点');
+    ({ lat: lat1, lng: lng1 } = from);
+    ({ lat: lat2, lng: lng2 } = to);
     const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLng = (lng2 - lng1) * Math.PI / 180;
     const a = Math.sin(dLat / 2) ** 2 +
               Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
               Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const bounded = Math.max(0, Math.min(1, a));
+    return R * 2 * Math.atan2(Math.sqrt(bounded), Math.sqrt(1 - bounded));
   }
 
   // 距離行列を生成（自宅 + 店舗群）
@@ -88,15 +131,12 @@ const RouteOptimizer = (() => {
   // stores: [{ store_id, lat, lng, priority_score, ... }]
   // 戻り値: { orderedStores, totalDistanceKm, estimatedMinutes }
   function optimize(home, stores, avgSpeedKmh = 30) {
+    const input = routeInputs_(home, stores, avgSpeedKmh);
+    home = input.home;
+    stores = input.stores;
+    avgSpeedKmh = input.speed;
     if (stores.length === 0) return { orderedStores: [], totalDistanceKm: 0, estimatedMinutes: 0 };
-    if (stores.length === 1) {
-      const d = haversine(home.lat, home.lng, stores[0].lat, stores[0].lng) * 2;
-      return {
-        orderedStores: stores,
-        totalDistanceKm: Math.round(d * 10) / 10,
-        estimatedMinutes: Math.round(d / avgSpeedKmh * 60)
-      };
-    }
+    if (stores.length === 1) return calcSelectionOrder(home, stores, avgSpeedKmh);
 
     const storesWithCoords = stores.map(s => ({
       ...s,
@@ -119,12 +159,12 @@ const RouteOptimizer = (() => {
 
     // 推定時間 = 移動時間 + 滞在時間
     const driveMin = totalKm / avgSpeedKmh * 60;
-    const stayMin = orderedStores.reduce((s, st) => s + (Number(st.avg_stay_min) || 30), 0);
+    const stayMin = orderedStores.reduce((s, st) => s + st.avg_stay_min, 0);
 
     return {
       orderedStores,
       totalDistanceKm: Math.round(totalKm * 10) / 10,
-      estimatedMinutes: Math.round(driveMin + stayMin)
+      estimatedMinutes: estimatedMinutes_(driveMin, stayMin)
     };
   }
 
@@ -146,6 +186,8 @@ const RouteOptimizer = (() => {
   }
 
   function generateMapsSegments(home, orderedStores) {
+    if (!Array.isArray(orderedStores)) throw new Error('店舗一覧が不正です');
+    orderedStores = orderedStores.map((store, index) => ({ ...store, ...coordinates_(store, `${index + 1}店舗目`) }));
     const segments = [];
     for (let start = 0; start < orderedStores.length; start += MAPS_MAX_STOPS_PER_SEGMENT) {
       const segmentStores = orderedStores.slice(start, start + MAPS_MAX_STOPS_PER_SEGMENT);
@@ -165,6 +207,10 @@ const RouteOptimizer = (() => {
 
   // 選択順ルートの距離・時間を計算（最適化なし、選択順そのまま）
   function calcSelectionOrder(home, stores, avgSpeedKmh = 30) {
+    const input = routeInputs_(home, stores, avgSpeedKmh);
+    home = input.home;
+    stores = input.stores;
+    avgSpeedKmh = input.speed;
     if (stores.length === 0) return { orderedStores: [], totalDistanceKm: 0, estimatedMinutes: 0 };
 
     const storesWithCoords = stores.map(s => ({
@@ -184,12 +230,12 @@ const RouteOptimizer = (() => {
     totalKm += haversine(prev.lat, prev.lng, homeCoords.lat, homeCoords.lng);
 
     const driveMin = totalKm / avgSpeedKmh * 60;
-    const stayMin = storesWithCoords.reduce((sum, s) => sum + (Number(s.avg_stay_min) || 30), 0);
+    const stayMin = storesWithCoords.reduce((sum, s) => sum + s.avg_stay_min, 0);
 
     return {
       orderedStores: storesWithCoords,
       totalDistanceKm: Math.round(totalKm * 10) / 10,
-      estimatedMinutes: Math.round(driveMin + stayMin)
+      estimatedMinutes: estimatedMinutes_(driveMin, stayMin)
     };
   }
 

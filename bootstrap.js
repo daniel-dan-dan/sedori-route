@@ -41,7 +41,7 @@
       if (event.data && event.data.type === 'SW_VERSION') checkPwaVersion(event.data.cacheName);
     });
 
-    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(registration => {
+    navigator.serviceWorker.register('sw.js?v=196', { updateViaCache: 'none' }).then(registration => {
       if (!registration) return;
       registration.addEventListener('updatefound', () => {
         const worker = registration.installing;

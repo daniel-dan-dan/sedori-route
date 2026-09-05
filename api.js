@@ -293,6 +293,7 @@ const API = (() => {
       const message = String(data.error || 'API error');
       const code = message.startsWith('UNAUTHORIZED') ? 'UNAUTHORIZED'
         : message.startsWith('BUSY') ? 'BUSY'
+          : message.startsWith('OPERATION_OUTCOME_UNKNOWN') ? 'OPERATION_OUTCOME_UNKNOWN'
           : 'API_ERROR';
       if (code === 'UNAUTHORIZED') {
         window.dispatchEvent(new CustomEvent('api-auth-error', { detail: { action } }));
@@ -330,6 +331,10 @@ const API = (() => {
       auth_token: getToken(),
       ...(operationId ? { operation_id: operationId } : {})
     };
+    if (!isRead) {
+      const reservation = await Storage.reservePendingAction({ action, body: { ...body, operation_id: operationId }, operation_id: operationId, timestamp: Date.now(), attempts: 0 });
+      if (reservation.conflictId) throw apiError_(`同じ内容を確認中です。再入力せず受付ID ${reservation.conflictId} の送信待ちを確認してください`, 'PENDING_OPERATION_EXISTS');
+    }
     const controller = new AbortController();
     const timeoutMs = Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -342,20 +347,29 @@ const API = (() => {
         redirect: 'follow',
         signal: controller.signal
       });
-      return await readJson_(res, action);
+      const result = await readJson_(res, action);
+      if (!isRead) {
+        try { await Storage.settlePendingAction(operationId, { remove: true }); }
+        catch (error) { throw apiError_('保存後の端末側の記録確認に失敗しました', 'UNKNOWN_RESPONSE', error); }
+      }
+      return result;
     } catch (error) {
       const queueOnFailure = options.queueOnFailure !== false && !isRead;
       const retryable = error.name === 'AbortError'
+        || error.name === 'TypeError'
+        || ['UNKNOWN_RESPONSE', 'OPERATION_OUTCOME_UNKNOWN'].includes(error.code)
         || /load failed|failed to fetch|networkerror/i.test(String(error.message || error));
+      if (!isRead) {
+        await Storage.settlePendingAction(operationId, retryable ? {
+          last_error: String(error.message || error), last_error_code: String(error.code || ''), last_attempt_at: Date.now()
+        } : (options.queueOnFailure === false ? {
+          last_error: String(error.message || error), last_error_code: String(error.code || ''), last_attempt_at: Date.now()
+        } : { remove: true }));
+      }
       if (queueOnFailure && retryable) {
-        await Storage.addPendingAction({
-          action,
-          body: { ...body, operation_id: operationId },
-          operation_id: operationId,
-          attempts: 0,
-          last_error: String(error.message || error),
-          timestamp: Date.now()
-        });
+        if (error.code === 'OPERATION_OUTCOME_UNKNOWN') {
+          throw apiError_(`保存結果の個別確認が必要です。入力は残しています。受付ID ${operationId}（自動再実行なし）`, 'OPERATION_OUTCOME_UNKNOWN', error);
+        }
         return { _queued: true, operation_id: operationId };
       }
       if (error.name === 'AbortError') {

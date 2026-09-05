@@ -1,26 +1,33 @@
 const CACHE_PREFIX = 'sedori-route-';
-const CACHE_NAME = 'sedori-route-v195';
+const CACHE_NAME = 'sedori-route-v196';
 const ASSETS = [
   './',
   './index.html',
   './pair.html',
-  './style.css?v=195',
-  './app.js?v=195',
-  './router.js?v=195',
-  './api.js?v=195',
-  './route-optimizer.js?v=195',
-  './storage.js?v=195',
-  './quiz.js?v=195',
-  './bootstrap.js?v=195',
-  './pair.js?v=195',
-  './vendor/leaflet/leaflet.css?v=195',
-  './vendor/leaflet/leaflet.js?v=195',
+  './style.css?v=196',
+  './app.js?v=196',
+  './router.js?v=196',
+  './api.js?v=196',
+  './route-optimizer.js?v=196',
+  './storage.js?v=196',
+  './quiz.js?v=196',
+  './bootstrap.js?v=196',
+  './pair.js?v=196',
+  './vendor/leaflet/leaflet.css?v=196',
+  './vendor/leaflet/leaflet.js?v=196',
   './vendor/leaflet/images/layers-2x.png',
   './vendor/leaflet/images/layers.png',
   './vendor/leaflet/images/marker-icon-2x.png',
   './vendor/leaflet/images/marker-icon.png',
   './vendor/leaflet/images/marker-shadow.png',
+  './icons/icon-72.png',
   './icons/icon-96.png',
+  './icons/icon-128.png',
+  './icons/icon-144.png',
+  './icons/icon-152.png',
+  './icons/icon-192.png',
+  './icons/icon-384.png',
+  './icons/icon-512.png',
   './icons/chains/2ndstreet.png',
   './icons/chains/aeon.png',
   './icons/chains/autobacs.png',
@@ -51,33 +58,65 @@ const ASSETS = [
   './manifest.json'
 ];
 
+function validAssetResponse_(asset, response) {
+  if (!response || !response.ok || response.type === 'opaque') return false;
+  if (response.url && new URL(response.url).origin !== self.location.origin) return false;
+  const path = new URL(asset, self.location.href).pathname;
+  const mime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  if (/\.js$/.test(path)) return ['application/javascript', 'text/javascript'].includes(mime);
+  if (/\.css$/.test(path)) return mime === 'text/css';
+  if (/\.png$/.test(path)) return mime === 'image/png';
+  if (/\.json$/.test(path)) return ['application/json', 'application/manifest+json'].includes(mime);
+  return mime === 'text/html';
+}
+
+async function releaseCacheComplete_() {
+  const cache = await caches.open(CACHE_NAME);
+  const responses = await Promise.all(ASSETS.map(asset => cache.match(asset)));
+  return responses.every((response, index) => validAssetResponse_(ASSETS[index], response));
+}
+
+async function installRelease_() {
+  // Start: all required HTTP/MIME responses pass; continue: cache writes finish;
+  // end: read-back is complete before takeover, or discard only this new cache.
+  const responses = await Promise.all(ASSETS.map(async asset => {
+    const response = await fetch(asset, { cache: 'reload' });
+    if (!validAssetResponse_(asset, response)) throw new Error(`PWA更新ファイルを確認できません: ${asset}`);
+    return response;
+  }));
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    for (let index = 0; index < ASSETS.length; index++) await cache.put(ASSETS[index], responses[index]);
+    if (!(await releaseCacheComplete_())) throw new Error('PWA更新ファイルの保存確認に失敗しました');
+  } catch (error) {
+    await caches.delete(CACHE_NAME);
+    throw error;
+  }
+  await self.skipWaiting();
+}
+
 self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then(c =>
-      Promise.all(ASSETS.map(url => fetch(url, { cache: 'reload' }).then(r => c.put(url, r))))
-    )
-  );
-  self.skipWaiting();
+  e.waitUntil(installRelease_());
 });
 
 self.addEventListener('message', e => {
-  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
+  if (e.data && e.data.type === 'SKIP_WAITING') {
+    e.waitUntil(releaseCacheComplete_().then(complete => { if (complete) return self.skipWaiting(); }));
+  }
   if (e.data && e.data.type === 'GET_VERSION' && e.source) {
     e.source.postMessage({ type: 'SW_VERSION', cacheName: CACHE_NAME });
   }
 });
 
 self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys
-          .filter(k => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)
-          .map(k => caches.delete(k))
-      )
-    )
-  );
-  self.clients.claim();
+  e.waitUntil((async () => {
+    if (!(await releaseCacheComplete_())) throw new Error('未完成のPWA更新は有効化しません');
+    const keys = await caches.keys();
+    await Promise.all(keys
+      .filter(k => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)
+      .map(k => caches.delete(k)));
+    await self.clients.claim();
+  })());
 });
 
 self.addEventListener('fetch', e => {
@@ -91,13 +130,17 @@ self.addEventListener('fetch', e => {
 
   // 自前ファイルだけネットワーク優先で更新確認（失敗時にSWキャッシュ）
   const req = new Request(e.request, { cache: 'no-cache' });
+  const knownAsset = ASSETS.find(asset => new URL(asset, self.location.href).href === e.request.url);
   e.respondWith(
     fetch(req)
       .then(res => {
-        const clone = res.clone();
-        if (res.ok) caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+        if (knownAsset && !validAssetResponse_(knownAsset, res)) throw new Error('更新ファイルが不正なため保存済み版を使います');
+        if (knownAsset) {
+          const clone = res.clone();
+          e.waitUntil(caches.open(CACHE_NAME).then(c => c.put(e.request, clone)));
+        }
         return res;
       })
-      .catch(() => caches.match(e.request))
+      .catch(() => caches.open(CACHE_NAME).then(c => c.match(e.request)))
   );
 });

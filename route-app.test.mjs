@@ -91,7 +91,7 @@ function createApiHarness({ initial = {}, initialCredentials = {}, fetchImpl } =
     URL,
     setTimeout,
     clearTimeout,
-    Storage: { async addPendingAction() {} },
+    Storage: { async addPendingAction() {}, async reservePendingAction() { return { conflictId: '' }; }, async settlePendingAction() {} },
     CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
     window: { dispatchEvent() {} },
     globalThis: null,

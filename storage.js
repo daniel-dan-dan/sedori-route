@@ -162,7 +162,55 @@ const Storage = (() => {
     return clear('pendingActions');
   }
 
+  function pendingActionsConflict_(left, right) {
+    const shops = new Set(['updateInventoryShop', 'bulkUpdateInventoryShop']);
+    const uuids = item => (item.action === 'bulkUpdateInventoryShop' ? item.body?.items || [] : [item.body || {}]).map(value => value.inventory_uuid).filter(Boolean);
+    if (shops.has(left.action) && shops.has(right.action)) {
+      const existing = new Set(uuids(left));
+      return uuids(right).some(uuid => existing.has(uuid));
+    }
+    if (left.action !== right.action) return false;
+    if (left.action === 'addInventoryPurchase') {
+      return ['product_name', 'purchase_date', 'store_id', 'store_name'].every(key => String(left.body?.[key] || '').trim() === String(right.body?.[key] || '').trim());
+    }
+    function canonical(value) {
+      if (Array.isArray(value)) return value.map(canonical);
+      if (value && typeof value === 'object') return Object.keys(value).filter(key => !['operation_id', 'auth_token'].includes(key)).sort().map(key => [key, canonical(value[key])]);
+      return value;
+    }
+    return JSON.stringify(canonical(left.body || {})) === JSON.stringify(canonical(right.body || {}));
+  }
+
+  // 読取と追加を同一readwrite transaction内に置き、別タブ・同時押しにも対応する。
+  async function reservePendingAction(actionObj) {
+    const d = await open();
+    const tx = d.transaction('pendingActions', 'readwrite');
+    const store = tx.objectStore('pendingActions');
+    let conflictId = '';
+    const request = store.getAll();
+    request.onsuccess = () => {
+      const rows = request.result || [];
+      const conflict = rows.find(item => String(item.operation_id || item.body?.operation_id || '') !== actionObj.operation_id && pendingActionsConflict_(item, actionObj));
+      if (conflict) { conflictId = String(conflict.operation_id || conflict.body?.operation_id || '旧受付'); return; }
+      if (!rows.some(item => String(item.operation_id || item.body?.operation_id || '') === actionObj.operation_id)) store.add(actionObj);
+    };
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve({ conflictId });
+      tx.onerror = event => reject(event.target.error);
+      tx.onabort = event => reject(event.target.error || new Error('受付IDを端末に保存できません'));
+    });
+  }
+
+  async function settlePendingAction(operationId, update) {
+    const action = (await getPendingActions()).find(item => String(item.operation_id || item.body?.operation_id || '') === operationId);
+    if (!action) return;
+    if (update.remove) return del('pendingActions', action._queueKey);
+    return putWithKey('pendingActions', action._queueKey, { ...action, ...update, _queueKey: undefined });
+  }
+
   function pendingActionBlockReason_(action, now = Date.now()) {
+    if (action?.last_error_code === 'OPERATION_OUTCOME_UNKNOWN') return '保存結果が不明です。受付IDを確認してから個別に処理してください';
+    if (['API_ERROR', 'PENDING_OPERATION_EXISTS'].includes(action?.last_error_code)) return '入力内容または先行する受付の確認が必要なため自動再送を停止しました';
     const createdAt = Number(action?.timestamp);
     if (!Number.isFinite(createdAt) || createdAt <= 0) return '作成時刻を確認できません';
     if (now - createdAt > MAX_AUTO_RETRY_AGE_MS) return '7日以上前のため自動再送を停止しました';
@@ -235,6 +283,7 @@ const Storage = (() => {
             _queueKey: undefined,
             attempts,
             last_error: String(e.message || e),
+            last_error_code: String(e.code || ''),
             last_attempt_at: Date.now()
           });
           // 順序依存の書き込みを追い越さない。残りは次回の起動・オンライン復帰時に再試行する。
@@ -318,7 +367,7 @@ const Storage = (() => {
   });
 
   return {
-    addPendingAction, getPendingActions, clearPendingActions, getPendingQueueStatus, syncPending,
+    addPendingAction, reservePendingAction, settlePendingAction, getPendingActions, clearPendingActions, getPendingQueueStatus, syncPending,
     cacheStores, getCachedStores,
     cacheConfig, getCachedConfig,
     saveCurrentRoute, getCurrentRoute, clearCurrentRoute,

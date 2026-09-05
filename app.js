@@ -91,7 +91,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v195';
+  const ASSET_VER = 'v196';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -452,7 +452,7 @@ const App = (() => {
       return false;
     }
 
-    const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
+    const home = { lat: config.home_lat, lng: config.home_lng };
     const reconstructed = {
       orderedStores,
       totalDistanceKm: serverRecord.totalDistanceKm,
@@ -966,7 +966,7 @@ const App = (() => {
         <div class="route-stop">
           <div class="stop-num">${i + 1}</div>
           <span class="stop-name">${renderStopIconHtml(s)}${esc(s.name)}</span>
-          <span class="stop-stay">${s.avg_stay_min || 30}分</span>
+          <span class="stop-stay">${s.avg_stay_min ?? 30}分</span>
         </div>`;
     });
     html += `
@@ -1035,10 +1035,14 @@ const App = (() => {
 
   function doOptimize() {
     const selected = selectedStoreIds.map(id => stores.find(s => s.store_id === id)).filter(Boolean);
-    const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
-    const speed = Number(config.avg_speed_kmh) || 30;
-    const selRoute = RouteOptimizer.calcSelectionOrder(home, selected, speed);
-    Router.navigate('route-select', { selRoute });
+    const home = { lat: config.home_lat, lng: config.home_lng };
+    const speed = config.avg_speed_kmh === '' || config.avg_speed_kmh == null ? 30 : Number(config.avg_speed_kmh);
+    try {
+      const selRoute = RouteOptimizer.calcSelectionOrder(home, selected, speed);
+      Router.navigate('route-select', { selRoute });
+    } catch (error) {
+      toast(error.message, 5000);
+    }
   }
 
   // ---------- マップビュー ----------
@@ -2151,7 +2155,7 @@ const App = (() => {
   function renderRouteSelect(container, { selRoute } = {}) {
     if (!selRoute) { Router.navigate('home'); return; }
     setTitle('ルート確認');
-    const home = { lat: Number(config.home_lat), lng: Number(config.home_lng) };
+    const home = { lat: config.home_lat, lng: config.home_lng };
     const mapsSegments = RouteOptimizer.generateMapsSegments(home, selRoute.orderedStores);
 
     function buildStopList(orderedStores) {
@@ -2161,13 +2165,13 @@ const App = (() => {
           <div class="route-stop">
             <div class="stop-num">${i + 1}</div>
             <span class="stop-name">${renderStopIconHtml(s)}${esc(s.name)}</span>
-            <span class="stop-stay">${s.avg_stay_min || 30}分</span>
+            <span class="stop-stay">${s.avg_stay_min ?? 30}分</span>
           </div>`;
       });
       return html;
     }
 
-    let html = '<div class="text-sm text-dim text-center mb-8">この順番で巡回します</div>';
+    let html = '<div class="text-sm text-dim text-center mb-8">この順番で巡回します。時間・距離は直線距離による概算です。道路、混雑、営業時間は未反映です。</div>';
 
     // 選択順ルートカード
     html += `
@@ -2258,7 +2262,7 @@ const App = (() => {
     const visits = Number(store.visit_count) || 0;
     const totalPurchase = Number(store.total_purchase) || 0;
     const totalItems = Number(store.total_items) || 0;
-    const avgStay = Number(store.avg_stay_min) || 30;
+    const avgStay = Number(store.avg_stay_min ?? 30);
     const purchaseLabel = totalPurchase >= 10000
       ? `${(totalPurchase / 10000).toFixed(totalPurchase >= 100000 ? 0 : 1)}万`
       : (totalPurchase ? totalPurchase.toLocaleString() : '-');
@@ -2399,7 +2403,7 @@ const App = (() => {
   function isRetryableRouteStartError_(error, duringStartRequest) {
     if (!duringStartRequest) return false;
     const code = String(error?.code || '').toUpperCase();
-    if (['TIMEOUT', 'UNKNOWN_RESPONSE', 'BUSY'].includes(code)) return true;
+    if (['TIMEOUT', 'UNKNOWN_RESPONSE', 'OPERATION_OUTCOME_UNKNOWN', 'BUSY'].includes(code)) return true;
     if (error?.name === 'AbortError') return true;
     // fetchの通信失敗はSafariを含む各ブラウザでTypeErrorになる。
     if (error?.name === 'TypeError') return true;
@@ -2985,7 +2989,7 @@ const App = (() => {
         } else {
           toast(`在庫に登録しました${result && result.row ? `（${result.row}行）` : ''}`);
         }
-        if (typeof options.onSaved === 'function') options.onSaved(result || {}, payload);
+        if (!result?._queued && typeof options.onSaved === 'function') options.onSaved(result || {}, payload);
       } catch (err) {
         button.disabled = false;
         button.textContent = '登録する';
@@ -3801,7 +3805,7 @@ const App = (() => {
       </div>
       <div class="flex gap-8">
         <div class="form-group" style="flex:1"><label class="form-label">平均滞在(分)</label>
-          <input type="number" class="form-input" id="sf-stay" value="${s.avg_stay_min || 30}"></div>
+          <input type="number" min="0" class="form-input" id="sf-stay" value="${s.avg_stay_min ?? 30}"></div>
         <div class="form-group" style="flex:1"><label class="form-label">アイコン</label>
           <input type="text" class="form-input" id="sf-icon" value="${s.icon || ''}"></div>
       </div>`;
@@ -3812,11 +3816,11 @@ const App = (() => {
       name: el.querySelector('#sf-name').value,
       category: el.querySelector('#sf-category').value,
       address: el.querySelector('#sf-address').value,
-      lat: Number(el.querySelector('#sf-lat').value) || 0,
-      lng: Number(el.querySelector('#sf-lng').value) || 0,
+      lat: el.querySelector('#sf-lat').value,
+      lng: el.querySelector('#sf-lng').value,
       open_time: el.querySelector('#sf-open').value,
       close_time: el.querySelector('#sf-close').value,
-      avg_stay_min: Number(el.querySelector('#sf-stay').value) || 30,
+      avg_stay_min: Number(el.querySelector('#sf-stay').value || 30),
       icon: el.querySelector('#sf-icon').value
     };
   }
@@ -4227,14 +4231,7 @@ const App = (() => {
           return;
         }
       }
-      if (candidates.length === 1) {
-        (byStore[candidates[0].store_id] = byStore[candidates[0].store_id] || []).push(it);
-        // L列が空の場合はGASに自動書き戻し（分析タブで店舗未確定になるのを防ぐ）
-        if (!it.shop && it.row) {
-          it.shop = candidates[0].name;
-          syncWrite(API.updateInventoryShop({ row: it.row, shop: candidates[0].name }), '店舗の自動紐付け');
-        }
-      } else if (candidates.length > 1) {
+      if (candidates.length >= 1 && !it.shop) {
         ambiguous.push({ item: it, candidates });
       } else {
         unrelated.push(it);
@@ -4303,7 +4300,7 @@ const App = (() => {
       });
       html += `<div class="card mt-8" style="background:#fff7e6;border:1px solid #ffb74d">
         <div class="card-title" style="color:var(--accent)">⚠️ 店舗未確定（${ambiguous.length}件）</div>
-        <div class="text-sm text-dim mb-8">同じ日に同チェーンの複数店舗を訪問しました。仕入先ごとにまとめて設定できます。</div>`;
+        <div class="text-sm text-dim mb-8">店舗はまだ確定していません。候補が1店舗でも、実際の仕入先を確認して選択してください。上の合計には未確定候補も含みます。</div>`;
       ambiguousGroups.forEach(group => {
         const rows = group.entries.map(entry => Number(entry.item.row)).filter(Boolean);
         const options = ['<option value="">-- 一括設定する店舗 --</option>']
@@ -4366,6 +4363,16 @@ const App = (() => {
 
     section.innerHTML = html;
 
+    const shopUpdatePayload = (row, shop) => {
+      const item = items.find(value => Number(value.row) === Number(row));
+      if (!item?.inventory_uuid) throw new Error('在庫を最新情報に読み直してから選択してください');
+      return { row, shop, inventory_uuid: item.inventory_uuid, expected_shop: item.shop || '', expected_date: item.date };
+    };
+    const verifyShopSaved = result => {
+      if (result?._queued) throw new Error(`受付ID ${result.operation_id} の結果は未確定です。再入力せず送信待ちを確認してください`);
+      if (!result?.updated) throw new Error('店舗名の保存結果を確認できません');
+    };
+
     // キャッシュ内のitemのshopを即時更新（サーバ書き込み後の再レンダリングで最新状態に反映するため）
     const updateCachedShop = (row, shop) => {
       const date = normalizeRouteDate_(route.date);
@@ -4383,9 +4390,11 @@ const App = (() => {
         const shop = select.value;
         const rows = String(select.dataset.rows || '').split(',').map(Number).filter(Boolean);
         if (!shop || !rows.length) return;
+        if (!confirm(`${rows.length}件の仕入先を「${shop}」に確定しますか？`)) { select.value = ''; return; }
         select.disabled = true;
         try {
-          await API.bulkUpdateInventoryShop({ items: rows.map(row => ({ row, shop })) });
+          const result = await API.bulkUpdateInventoryShop({ items: rows.map(row => shopUpdatePayload(row, shop)) });
+          verifyShopSaved(result);
           rows.forEach(row => updateCachedShop(row, shop));
           toast(`${shop} に${rows.length}件を一括設定しました`);
           loadInventoryForRoute(route, { backgroundRefresh: false });
@@ -4404,7 +4413,8 @@ const App = (() => {
         if (!row || !shop) return;
         sel.disabled = true;
         try {
-          await API.updateInventoryShop({ row, shop });
+          const result = await API.updateInventoryShop(shopUpdatePayload(row, shop));
+          verifyShopSaved(result);
           toast(`${shop} に確定しました`);
           updateCachedShop(row, shop);
           loadInventoryForRoute(route, { backgroundRefresh: false });
@@ -4423,7 +4433,8 @@ const App = (() => {
         if (!row || !shop) return;
         sel.disabled = true;
         try {
-          await API.updateInventoryShop({ row, shop });
+          const result = await API.updateInventoryShop(shopUpdatePayload(row, shop));
+          verifyShopSaved(result);
           toast(`${shop} に紐付けました`);
           updateCachedShop(row, shop);
           loadInventoryForRoute(route, { backgroundRefresh: false });
@@ -4854,6 +4865,12 @@ const App = (() => {
     const url = API.getUrl();
     let html = `
       <div class="settings-section-title">基本設定</div>
+      <div class="card settings-card">
+        <div class="card-title">店舗スコアの集計状況</div>
+        <div class="text-sm">最終成功: ${esc(config.priority_last_success || 'まだ確認できていません')}</div>
+        <div class="text-sm text-dim">${esc(config.priority_last_error || '失敗記録なし（最新の処理成功を保証する表示ではありません）')}</div>
+        <div class="text-sm text-dim">在庫側の店舗名が確定した商品のみ集計します。</div>
+      </div>
       <div class="card settings-card">
         <div class="card-title">端末接続コード</div>
         <div class="text-sm text-dim mb-8">この端末からだけ安全にデータを読み書きするためのコードです。</div>
