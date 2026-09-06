@@ -23,5 +23,7 @@ jobs:
       - run: node --check pair.js
       - run: node --check bootstrap.js
       - run: node --check sw.js
-      - run: node --test *.test.mjs
+      # Backend integration tests run privately with the adjacent GAS checkout.
+      # Do not publish private GAS code just to satisfy the public PWA CI.
+      - run: node --test route-app.test.mjs route-amazon-pricing.test.mjs route-operation-reservation.test.mjs route-safety-remediation.test.mjs route-ui.test.mjs
       - run: node verify-pwa-version.mjs
