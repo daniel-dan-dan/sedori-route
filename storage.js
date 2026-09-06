@@ -204,9 +204,44 @@ const Storage = (() => {
   async function settlePendingAction(operationId, update) {
     const action = (await getPendingActions()).find(item => String(item.operation_id || item.body?.operation_id || '') === operationId);
     if (!action) return;
-    if (update.remove) return del('pendingActions', action._queueKey);
-    return putWithKey('pendingActions', action._queueKey, { ...action, ...update, _queueKey: undefined });
+    // 成功応答を先に永続化。キュー消去に失敗しても同じ受付IDの記録は1件だけ残る。
+    if (update.remove && Object.hasOwn(update, 'result') && action.action === 'addInventoryPurchase') {
+      const result = update.result && typeof update.result === 'object' ? update.result : {};
+      const registered = Number.isInteger(Number(result.row)) && Number(result.row) > 0;
+      await put('currentRoute', {
+        id: 'inventory-receipt-' + operationId,
+        operation_id: operationId,
+        body: action.body,
+        status: registered ? 'registered' : 'review',
+        reason: registered ? '' : '応答は受信しましたが、在庫の登録先を確認できません。再登録せず受付情報をご確認ください',
+        row: Number(result.row) || null,
+        inventory_uuid: String(result.inventory_uuid || ''),
+        timestamp: action.timestamp,
+        confirmedAt: Date.now(),
+      });
+    }
+    if (update.remove) await del('pendingActions', action._queueKey);
+    else await putWithKey('pendingActions', action._queueKey, { ...action, ...update, _queueKey: undefined });
+    window.dispatchEvent(new CustomEvent('inventory-status-changed'));
   }
+
+  async function getInventoryReceiptStatus(routeId = '') {
+    const records = (await getAll('currentRoute')).filter(item => String(item.id || '').startsWith('inventory-receipt-'));
+    const receipts = new Map(records.map(item => [item.operation_id, item]));
+    const actions = await getPendingActions();
+    for (const action of actions) {
+      if (action.action !== 'addInventoryPurchase' || receipts.has(action.operation_id)) continue;
+      const reason = pendingActionBlockReason_(action);
+      receipts.set(action.operation_id, { ...action, status: reason ? 'review' : 'pending', reason });
+    }
+    return [...receipts.values()]
+      .filter(item => !routeId || String(item.body?.route_id || '') === String(routeId))
+      .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+  }
+
+  function savePurchaseDraft(key, data) { return put('currentRoute', { id: 'purchase-draft-' + key, data }); }
+  function getPurchaseDraft(key) { return get('currentRoute', 'purchase-draft-' + key); }
+  function clearPurchaseDraft(key) { return del('currentRoute', 'purchase-draft-' + key); }
 
   function pendingActionBlockReason_(action, now = Date.now()) {
     if (action?.last_error_code === 'OPERATION_OUTCOME_UNKNOWN') return '保存結果が不明です。受付IDを確認してから個別に処理してください';
@@ -373,5 +408,6 @@ const Storage = (() => {
     saveCurrentRoute, getCurrentRoute, clearCurrentRoute,
     savePlannedRoute, getPlannedRoute, clearPlannedRoute,
     saveViewCache, getViewCache, clearViewCache, clearRemoteCaches,
+    getInventoryReceiptStatus, savePurchaseDraft, getPurchaseDraft, clearPurchaseDraft,
   };
 })();

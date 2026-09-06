@@ -1,20 +1,20 @@
 const CACHE_PREFIX = 'sedori-route-';
-const CACHE_NAME = 'sedori-route-v196';
+const CACHE_NAME = 'sedori-route-v198';
 const ASSETS = [
   './',
   './index.html',
   './pair.html',
-  './style.css?v=196',
-  './app.js?v=196',
-  './router.js?v=196',
-  './api.js?v=196',
-  './route-optimizer.js?v=196',
-  './storage.js?v=196',
-  './quiz.js?v=196',
-  './bootstrap.js?v=196',
-  './pair.js?v=196',
-  './vendor/leaflet/leaflet.css?v=196',
-  './vendor/leaflet/leaflet.js?v=196',
+  './style.css?v=198',
+  './app.js?v=198',
+  './router.js?v=198',
+  './api.js?v=198',
+  './route-optimizer.js?v=198',
+  './storage.js?v=198',
+  './quiz.js?v=198',
+  './bootstrap.js?v=198',
+  './pair.js?v=198',
+  './vendor/leaflet/leaflet.css?v=198',
+  './vendor/leaflet/leaflet.js?v=198',
   './vendor/leaflet/images/layers-2x.png',
   './vendor/leaflet/images/layers.png',
   './vendor/leaflet/images/marker-icon-2x.png',
@@ -92,7 +92,7 @@ async function installRelease_() {
     await caches.delete(CACHE_NAME);
     throw error;
   }
-  await self.skipWaiting();
+  // 入力中の旧タブを守るため、全クライアントが閉じるまで通常のwaitingを維持する。
 }
 
 self.addEventListener('install', e => {
@@ -101,7 +101,8 @@ self.addEventListener('install', e => {
 
 self.addEventListener('message', e => {
   if (e.data && e.data.type === 'SKIP_WAITING') {
-    e.waitUntil(releaseCacheComplete_().then(complete => { if (complete) return self.skipWaiting(); }));
+    // 旧bootstrapは更新のたびにこのメッセージを送る。即時切替は行わない。
+    if (e.source) e.source.postMessage({ type: 'UPDATE_WAITING', cacheName: CACHE_NAME });
   }
   if (e.data && e.data.type === 'GET_VERSION' && e.source) {
     e.source.postMessage({ type: 'SW_VERSION', cacheName: CACHE_NAME });

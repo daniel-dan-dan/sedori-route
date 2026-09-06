@@ -190,3 +190,36 @@ test('sync retains invalid old requests for review without automatically replayi
   assert.equal(await Storage.syncPending(), 0);
   assert.equal(requests, 1, 'a blocked validation failure must not be sent again');
 });
+
+test('registration status persists after a successful response and is isolated by route', async () => {
+  const db = memoryIndexedDb();
+  const { API, Storage } = harness(db, async () => response({row:123,inventory_uuid:'fixture-inventory'}));
+  await API.addInventoryPurchase({...purchase,route_id:'route-a'});
+  assert.equal((await Storage.getPendingActions()).length,0);
+  let receipts=await Storage.getInventoryReceiptStatus('route-a');
+  assert.equal(receipts.length,1);assert.equal(receipts[0].status,'registered');assert.equal(receipts[0].row,123);
+  assert.equal((await Storage.getInventoryReceiptStatus('route-b')).length,0);
+  await Storage.savePurchaseDraft('fixture-key',{payload:{product_name:'next item'}});
+  await Storage.clearRemoteCaches();
+  const reloaded=harness(db,async()=>{throw Error('unexpected network');});await reloaded.API.ready();
+  receipts=await reloaded.Storage.getInventoryReceiptStatus('route-a');assert.equal(receipts[0].status,'registered');
+  assert.equal((await reloaded.Storage.getPurchaseDraft('fixture-key')).data.payload.product_name,'next item');
+});
+test('pending and unknown receipts never appear registered, including after a replay succeeds',async()=>{
+  const db=memoryIndexedDb();const first=harness(db,async()=>{throw TypeError('Failed to fetch');});
+  await first.API.addInventoryPurchase({...purchase,route_id:'route-a'});
+  assert.equal((await first.Storage.getInventoryReceiptStatus())[0].status,'pending');
+  const retry=harness(db,async()=>response({row:124}));await retry.API.ready();await retry.Storage.syncPending();
+  const receipts=await retry.Storage.getInventoryReceiptStatus();assert.equal(receipts.length,1);assert.equal(receipts[0].status,'registered');
+  const review=harness(memoryIndexedDb(),async()=>unknown());await assert.rejects(review.API.addInventoryPurchase(purchase));
+  assert.equal((await review.Storage.getInventoryReceiptStatus())[0].status,'review');
+});
+
+for (const emptyResult of [null, undefined, false, '', 0, {}]) test('empty success data persists as review before clearing its pending receipt: '+String(emptyResult),async()=>{
+  const {API,Storage}=harness(memoryIndexedDb(),async()=>response(emptyResult));
+  await API.addInventoryPurchase({...purchase,route_id:'route-empty'});
+  assert.equal((await Storage.getPendingActions()).length,0);
+  const receipts=await Storage.getInventoryReceiptStatus('route-empty');
+  assert.equal(receipts.length,1);assert.equal(receipts[0].status,'review');assert.equal(receipts[0].row,null);
+  assert.match(receipts[0].reason,/登録先を確認できません/);
+});

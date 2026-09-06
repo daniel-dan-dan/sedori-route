@@ -14,8 +14,9 @@ const Router = (() => {
     'history-detail': 'history',
     analytics: 'analytics',
     haiban: 'haiban',
-    quiz: 'quiz',
-    settings: 'settings'
+    quiz: 'more',
+    settings: 'more',
+    more: 'more'
   };
 
   function syncNavigation(name) {

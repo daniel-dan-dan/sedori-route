@@ -349,7 +349,7 @@ const API = (() => {
       });
       const result = await readJson_(res, action);
       if (!isRead) {
-        try { await Storage.settlePendingAction(operationId, { remove: true }); }
+        try { await Storage.settlePendingAction(operationId, { remove: true, result }); }
         catch (error) { throw apiError_('保存後の端末側の記録確認に失敗しました', 'UNKNOWN_RESPONSE', error); }
       }
       return result;

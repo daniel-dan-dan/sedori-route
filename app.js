@@ -26,6 +26,8 @@ const App = (() => {
   let mapCluster = null;
   let mapMarkers = new Map(); // store_id → L.marker（差分更新用）
   let mapChainFilter = 'all';
+  let mapSearchQuery = '';
+  let mapViewMode = 'map';
   let mapBoundsFilter = false;
   let mapVisitInfoByStoreId = new Map();
   let mapVisitInfoLoaded = false;
@@ -91,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v196';
+  const ASSET_VER = 'v198';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -518,9 +520,11 @@ const App = (() => {
         const reason = String(event?.detail?.reason || '安全確認が必要です');
         toast(`古い未送信データは自動送信を止めました: ${reason}`, 7000);
       });
+      window.addEventListener('inventory-status-changed', () => refreshInventoryStatus_());
       pendingQueueListenerReady = true;
     }
     document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') refreshInventoryStatus_();
       if (document.visibilityState === 'visible' && Router.getCurrentView() === 'home') {
         refreshPlannedRouteOnHome_(true);
       }
@@ -684,6 +688,7 @@ const App = (() => {
     Router.register('history', renderHistory);
     Router.register('history-detail', renderHistoryDetail);
     Router.register('settings', renderSettings);
+    Router.register('more', renderMore);
     Router.register('analytics', renderAnalytics);
     Router.register('haiban', renderHaiban);
     Router.register('quiz', (container) => {
@@ -1069,8 +1074,8 @@ const App = (() => {
     return L.divIcon({
       className: '',
       html: `<div class="${cls}" style="${style}">${inner}${badge}</div>`,
-      iconSize: [36, 36],
-      iconAnchor: [18, 18],
+      iconSize: [44, 44],
+      iconAnchor: [22, 22],
     });
   }
 
@@ -1100,12 +1105,22 @@ const App = (() => {
     container.innerHTML = `
       ${buildPatrolBanner()}
       ${buildPlannedRouteBanner()}
+      <div class="map-toolbar">
+        <label class="sr-only" for="map-store-search">店舗名・地域・住所で検索</label>
+        <input type="search" class="form-input" id="map-store-search" placeholder="店舗名・地域・住所で検索" value="${esc(mapSearchQuery)}">
+        <div class="view-switch" aria-label="店舗の表示方法">
+          <button type="button" class="btn btn-outline" id="btn-view-map" aria-pressed="${mapViewMode === 'map'}">地図</button>
+          <button type="button" class="btn btn-outline" id="btn-view-list" aria-pressed="${mapViewMode === 'list'}">店舗一覧</button>
+        </div>
+      </div>
       ${chipHtml}
-      <div id="map-view">
+      <div id="map-load-status" class="map-load-status" role="status" hidden></div>
+      <div id="map-view" ${mapViewMode === 'list' ? 'hidden' : ''}>
         <button class="btn-map-current" id="btn-map-current" title="現在地" aria-label="現在地">
           <svg class="map-current-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-4.4 7-11a7 7 0 1 0-14 0c0 6.6 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/></svg>
         </button>
       </div>
+      <div id="map-store-list" class="map-store-list" ${mapViewMode === 'map' && !mapSearchQuery ? 'hidden' : ''}></div>
       <div class="map-bottom-bar">
         <div class="flex-between mb-8">
           <span class="text-sm text-dim"><span id="map-sel-count">${selectedStoreIds.length}</span>店舗 選択中</span>
@@ -1146,8 +1161,30 @@ const App = (() => {
       });
     });
 
+    document.getElementById('map-store-search').addEventListener('input', event => {
+      mapSearchQuery = event.target.value;
+      refreshMapMarkers();
+    });
+    const changeView = mode => {
+      mapViewMode = mode;
+      document.getElementById('map-view').hidden = mode === 'list';
+      document.getElementById('btn-view-map').setAttribute('aria-pressed', String(mode === 'map'));
+      document.getElementById('btn-view-list').setAttribute('aria-pressed', String(mode === 'list'));
+      if (mode === 'map') mapInstance?.invalidateSize(false);
+      renderMapStoreList_();
+    };
+    document.getElementById('btn-view-map').addEventListener('click', () => changeView('map'));
+    document.getElementById('btn-view-list').addEventListener('click', () => changeView('list'));
+    renderMapStoreList_();
+
     // Leaflet初期化（DOMレイアウト完了後）
-    requestAnimationFrame(() => requestAnimationFrame(() => initMap()));
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      try { initMap(); } catch (error) {
+        showMapFailure_('map-load-status');
+        changeView('list');
+        console.warn('地図の初期化に失敗:', error);
+      }
+    }));
 
     document.getElementById('btn-map-clear').addEventListener('click', () => {
       selectedStoreIds = [];
@@ -1175,6 +1212,31 @@ const App = (() => {
   // 初期中心は常に仙台駅固定
   const SENDAI_STATION = [38.2603, 140.8828];
 
+  // 公式仕様: https://maps.gsi.go.jp/development/ichiran.html (2026-09-06確認)
+  const BASE_MAP_URL = 'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png';
+  function showMapFailure_(statusId) {
+    const status = document.getElementById(statusId);
+    if (!status) return;
+    status.hidden = false;
+    status.textContent = '地図を読み込めません。店舗一覧から選択できます。';
+  }
+  function addBaseMap_(map, statusId) {
+    let failed = false;
+    const layer = L.tileLayer(BASE_MAP_URL, {
+      minZoom: 9, maxZoom: 19, maxNativeZoom: 18,
+      updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 2,
+      attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>に店舗情報を追記',
+    });
+    layer.on('loading', () => { failed = false; });
+    layer.on('tileerror', () => { failed = true; showMapFailure_(statusId); });
+    layer.on('load', () => {
+      const status = document.getElementById(statusId);
+      if (status && !failed) status.hidden = true;
+    });
+    layer.addTo(map);
+    return layer;
+  }
+
   function initMap() {
     const mapEl = document.getElementById('map-view');
     if (!mapEl) return;
@@ -1197,20 +1259,13 @@ const App = (() => {
     });
     wireMapDoubleTapZoom(mapEl);
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      subdomains: 'abcd',
-      updateWhenIdle: false,     // アニメ終了を待たずタイル取得を開始
-      updateWhenZooming: false,  // アニメ中の描画更新は抑制（ガクつき防止）
-      updateInterval: 120,
-      keepBuffer: 5,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    }).addTo(mapInstance);
+    addBaseMap_(mapInstance, 'map-load-status');
 
     mapCluster = L.layerGroup();
     mapInstance.addLayer(mapCluster);
     mapMarkers.clear();
-    mapInstance.on('zoomend moveend', () => {
+    mapInstance.on('zoomend', refreshMapMarkers);
+    mapInstance.on('moveend', () => {
       if (!mapInstance) return;
       if (mapBoundsFilter) refreshMapMarkers();
     });
@@ -1489,65 +1544,105 @@ const App = (() => {
     return positions;
   }
 
-  function refreshMapMarkers() {
-    if (!mapInstance || !mapCluster) return;
+  function storeMatchesSearch_(store, query) {
+    const words = String(query || '').normalize('NFKC').toLocaleLowerCase('ja').trim().split(/\s+/).filter(Boolean);
+    const area = AREAS.find(item => item.id === getArea(store))?.name || '';
+    const haystack = [store.name, store.address, getChain(store), area].join(' ').normalize('NFKC').toLocaleLowerCase('ja');
+    return words.every(word => haystack.includes(word));
+  }
 
-    // 巡回中は巡回ルートの店舗を必ず表示しフィルター無視
-    const patrolIds = patrolState ? patrolState.stops.map(s => s.store_id) : [];
-    // 巡回前は保存済み予定の店舗を順番付きで必ず表示する
-    const plannedIds = !patrolState && plannedRoute
-      ? plannedRoute.orderedStores.map(s => s.store_id)
-      : [];
-    const routeIdSet = new Set([...patrolIds, ...plannedIds]);
-
-    // 差分更新: 既存markerを使いまわし、不要分だけ削除・新規だけ追加
-    const wanted = new Map();
-    stores.forEach(s => {
-      const lat = Number(s.lat);
-      const lng = Number(s.lng);
-      if (!lat || !lng) return;
-      if (mapChainFilter !== 'all' && getChain(s) !== mapChainFilter && !routeIdSet.has(s.store_id)) return;
-      if (mapBoundsFilter && !routeIdSet.has(s.store_id) && !mapInstance.getBounds().contains([lat, lng])) return;
-      wanted.set(s.store_id, s);
+  function getMapFilteredStores_() {
+    return stores.filter(store => {
+      if (mapChainFilter !== 'all' && getChain(store) !== mapChainFilter) return false;
+      if (!storeMatchesSearch_(store, mapSearchQuery)) return false;
+      if (mapBoundsFilter && mapInstance && !mapInstance.getBounds().contains([Number(store.lat), Number(store.lng)])) return false;
+      return true;
     });
+  }
 
-    const markerPositions = buildMarkerPositions([...wanted.values()]);
+  function renderMapStoreList_() {
+    const list = document.getElementById('map-store-list');
+    if (!list) return;
+    list.hidden = mapViewMode === 'map' && !mapSearchQuery.trim();
+    const filtered = getMapFilteredStores_();
+    list.innerHTML = `<div class="store-list-count">${filtered.length}店舗${mapSearchQuery ? 'が一致' : ''}</div>` + (filtered.length ? filtered.map(store => {
+      const selected = selectedStoreIds.includes(store.store_id);
+      const valid = Number.isFinite(Number(store.lat)) && Number.isFinite(Number(store.lng)) && Number(store.lat) !== 0 && Number(store.lng) !== 0;
+      return `<button type="button" class="store-select-row ${selected ? 'selected' : ''}" data-select-store="${esc(store.store_id)}" aria-pressed="${selected}" ${valid ? '' : 'disabled'}>
+        ${renderStoreIconHtml(store)}<span class="store-select-info"><strong>${esc(store.name)}</strong><span>${esc(store.address || getChain(store))}</span>${valid ? '' : '<span>位置情報の確認が必要です</span>'}</span><span class="store-select-mark">${selected ? getSelectionLabel(selectedStoreIds.indexOf(store.store_id)) : '＋'}</span>
+      </button>`;
+    }).join('') : '<div class="empty-state">該当する店舗はありません。検索やチェーンの条件を変更してください。</div>');
+    list.querySelectorAll('[data-select-store]').forEach(button => button.addEventListener('click', () => toggleMapSelection(button.dataset.selectStore)));
+  }
 
-    mapMarkers.forEach((marker, sid) => {
-      if (!wanted.has(sid)) {
-        mapCluster.removeLayer(marker);
-        mapMarkers.delete(sid);
+  // 画面上で近い未選択店舗だけをまとめる。選択順のピンと元座標は変更しない。
+  function groupNearbyStores_(items, project, excludedIds = new Set(), cellSize = 64) {
+    const groups = new Map();
+    const singles = [];
+    items.forEach(store => {
+      if (excludedIds.has(store.store_id)) { singles.push([store]); return; }
+      const point = project([Number(store.lat), Number(store.lng)]);
+      const key = `${Math.floor(point.x / cellSize)}:${Math.floor(point.y / cellSize)}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(store);
+    });
+    return [...singles, ...groups.values()];
+  }
+
+  function buildClusterMarker_(map, group, onSelect) {
+    const lat = group.reduce((sum, item) => sum + Number(item.lat), 0) / group.length;
+    const lng = group.reduce((sum, item) => sum + Number(item.lng), 0) / group.length;
+    const areaNames = [...new Set(group.map(item => AREAS.find(area => area.id === getArea(item))?.name || '近隣'))];
+    const label = areaNames.length === 1 ? areaNames[0] : '近隣';
+    const marker = L.marker([lat, lng], { title: `${label} ${group.length}店舗`, icon: L.divIcon({
+      className: '', iconSize: [64, 52], iconAnchor: [32, 26],
+      html: `<div class="map-cluster"><strong>${group.length}</strong><span>${esc(label)}</span></div>`
+    }) });
+    marker.on('click', () => {
+      if (map.getZoom() < 17) {
+        map.fitBounds(L.latLngBounds(group.map(item => [Number(item.lat), Number(item.lng)])), { maxZoom: Math.min(17, map.getZoom() + 2), padding: [30, 30] });
+      } else {
+        const popup = document.createElement('div');
+        popup.className = 'cluster-store-list';
+        group.forEach(item => {
+          const button = document.createElement('button');
+          button.className = 'btn btn-outline';
+          button.textContent = String(item.name || '店舗');
+          button.addEventListener('click', () => onSelect(item));
+          popup.appendChild(button);
+        });
+        marker.bindPopup(popup, { autoPan: false }).openPopup();
       }
     });
+    return marker;
+  }
 
-    wanted.forEach((s, sid) => {
-      const lat = Number(s.lat);
-      const lng = Number(s.lng);
-      // 巡回中は巡回順、次に手動選択順、最後に保存済み予定順を表示
+  function refreshMapMarkers() {
+    renderMapStoreList_();
+    if (!mapInstance || !mapCluster) return;
+    const patrolIds = patrolState ? patrolState.stops.map(s => s.store_id) : [];
+    const plannedIds = !patrolState && plannedRoute ? plannedRoute.orderedStores.map(s => s.store_id) : [];
+    const routeIdSet = new Set([...patrolIds, ...plannedIds, ...selectedStoreIds]);
+    const filteredIds = new Set(getMapFilteredStores_().map(store => store.store_id));
+    const wanted = stores.filter(store => Number(store.lat) && Number(store.lng) && (filteredIds.has(store.store_id) || routeIdSet.has(store.store_id)));
+    const markerPositions = buildMarkerPositions(wanted);
+    mapCluster.clearLayers();
+    mapMarkers.clear();
+    groupNearbyStores_(wanted, point => mapInstance.project(point, mapInstance.getZoom()), routeIdSet).forEach(group => {
+      if (group.length > 1) {
+        mapCluster.addLayer(buildClusterMarker_(mapInstance, group, store => toggleMapSelection(store.store_id)));
+        return;
+      }
+      const s = group[0], sid = s.store_id;
       const patrolIdx = patrolIds.indexOf(sid);
       const selectedIdx = selectedStoreIds.indexOf(sid);
       const plannedIdx = plannedIds.indexOf(sid);
-      const displayIdx = patrolIdx >= 0
-        ? patrolIdx
-        : selectedIdx >= 0
-          ? selectedIdx
-          : plannedIdx;
-      const popupSelectionIdx = patrolIdx >= 0 ? patrolIdx : selectedIdx;
-      const existing = mapMarkers.get(sid);
-      const markerLatLng = markerPositions.get(sid) || [lat, lng];
-      if (existing) {
-        existing.setLatLng(markerLatLng);
-        existing.setIcon(buildPinIcon(s, displayIdx));
-        existing.setPopupContent(buildMapPopupElement(s, popupSelectionIdx));
-      } else {
-        const marker = L.marker(markerLatLng, { icon: buildPinIcon(s, displayIdx) });
-        marker.bindPopup(buildMapPopupElement(s, popupSelectionIdx));
-        mapCluster.addLayer(marker);
-        mapMarkers.set(sid, marker);
-      }
+      const displayIdx = patrolIdx >= 0 ? patrolIdx : selectedIdx >= 0 ? selectedIdx : plannedIdx;
+      const marker = L.marker(markerPositions.get(sid) || [Number(s.lat), Number(s.lng)], { title: String(s.name || ''), icon: buildPinIcon(s, displayIdx) });
+      marker.bindPopup(buildMapPopupElement(s, selectedIdx), { autoPan: false });
+      mapCluster.addLayer(marker);
+      mapMarkers.set(sid, marker);
     });
-
-    // 巡回ルートのポリライン描画
     drawPatrolPolyline();
   }
 
@@ -2152,6 +2247,16 @@ const App = (() => {
 
   // ---------- ルート選択画面 ----------
 
+  function reorderRouteStores_(orderedStores, index, direction, remove = false) {
+    const next = orderedStores.slice();
+    if (!Number.isInteger(index) || index < 0 || index >= next.length) return next;
+    if (remove) { next.splice(index, 1); return next; }
+    const target = index + direction;
+    if (![-1, 1].includes(direction) || target < 0 || target >= next.length) return next;
+    [next[index], next[target]] = [next[target], next[index]];
+    return next;
+  }
+
   function renderRouteSelect(container, { selRoute } = {}) {
     if (!selRoute) { Router.navigate('home'); return; }
     setTitle('ルート確認');
@@ -2165,7 +2270,11 @@ const App = (() => {
           <div class="route-stop">
             <div class="stop-num">${i + 1}</div>
             <span class="stop-name">${renderStopIconHtml(s)}${esc(s.name)}</span>
-            <span class="stop-stay">${s.avg_stay_min ?? 30}分</span>
+            <div class="stop-order-actions">
+              <button type="button" class="btn btn-outline" data-move-stop="${i}" data-direction="-1" aria-label="${esc(s.name)}を上へ" ${i === 0 ? 'disabled' : ''}>↑</button>
+              <button type="button" class="btn btn-outline" data-move-stop="${i}" data-direction="1" aria-label="${esc(s.name)}を下へ" ${i === orderedStores.length - 1 ? 'disabled' : ''}>↓</button>
+              <button type="button" class="btn btn-outline" data-remove-stop="${i}" aria-label="${esc(s.name)}をルートから外す">外す</button>
+            </div>
           </div>`;
       });
       return html;
@@ -2212,6 +2321,18 @@ const App = (() => {
 
     container.innerHTML = html;
     updatePatrolStartControls_();
+
+    function updateOrder(index, direction, remove = false) {
+      if (patrolStartInProgress) return;
+      const next = reorderRouteStores_(selRoute.orderedStores, index, direction, remove);
+      selectedStoreIds = next.map(store => store.store_id);
+      if (!next.length) { Router.navigate('home'); return; }
+      const speed = config.avg_speed_kmh === '' || config.avg_speed_kmh == null ? 30 : Number(config.avg_speed_kmh);
+      const updated = RouteOptimizer.calcSelectionOrder(home, next, speed);
+      Router.navigate('route-select', { selRoute: updated });
+    }
+    container.querySelectorAll('[data-move-stop]').forEach(button => button.addEventListener('click', () => updateOrder(Number(button.dataset.moveStop), Number(button.dataset.direction))));
+    container.querySelectorAll('[data-remove-stop]').forEach(button => button.addEventListener('click', () => updateOrder(Number(button.dataset.removeStop), 0, true)));
 
     function pickRoute() {
       const chosen = selRoute;
@@ -2556,8 +2677,8 @@ const App = (() => {
       <div class="patrol-current">
         <div class="patrol-topline">
           <div>
-            <div class="current-label">次の店舗</div>
-            <div class="current-progress">${currentIdx + 1} / ${stops.length} 店舗・残り${remainingCount}店舗</div>
+            <div class="current-label">いま回る店舗</div>
+            <div class="current-progress">${currentIdx + 1} / ${stops.length} 店舗・残り${remainingCount}店舗</div><div id="current-inventory-count" class="current-progress">登録状況を確認中</div>
           </div>
           <div class="patrol-timer" id="patrol-timer">00:00:00</div>
         </div>
@@ -2569,10 +2690,11 @@ const App = (() => {
 
     html += `
       <div class="patrol-actions">
-        <button class="btn btn-success btn-block" id="btn-depart">完了して次へ</button>
-        <button class="btn btn-primary btn-block" id="btn-add-inventory-current">商品を在庫に登録</button>
+        <button class="btn btn-primary btn-block" id="btn-add-inventory-current">仕入れを記録</button>
+        <button class="btn btn-outline btn-block" id="btn-depart">完了して次へ</button>
       </div>`;
 
+    html += buildInventoryStatusCard_(patrolState.routeId);
     html += renderStoreContextPanel(current);
 
     // スキップ
@@ -2612,6 +2734,7 @@ const App = (() => {
     // タイマー開始
     startPatrolTimer();
     loadPatrolStoreContext(current);
+    refreshInventoryStatus_();
 
     document.getElementById('btn-depart')?.addEventListener('click', () => completeCurrentStop_('visited'));
     document.getElementById('btn-skip')?.addEventListener('click', () => completeCurrentStop_('skipped'));
@@ -2628,6 +2751,7 @@ const App = (() => {
           current.purchaseAmount = (Number(current.purchaseAmount) || 0) + amount;
           current.purchaseItems = (Number(current.purchaseItems) || 0) + 1;
           Storage.saveCurrentRoute(patrolState);
+          refreshInventoryStatus_();
           syncWrite(API.updateStop({
             route_id: patrolState.routeId,
             store_id: current.store_id,
@@ -2891,111 +3015,207 @@ const App = (() => {
     });
   }
 
+  function buildInventoryStatusCard_(routeId = '') {
+    return `<section class="card inventory-status-card" id="inventory-status-card" data-route-id="${esc(routeId)}" aria-label="仕入れの登録状況">
+      <div class="card-title">仕入れの登録状況</div><div id="inventory-status-body" role="status">確認中...</div>
+    </section>`;
+  }
+
+  async function refreshInventoryStatus_() {
+    const card = document.getElementById('inventory-status-card');
+    if (!card) return;
+    try {
+      const receipts = await Storage.getInventoryReceiptStatus(card.dataset.routeId || '');
+      if (!card.isConnected) return;
+      const groups = { registered: [], pending: [], review: [] };
+      receipts.forEach(item => (groups[item.status] || groups.review).push(item));
+      const labels = { registered: '在庫登録済み', pending: '送信待ち', review: '要確認' };
+      const body = card.querySelector('#inventory-status-body');
+      body.innerHTML = `<div class="inventory-status-grid">${Object.keys(groups).map(status => `<button type="button" class="inventory-status-button ${status}" data-receipt-status="${status}" aria-label="${labels[status]} ${groups[status].length}点を確認"><strong>${groups[status].length}</strong><span>${labels[status]}</span></button>`).join('')}</div><p class="inventory-status-note">この端末から登録した商品の状況です。送信待ちは在庫シートへの反映が未確認です。</p>`;
+      body.querySelectorAll('[data-receipt-status]').forEach(button => button.addEventListener('click', () => showInventoryStatusList_(groups[button.dataset.receiptStatus], labels[button.dataset.receiptStatus])));
+      const currentCount = document.getElementById('current-inventory-count');
+      if (currentCount && patrolState) {
+        const sid = patrolState.stops[patrolState.currentIdx]?.store_id;
+        const current = receipts.filter(item => item.body?.store_id === sid);
+        currentCount.textContent = `この店舗：在庫登録済み ${current.filter(item => item.status === 'registered').length}点・送信待ち ${current.filter(item => item.status === 'pending').length}点・要確認 ${current.filter(item => item.status === 'review').length}点`;
+      }
+    } catch (error) {
+      const body = card.querySelector('#inventory-status-body');
+      if (body) body.textContent = '登録状況を確認できません。未確認のまま再登録せず、通信・端末保存をご確認ください。';
+    }
+  }
+
+  function showInventoryStatusList_(receipts, label) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `<section class="modal" role="dialog" aria-modal="true" aria-label="${esc(label)}の明細"><div class="modal-title">${esc(label)} ${receipts.length}点</div>${receipts.length ? receipts.map(item => `<article class="receipt-item"><strong>${esc(item.body?.product_name || '商品')}</strong><div>${esc(item.body?.store_name || '')}・${formatYen_(item.body?.purchase_price)}</div><div class="text-sm text-dim">${esc(item.body?.purchase_date || '')}${item.status === 'registered' ? `・在庫シート ${Number(item.row)}行` : ''}</div>${item.reason ? `<p class="receipt-reason">${esc(item.reason)}</p>` : ''}<details><summary>受付情報</summary><div class="receipt-id">${esc(item.operation_id)}</div></details></article>`).join('') : '<p class="empty-state">該当する商品はありません。</p>'}<button type="button" class="btn btn-outline btn-block" id="receipt-close">閉じる</button></section>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector('#receipt-close').addEventListener('click', close);
+    overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
+    overlay.querySelector('#receipt-close').focus();
+  }
+
+  function mustHoldInventorySubmission_(sendStarted, accepted, error) {
+    if (accepted) return true;
+    if (['OPERATION_OUTCOME_UNKNOWN', 'PENDING_OPERATION_EXISTS', 'UNKNOWN_RESPONSE'].includes(error?.code)) return true;
+    return sendStarted && !['API_ERROR', 'URL_REQUIRED', 'AUTH_TOKEN_REQUIRED', 'UNAUTHORIZED'].includes(error?.code);
+  }
+
   function showInventoryPurchaseModal(store, options = {}) {
     const purchaseDate = normalizeRouteDate_(options.date) || today_();
     const storeName = store?.name || store?.store_name || '';
+    const draftKey = [options.routeId || '', store?.store_id || storeName].join('|');
     const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
+    overlay.className = 'modal-overlay inventory-purchase-overlay';
     overlay.innerHTML = `
-      <div class="modal">
-        <div class="modal-title">商品を在庫に登録</div>
-        <div class="text-sm text-dim mb-8">${esc(storeName)} の仕入れ品として登録します</div>
+      <section class="modal inventory-purchase-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-modal-title">
+        <div class="modal-title" id="inventory-modal-title">仕入れを記録</div>
+        <div class="purchase-store-name">${esc(storeName)}</div>
+        <p class="text-sm text-dim mb-8">商品名と仕入価格を入力すると、在庫への登録を依頼できます。</p>
         <div class="form-group">
-          <label class="form-label">商品名</label>
-          <input type="text" class="form-input" id="ip-name" placeholder="例: BURBERRY 長袖シャツ">
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">仕入価格</label>
-            <input type="number" class="form-input" id="ip-price" inputmode="numeric" placeholder="0">
-          </div>
-          <div class="form-group">
-            <label class="form-label">販売予定価格</label>
-            <input type="number" class="form-input" id="ip-sale-price" inputmode="numeric" placeholder="任意">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">ブランド</label>
-            <input type="text" class="form-input" id="ip-brand" placeholder="任意">
-          </div>
-          <div class="form-group">
-            <label class="form-label">サイズ</label>
-            <input type="text" class="form-input" id="ip-size" placeholder="任意">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">色</label>
-            <input type="text" class="form-input" id="ip-color" placeholder="任意">
-          </div>
-          <div class="form-group">
-            <label class="form-label">状態</label>
-            <select class="form-select" id="ip-condition">
-              <option>中古品 - 良い</option>
-              <option>中古品 - 非常に良い</option>
-              <option>中古品 - 可</option>
-              <option>中古品 - ほぼ新品</option>
-            </select>
-          </div>
+          <label class="form-label" for="ip-name">商品名 <span class="required-label">必須</span></label>
+          <input type="text" class="form-input" id="ip-name" placeholder="例: BURBERRY 長袖シャツ" required disabled>
         </div>
         <div class="form-group">
-          <label class="form-label">仕入日</label>
-          <input type="date" class="form-input" id="ip-date" value="${purchaseDate}">
+          <label class="form-label" for="ip-price">仕入価格 <span class="required-label">必須</span></label>
+          <div class="price-input-wrap"><input type="number" class="form-input" id="ip-price" inputmode="numeric" min="1" placeholder="1円以上" required disabled><span>円</span></div>
         </div>
-        <div class="form-group">
-          <label class="form-label">メモ</label>
-          <textarea class="form-textarea" id="ip-note" placeholder="任意"></textarea>
+        <details class="purchase-details" id="purchase-details">
+          <summary>詳細を追加 <span>販売予定価格・ブランド・サイズなど</span></summary>
+          <div class="form-group"><label class="form-label" for="ip-sale-price">販売予定価格</label><input type="number" class="form-input" id="ip-sale-price" inputmode="numeric" min="1" placeholder="任意" disabled></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label" for="ip-brand">ブランド</label><input type="text" class="form-input" id="ip-brand" placeholder="任意" disabled></div>
+            <div class="form-group"><label class="form-label" for="ip-size">サイズ</label><input type="text" class="form-input" id="ip-size" placeholder="任意" disabled></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label" for="ip-color">色</label><input type="text" class="form-input" id="ip-color" placeholder="任意" disabled></div>
+            <div class="form-group"><label class="form-label" for="ip-condition">状態</label><select class="form-select" id="ip-condition" disabled><option>中古品 - 良い</option><option>中古品 - 非常に良い</option><option>中古品 - 可</option><option>中古品 - ほぼ新品</option></select></div>
+          </div>
+          <div class="form-group"><label class="form-label" for="ip-date">仕入日</label><input type="date" class="form-input" id="ip-date" value="${purchaseDate}" disabled></div>
+          <div class="form-group"><label class="form-label" for="ip-note">メモ</label><textarea class="form-textarea" id="ip-note" placeholder="任意" disabled></textarea></div>
+        </details>
+        <p id="inventory-form-status" class="inventory-form-status" role="status">保存済みの入力を確認中...</p>
+        <div class="inventory-submit-actions">
+          <button type="button" class="btn btn-primary btn-block" id="inventory-modal-next" disabled>登録してもう1点</button>
+          <div class="btn-group"><button type="button" class="btn btn-outline" id="inventory-modal-cancel">閉じる</button><button type="button" class="btn btn-outline" id="inventory-modal-submit" disabled>登録して閉じる</button></div>
         </div>
-        <div class="btn-group">
-          <button class="btn btn-outline" style="flex:1" id="inventory-modal-cancel">キャンセル</button>
-          <button class="btn btn-primary" style="flex:1" id="inventory-modal-submit">登録する</button>
-        </div>
-      </div>`;
+      </section>`;
     document.body.appendChild(overlay);
-
-    overlay.querySelector('#inventory-modal-cancel').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-    overlay.querySelector('#inventory-modal-submit').addEventListener('click', async () => {
-      const button = overlay.querySelector('#inventory-modal-submit');
-      const payload = {
-        store_id: store?.store_id || '',
-        store_name: storeName,
-        route_id: options.routeId || '',
-        purchase_date: overlay.querySelector('#ip-date').value || purchaseDate,
-        product_name: overlay.querySelector('#ip-name').value.trim(),
-        purchase_price: overlay.querySelector('#ip-price').value,
-        expected_sale_price: overlay.querySelector('#ip-sale-price').value,
-        brand: overlay.querySelector('#ip-brand').value.trim(),
-        size: overlay.querySelector('#ip-size').value.trim(),
-        color: overlay.querySelector('#ip-color').value.trim(),
-        condition: overlay.querySelector('#ip-condition').value,
-        note: overlay.querySelector('#ip-note').value.trim(),
-      };
-      if (!payload.product_name) { toast('商品名を入力してください'); return; }
-      if (!payload.purchase_price) { toast('仕入価格を入力してください'); return; }
-      button.disabled = true;
-      button.textContent = '登録中...';
-      try {
-        const result = await API.addInventoryPurchase(payload);
-        const dateKey = normalizeRouteDate_(payload.purchase_date);
-        if (dateKey) {
-          delete inventoryByDateCache[dateKey];
-          Storage.clearViewCache('inventory_' + dateKey).catch(() => {});
-        }
-        overlay.remove();
-        if (result && result._queued) {
-          toast('オフラインのため、オンライン復帰後に登録します');
-        } else {
-          toast(`在庫に登録しました${result && result.row ? `（${result.row}行）` : ''}`);
-        }
-        if (!result?._queued && typeof options.onSaved === 'function') options.onSaved(result || {}, payload);
-      } catch (err) {
-        button.disabled = false;
-        button.textContent = '登録する';
-        toast('登録に失敗: ' + err.message, 4000);
+    const fields = { product_name: 'ip-name', purchase_price: 'ip-price', expected_sale_price: 'ip-sale-price', brand: 'ip-brand', size: 'ip-size', color: 'ip-color', condition: 'ip-condition', purchase_date: 'ip-date', note: 'ip-note' };
+    const readPayload = () => ({ store_id: store?.store_id || '', store_name: storeName, route_id: options.routeId || '', ...Object.fromEntries(Object.entries(fields).map(([key, id]) => [key, overlay.querySelector('#' + id).value.trim()])) });
+    const status = overlay.querySelector('#inventory-form-status');
+    let busy = false, ready = false, blocked = false, draftLoadFailed = false, operationId = '', draftWrites = Promise.resolve();
+    const setControls = () => {
+      overlay.querySelectorAll('input, select, textarea').forEach(input => { input.disabled = !ready || busy || blocked; });
+      overlay.querySelector('#inventory-modal-next').disabled = !ready || busy || blocked;
+      overlay.querySelector('#inventory-modal-submit').disabled = !ready || busy || blocked;
+      overlay.querySelector('#inventory-modal-cancel').disabled = busy;
+      overlay.querySelector('#inventory-modal-next').textContent = busy ? '登録を確認中...' : '登録してもう1点';
+    };
+    const saveDraft = () => {
+      const data = { payload: readPayload(), operationId, blocked };
+      draftWrites = draftWrites.catch(() => {}).then(() => Storage.savePurchaseDraft(draftKey, data));
+      return draftWrites;
+    };
+    const close = async () => {
+      if (busy) return;
+      if (!ready || draftLoadFailed) { overlay.remove(); return; }
+      try { await saveDraft(); overlay.remove(); } catch (error) { status.textContent = '端末に入力を保存できません。画面を閉じずに端末の空き容量をご確認ください。'; }
+    };
+    overlay.querySelector('#inventory-modal-cancel').addEventListener('click', close);
+    overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
+    overlay.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
+    overlay.querySelectorAll('input, select, textarea').forEach(input => input.addEventListener('input', () => {
+      saveDraft().catch(() => { status.textContent = '入力を端末に保存できません。登録前に再確認します。'; });
+    }));
+    const clearInputs = () => {
+      Object.entries(fields).forEach(([key, id]) => {
+        if (key === 'purchase_date' || key === 'condition') return;
+        overlay.querySelector('#' + id).value = '';
+      });
+      operationId = '';
+      blocked = false;
+      overlay.querySelector('#purchase-details').open = false;
+    };
+    async function submit(keepOpen) {
+      if (!ready || busy || blocked) return;
+      const payload = readPayload();
+      if (!payload.product_name) { status.textContent = '商品名を入力してください。'; overlay.querySelector('#ip-name').focus(); return; }
+      if (!Number.isFinite(Number(payload.purchase_price)) || Number(payload.purchase_price) <= 0) {
+        status.textContent = '仕入価格は0より大きい数を入力してください。'; overlay.querySelector('#ip-price').focus(); return;
       }
-    });
+      if (payload.expected_sale_price !== '' && (!Number.isFinite(Number(payload.expected_sale_price)) || Number(payload.expected_sale_price) <= 0)) {
+        overlay.querySelector('#purchase-details').open = true;
+        status.textContent = '販売予定価格は空欄、または0より大きい数を入力してください。'; overlay.querySelector('#ip-sale-price').focus(); return;
+      }
+      busy = true;
+      operationId = operationId || API.createOperationId('addInventoryPurchase');
+      setControls();
+      status.textContent = '登録結果を確認しています。このままお待ちください。';
+      const submissionOperationId = operationId;
+      let sendStarted = false, accepted = false;
+      try {
+        await saveDraft();
+        sendStarted = true;
+        const result = await API.addInventoryPurchase({ ...payload, operation_id: operationId });
+        accepted = true;
+        if (!result?._queued && !(Number.isInteger(Number(result?.row)) && Number(result.row) > 0)) {
+          blocked = true;
+          await saveDraft();
+          status.textContent = '在庫の登録先を確認できません。要確認として残しました。再登録はせず受付情報をご確認ください。';
+          await refreshInventoryStatus_();
+          return;
+        }
+        const dateKey = normalizeRouteDate_(payload.purchase_date);
+        if (dateKey) { delete inventoryByDateCache[dateKey]; Storage.clearViewCache('inventory_' + dateKey).catch(() => {}); }
+        const message = result._queued ? '送信待ちとして保存しました。在庫シートへの反映は未確認です。' : '在庫に登録しました。';
+        await Storage.clearPurchaseDraft(draftKey);
+        clearInputs();
+        status.textContent = message + (keepOpen ? ' 次の商品を入力できます。' : '');
+        if (!result._queued && typeof options.onSaved === 'function') {
+          try { await options.onSaved(result, payload); } catch (error) { toast('在庫登録は完了しました。巡回集計の更新を確認してください。', 5000); }
+        }
+        await refreshInventoryStatus_();
+        if (!keepOpen) { overlay.remove(); toast(message, 5000); }
+      } catch (error) {
+        blocked = mustHoldInventorySubmission_(sendStarted, accepted, error);
+        // 成功・受付済みの後の端末整理失敗でも、受付IDを捨てて再送可能にはしない。
+        if (blocked) operationId = submissionOperationId;
+        else operationId = '';
+        await saveDraft().catch(() => {});
+        status.textContent = blocked ? `要確認：${error.message}` : `登録できませんでした。入力は残しています。${error.message}`;
+        await refreshInventoryStatus_();
+      } finally {
+        busy = false;
+        setControls();
+        if (overlay.isConnected && !blocked && !readPayload().product_name) overlay.querySelector('#ip-name').focus();
+      }
+    }
+    overlay.querySelector('#inventory-modal-submit').addEventListener('click', () => submit(false));
+    overlay.querySelector('#inventory-modal-next').addEventListener('click', () => submit(true));
+    (async () => {
+      try {
+        const draft = await Storage.getPurchaseDraft(draftKey);
+        if (!overlay.isConnected) return;
+        if (draft?.data?.payload) {
+          Object.entries(fields).forEach(([key, id]) => { if (draft.data.payload[key] != null) overlay.querySelector('#' + id).value = draft.data.payload[key]; });
+          operationId = draft.data.operationId || '';
+          blocked = Boolean(draft.data.blocked);
+          if (operationId) {
+            const receipts = await Storage.getInventoryReceiptStatus(options.routeId || '');
+            const receipt = receipts.find(item => item.operation_id === operationId);
+            if (receipt?.status === 'registered') { await Storage.clearPurchaseDraft(draftKey); clearInputs(); }
+            else if (receipt) blocked = true;
+            else operationId = '';
+          }
+          status.textContent = blocked ? '前回の登録を確認中です。入力を保持しています。登録状況の明細で受付を確認し、同じ商品を再登録しないでください。' : '保存していた入力を復元しました。';
+        } else status.textContent = '入力はこの端末に自動保存されます。';
+        ready = true;
+        setControls();
+        if (!blocked) overlay.querySelector('#ip-name').focus();
+      } catch (error) { status.textContent = '保存済みの入力を読み込めません。端末保存を確認してから開き直してください。'; draftLoadFailed = true; ready = true; blocked = true; setControls(); }
+    })();
   }
 
   function today_() {
@@ -3091,7 +3311,7 @@ const App = (() => {
     overlay.innerHTML = `
       <div class="modal add-stop-map-modal">
         <div class="modal-title">店舗を追加</div>
-        <div class="text-sm text-dim mb-8">地図のピンをタップして追加する店舗を選んでください</div>
+        <div class="text-sm text-dim mb-8">地図または店舗一覧から追加する店舗を選んでください</div>
         <div class="form-group">
           <input type="text" class="form-input" id="stop-search" placeholder="店舗名で検索...">
         </div>
@@ -3105,7 +3325,9 @@ const App = (() => {
             ${genreOptions}
           </select>
         </div>
+        <div id="stop-map-load-status" class="map-load-status" role="status" hidden></div>
         <div id="stop-add-map" class="add-stop-map"></div>
+        <details class="store-list-details"><summary>店舗一覧から選ぶ</summary><div id="stop-add-list" class="map-store-list"></div></details>
         <div id="stop-add-info" class="add-stop-map-info">追加する店舗を地図から選択してください</div>
         <div class="btn-group mt-8">
           <button class="btn btn-outline" style="flex:1" id="stop-modal-cancel">閉じる</button>
@@ -3122,22 +3344,20 @@ const App = (() => {
     const mapEl = overlay.querySelector('#stop-add-map');
     let selectedStore = null;
 
-    const addMap = L.map(mapEl, {
-      center: SENDAI_STATION,
-      zoom: 11,
-      zoomControl: true,
-      doubleClickZoom: false,
-      preferCanvas: true,
-    });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      subdomains: 'abcd',
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
-    }).addTo(addMap);
-    const addLayer = L.layerGroup().addTo(addMap);
+    let addMap = null, addLayer = null;
+    try {
+      addMap = L.map(mapEl, { center: SENDAI_STATION, zoom: 11, zoomControl: true, doubleClickZoom: false, preferCanvas: true });
+      addBaseMap_(addMap, 'stop-map-load-status');
+      addLayer = L.layerGroup().addTo(addMap);
+      addMap.on('zoomend', () => renderMarkers({ keepView: true }));
+    } catch (error) {
+      showMapFailure_('stop-map-load-status');
+      mapEl.hidden = true;
+      overlay.querySelector('.store-list-details').open = true;
+    }
 
     function closeModal() {
-      addMap.remove();
+      addMap?.remove();
       overlay.remove();
     }
 
@@ -3162,14 +3382,22 @@ const App = (() => {
     }
 
     function fitAddMap(filtered) {
-      if (!filtered.length) return;
+      if (!filtered.length || !addMap) return;
       const bounds = L.latLngBounds(filtered.map(s => [Number(s.lat), Number(s.lng)]));
       addMap.fitBounds(bounds, { padding: [28, 28], maxZoom: 13, animate: false });
     }
 
     function renderMarkers({ keepView = false } = {}) {
       const filtered = getFilteredStores();
-      addLayer.clearLayers();
+      addLayer?.clearLayers();
+      const list = overlay.querySelector('#stop-add-list');
+      list.innerHTML = filtered.length ? filtered.map(store => `<button type="button" class="store-select-row" data-list-store="${esc(store.store_id)}" aria-pressed="${selectedStore?.store_id === store.store_id}">${renderStopIconHtml(store)}<span class="store-select-info"><strong>${esc(store.name)}</strong><span>${esc(store._areaName)}・${esc(store.category)}</span></span></button>`).join('') : '<p class="empty-state">該当する店舗はありません。</p>';
+      list.querySelectorAll('[data-list-store]').forEach(button => button.addEventListener('click', () => {
+        const store = filtered.find(item => item.store_id === button.dataset.listStore);
+        selectStore(store);
+        list.querySelectorAll('[data-list-store]').forEach(row => row.setAttribute('aria-pressed', String(row.dataset.listStore === store.store_id)));
+      }));
+      if (searchInput.value.trim()) overlay.querySelector('.store-list-details').open = true;
       if (filtered.length === 0) {
         infoEl.innerHTML = '<div class="add-stop-map-empty">該当する店舗がありません</div>';
         selectedStore = null;
@@ -3177,7 +3405,13 @@ const App = (() => {
         return;
       }
 
-      filtered.forEach(s => {
+      const groups = addMap ? groupNearbyStores_(filtered, point => addMap.project(point, addMap.getZoom()), new Set(selectedStore ? [selectedStore.store_id] : [])) : [];
+      groups.forEach(group => {
+        if (group.length > 1) {
+          addLayer.addLayer(buildClusterMarker_(addMap, group, store => { selectStore(store); renderMarkers({ keepView: true }); }));
+          return;
+        }
+        const s = group[0];
         const isSelected = selectedStore && selectedStore.store_id === s.store_id;
         const marker = L.marker([Number(s.lat), Number(s.lng)], {
           icon: buildPinIcon(s, isSelected ? 0 : -1),
@@ -3209,7 +3443,7 @@ const App = (() => {
     }
 
     requestAnimationFrame(() => {
-      addMap.invalidateSize(false);
+      addMap?.invalidateSize(false);
       renderMarkers();
     });
 
@@ -4860,6 +5094,42 @@ const App = (() => {
 
   // ---------- 設定 ----------
 
+  function renderMore(container) {
+    setTitle('その他');
+    container.innerHTML = `<div class="page-heading"><h1>その他</h1><p>学習・設定・登録状況</p></div><div class="more-menu">
+      <button type="button" class="more-menu-item" data-open-view="quiz"><strong>仕入れクイズ</strong><span>商品知識と学習の記録を確認する</span><b aria-hidden="true">›</b></button>
+      <button type="button" class="more-menu-item" data-open-view="settings"><strong>設定</strong><span>端末接続・出発地点・店舗管理</span><b aria-hidden="true">›</b></button>
+    </div>${buildInventoryStatusCard_()}`;
+    container.querySelectorAll('[data-open-view]').forEach(button => button.addEventListener('click', () => Router.navigate(button.dataset.openView)));
+    refreshInventoryStatus_();
+  }
+
+  function organizeSettings_(container) {
+    const scoreCard = container.querySelector('.settings-card');
+    const sections = [
+      { title: '端末の接続', description: '接続コード・URL・接続確認', ids: ['set-auth-token', 'set-url', 'btn-test'], open: !API.hasDeviceCredential() },
+      { title: '出発地点と巡回の目安', description: '自宅の位置・移動速度・滞在時間', ids: ['set-lat', 'set-speed'] },
+      { title: '店舗管理', description: '店舗の追加・編集・データ更新', ids: ['btn-refresh', 'btn-add-store'] },
+      { title: '詳細と保存状況', description: '集計状況・未送信データ・履歴補正', ids: ['pending-sync-status', 'btn-route-correction-scan', 'btn-recalc-purchases'], includeScore: true },
+      { title: '履歴の消去', description: '取り消せない操作', ids: ['btn-clear-history'], danger: true },
+    ];
+    container.querySelectorAll('.settings-section-title').forEach(element => element.remove());
+    const heading = document.createElement('div');
+    heading.className = 'page-heading'; heading.innerHTML = '<h1>設定</h1><p>変更したい項目を開いてください。</p>';
+    container.prepend(heading);
+    sections.forEach(section => {
+      const details = document.createElement('details');
+      details.className = 'settings-group' + (section.danger ? ' settings-danger-group' : '');
+      details.open = Boolean(section.open);
+      const summary = document.createElement('summary');
+      summary.innerHTML = `<strong>${section.title}</strong><span>${section.description}</span>`;
+      details.appendChild(summary);
+      if (section.includeScore && scoreCard) details.appendChild(scoreCard);
+      section.ids.forEach(id => { const card = container.querySelector('#' + id)?.closest('.settings-card'); if (card) details.appendChild(card); });
+      container.appendChild(details);
+    });
+  }
+
   function renderSettings(container) {
     setTitle('設定');
     const url = API.getUrl();
@@ -4950,6 +5220,7 @@ const App = (() => {
       </div>`;
 
     container.innerHTML = html;
+    organizeSettings_(container);
 
     // 店舗一覧を描画
     const storeListEl = document.getElementById('store-list');
@@ -4975,7 +5246,7 @@ const App = (() => {
       const element = document.getElementById('pending-sync-status');
       if (!element) return;
       if (status.blocked > 0) {
-        element.textContent = `安全確認が必要な未送信データが${status.blocked}件あります。古いため自動送信は停止しています。`;
+        element.textContent = `安全確認が必要な未送信データが${status.blocked}件あります。${status.blockedReasons.join("。")}。`;
         element.classList.add('text-accent');
       } else if (status.total > 0) {
         element.textContent = `未送信データが${status.total}件あります。通信が戻ると作成順に送信します。`;
@@ -5194,7 +5465,7 @@ const App = (() => {
     if (s == null) return '';
     const d = document.createElement('div');
     d.textContent = String(s);
-    return d.innerHTML;
+    return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function safeStoreIcon_(value) {

@@ -10,17 +10,14 @@
   <title>巡回ルート</title>
   <link rel="preconnect" href="https://script.google.com">
   <link rel="dns-prefetch" href="https://script.google.com">
-  <link rel="preconnect" href="https://a.basemaps.cartocdn.com">
-  <link rel="preconnect" href="https://b.basemaps.cartocdn.com">
-  <link rel="preconnect" href="https://c.basemaps.cartocdn.com">
-  <link rel="preconnect" href="https://d.basemaps.cartocdn.com">
+  <link rel="preconnect" href="https://cyberjapandata.gsi.go.jp">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" sizes="96x96" href="icons/icon-96.png">
   <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
   <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png">
-  <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=196">
-  <link rel="stylesheet" href="style.css?v=196">
-  <script src="vendor/leaflet/leaflet.js?v=196"></script>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=198">
+  <link rel="stylesheet" href="style.css?v=198">
+  <script src="vendor/leaflet/leaflet.js?v=198"></script>
 </head>
 <body>
   <div id="app">
@@ -49,28 +46,20 @@
       </span>
       <span class="nav-label-with-badge">廃盤<span class="nav-badge nav-alert-badge" id="haiban-nav-badge" hidden></span></span>
     </button>
-    <button class="nav-item" data-view="quiz">
-      <span class="icon" aria-hidden="true">
-        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M4.5 5.5A2.5 2.5 0 0 1 7 3h13v17H7a2.5 2.5 0 0 0-2.5 2V5.5Z"/><path d="M8 7h8"/><path d="M8 11h6"/></svg>
-      </span>
-      <span class="nav-label-with-badge">クイズ<span class="nav-badge nav-streak-badge" id="quiz-nav-badge" hidden></span></span>
-    </button>
-    <button class="nav-item" data-view="settings">
-      <span class="icon" aria-hidden="true">
-        <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3-.2-.1a1.8 1.8 0 0 0-1.9-.2 1.8 1.8 0 0 0-1 1.5V21h-5v-.2a1.8 1.8 0 0 0-1-1.5 1.8 1.8 0 0 0-1.9.2l-.2.1-2-3 .1-.1A1.7 1.7 0 0 0 4.6 15a1.8 1.8 0 0 0-1.5-1H3v-4h.1a1.8 1.8 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-3 .2.1a1.8 1.8 0 0 0 1.9.2 1.8 1.8 0 0 0 1-1.5V3h5v.2a1.8 1.8 0 0 0 1 1.5 1.8 1.8 0 0 0 1.9-.2l.2-.1 2 3-.1.1A1.7 1.7 0 0 0 19.4 9a1.8 1.8 0 0 0 1.5 1h.1v4h-.1a1.8 1.8 0 0 0-1.5 1Z"/></svg>
-      </span>設定
+    <button class="nav-item" data-view="more">
+      <span class="icon" aria-hidden="true"><svg class="nav-icon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span><span class="nav-label-with-badge">その他<span class="nav-badge nav-streak-badge" id="quiz-nav-badge" hidden></span></span>
     </button>
   </nav>
 
-  <div class="app-version-badge" id="app-version-badge" data-version="v196">v196</div>
+  <div class="app-version-badge" id="app-version-badge" data-version="v198">v198</div>
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <script src="storage.js?v=196"></script>
-  <script src="api.js?v=196"></script>
-  <script src="route-optimizer.js?v=196"></script>
-  <script src="router.js?v=196"></script>
-  <script src="quiz.js?v=196"></script>
-  <script src="app.js?v=196"></script>
-  <script src="bootstrap.js?v=196"></script>
+  <script src="storage.js?v=198"></script>
+  <script src="api.js?v=198"></script>
+  <script src="route-optimizer.js?v=198"></script>
+  <script src="router.js?v=198"></script>
+  <script src="quiz.js?v=198"></script>
+  <script src="app.js?v=198"></script>
+  <script src="bootstrap.js?v=198"></script>
 </body>
 </html>

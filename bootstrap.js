@@ -1,5 +1,14 @@
 // PWA更新確認と、CSPでinline handlerを使わない画像エラー処理。
 (() => {
+  function showUpdateWaiting() {
+    if (document.getElementById('pwa-update-notice')) return;
+    const notice = document.createElement('div');
+    notice.id = 'pwa-update-notice';
+    notice.className = 'pwa-update-notice';
+    notice.setAttribute('role', 'status');
+    notice.textContent = '更新版を準備しました。作業後にこのアプリの全タブを閉じ、開き直すと適用されます。';
+    document.body.prepend(notice);
+  }
   function showVersionCheckWarning(message) {
     console.error(message);
     const toast = document.getElementById('toast');
@@ -39,24 +48,24 @@
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', event => {
       if (event.data && event.data.type === 'SW_VERSION') checkPwaVersion(event.data.cacheName);
+      if (event.data && event.data.type === 'UPDATE_WAITING') showUpdateWaiting();
     });
 
-    navigator.serviceWorker.register('sw.js?v=196', { updateViaCache: 'none' }).then(registration => {
+    navigator.serviceWorker.register('sw.js?v=198', { updateViaCache: 'none' }).then(registration => {
       if (!registration) return;
+      if (registration.waiting) showUpdateWaiting();
       registration.addEventListener('updatefound', () => {
         const worker = registration.installing;
         if (!worker) return;
         worker.addEventListener('statechange', () => {
           if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-            worker.postMessage({ type: 'SKIP_WAITING' });
+            showUpdateWaiting();
           }
         });
       });
-      let reloaded = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (reloaded) return;
-        reloaded = true;
-        location.reload();
+        // 表示中のフォームを自動再読込しない。新規起動時に最新版を読む。
+        navigator.serviceWorker.controller?.postMessage({ type: 'GET_VERSION' });
       });
       navigator.serviceWorker.ready.then(readyRegistration => {
         if (readyRegistration.active) readyRegistration.active.postMessage({ type: 'GET_VERSION' });

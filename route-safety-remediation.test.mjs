@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 const optimizerSource = readFileSync(new URL('./route-optimizer.js', import.meta.url), 'utf8');
 const workerSource = readFileSync(new URL('./sw.js', import.meta.url), 'utf8');
+const currentWorkerCache = workerSource.match(/const CACHE_NAME = '([^']+)'/)[1];
 const context = {};
 vm.runInNewContext(optimizerSource + '\nglobalThis.optimizer = RouteOptimizer;', context);
 const optimizer = context.optimizer;
@@ -127,7 +128,7 @@ test('worker takes over only after every required response is validated and cach
   const h = workerHarness();
   await h.event('install');
   assert.equal(h.calls.puts, h.assetCount);
-  assert.equal(h.calls.skip, 1);
+  assert.equal(h.calls.skip, 0, 'completed updates must wait until existing tabs close');
   assert.ok(h.cacheMaps.has('sedori-route-v195'));
   await h.event('activate');
   assert.equal(h.calls.claim, 1);
@@ -151,7 +152,7 @@ test('cache write failure deletes only the incomplete new release', async () => 
   assert.equal(h.calls.skip, 0);
   assert.ok(h.cacheMaps.has('sedori-route-v195'));
   assert.ok(h.cacheMaps.has('other-app-v1'));
-  assert.ok(!h.cacheMaps.has('sedori-route-v196'));
+  assert.ok(!h.cacheMaps.has(currentWorkerCache));
 });
 
 test('early skip-waiting message cannot bypass the complete cache gate', async () => {
