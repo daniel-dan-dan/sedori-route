@@ -110,6 +110,93 @@ const unknown = () => response(null, 'OPERATION_OUTCOME_UNKNOWN: fixture only');
 const purchase = { product_name: 'fixture product', purchase_date: '2026-09-05', store_id: 's-fixture', store_name: 'fixture shop', purchase_price: 1000 };
 const item = { inventory_uuid: 'inv_00000000-0000-4000-8000-000000000001', expected_date: '2026-09-05', expected_shop: '', shop: 'fixture shop' };
 
+const pricingPreference = { sku: 'fixture-amazon-sku', action: 'snooze', days: 3, expectedRevision: 0, operation_id: 'fixture-pricing-op-1' };
+test('size allowance action sends only its exact identity and class, with durable operation protection',async()=>{
+  const requests=[];
+  const {API}=harness(memoryIndexedDb(),async(_url,options)=>{
+    requests.push(JSON.parse(options.body));
+    return response({ok:true,verified:true,item:{sku:pricingPreference.sku,preference:{revision:1},canChangePrice:false}});
+  });
+  await API.updateAmazonPricingPreference({...pricingPreference,action:'set_size',asin:'B000TEST01',sizeClass:'large'});
+  assert.equal(requests[0].preference_action,'set_size');assert.equal(requests[0].sizeClass,'large');
+  assert.equal(requests[0].asin,'B000TEST01');assert.equal(requests[0].days,undefined);
+  for(const change of [{sizeClass:'unknown'},{asin:''},{asin:'bad'}]) {
+    await assert.rejects(API.updateAmazonPricingPreference({...pricingPreference,action:'set_size',asin:'B000TEST01',sizeClass:'normal',...change}),{code:'INVALID_INPUT'});
+  }
+  assert.equal(requests.length,1);
+});
+test('pricing read does not create an operation and setting action is sent in a distinct wire field', async () => {
+  const requests = [];
+  const { API, Storage } = harness(memoryIndexedDb(), async (_url, options) => {
+    const request = JSON.parse(options.body); requests.push(request);
+    return response(request.action === 'getAmazonPricing' ? { ok:true, items:[] } : { ok:true,verified:true,item:{sku:pricingPreference.sku,preference:{revision:1},canChangePrice:false} });
+  });
+  await API.getAmazonPricing();
+  assert.equal((await Storage.getPendingActions()).length, 0);
+  await API.updateAmazonPricingPreference(pricingPreference);
+  assert.equal(requests[1].action, 'updateAmazonPricingPreference');
+  assert.equal(requests[1].preference_action, 'snooze');
+  assert.equal(requests[1].operation_id, pricingPreference.operation_id);
+  assert.equal((await Storage.getPendingActions()).length, 0);
+});
+
+test('pricing transport failure and changed preference never automatically replay', async () => {
+  let calls = 0;
+  const { API, Storage } = harness(memoryIndexedDb(), async () => { calls++; throw new TypeError('Failed to fetch'); });
+  await assert.rejects(API.updateAmazonPricingPreference(pricingPreference));
+  assert.equal((await Storage.getPendingActions())[0].last_error_code, 'OPERATION_OUTCOME_UNKNOWN');
+  await assert.rejects(API.updateAmazonPricingPreference({...pricingPreference,action:'exclude',operation_id:'fixture-pricing-op-2'}), {code:'PENDING_OPERATION_EXISTS'});
+  assert.equal(await Storage.syncPending(),0);
+  assert.equal(calls,1);
+});
+
+test('pricing response with wrong SKU, revision or price write capability is not accepted', async () => {
+  for (const delta of [{sku:'other'}, {preference:{revision:2}}, {canChangePrice:true}]) {
+    const { API, Storage } = harness(memoryIndexedDb(), async () => response({ok:true,verified:true,item:{sku:pricingPreference.sku,preference:{revision:1},canChangePrice:false,...delta}}));
+    await assert.rejects(API.updateAmazonPricingPreference(pricingPreference), {code:'OPERATION_OUTCOME_UNKNOWN'});
+    assert.equal(await Storage.syncPending(),0);
+  }
+});
+
+test('pricing reservation is blocked even if browser reloads during the first request', async () => {
+  const db=memoryIndexedDb(); let started, finish, calls=0;
+  const began=new Promise(resolve=>{started=resolve;});
+  const original=harness(db,async()=>{calls++;started();return new Promise(resolve=>{finish=resolve;});});
+  const pending=original.API.updateAmazonPricingPreference(pricingPreference); await began;
+  const reloaded=harness(db,async()=>{calls++;return unknown();}); await reloaded.API.ready();
+  assert.equal(await reloaded.Storage.syncPending(),0); assert.equal(calls,1);
+  finish(response({ok:true,verified:true,item:{sku:pricingPreference.sku,preference:{revision:1},canChangePrice:false}})); await pending;
+});
+
+test('pricing invalid revision/day/action is rejected before network or durable reservation', async () => {
+  let calls=0; const {API,Storage}=harness(memoryIndexedDb(),async()=>{calls++;return unknown();});
+  for(const delta of [{days:4},{expectedRevision:'0'},{action:'change_price'},{operation_id:''}]) {
+    await assert.rejects(API.updateAmazonPricingPreference({...pricingPreference,...delta}),{code:'INVALID_INPUT'});
+  }
+  assert.equal(calls,0); assert.equal((await Storage.getPendingActions()).length,0);
+});
+
+test('pricing known pre-write refusal preserves its code and safely releases the reservation',async()=>{
+  for(const code of ['INVALID_INPUT','PRICING_REFRESH_REQUIRED','PRICING_REVISION_CONFLICT','BUSY','UNAUTHORIZED']) {
+    const {API,Storage}=harness(memoryIndexedDb(),async()=>response(null,code+': fixture rejection'));
+    await assert.rejects(API.updateAmazonPricingPreference(pricingPreference),{code});
+    assert.equal((await Storage.getPendingActions()).length,0);
+  }
+});
+
+test('pricing uncertain request does not freeze unrelated queued inventory work',async()=>{
+  const calls=[];const {API,Storage}=harness(memoryIndexedDb(),async(_url,options)=>{
+    const req=JSON.parse(options.body);calls.push(req.action);
+    if(req.action==='updateAmazonPricingPreference')throw new TypeError('Failed to fetch');
+    return response({row:4});
+  });
+  await assert.rejects(API.updateAmazonPricingPreference(pricingPreference));
+  await Storage.reservePendingAction({action:'addInventoryPurchase',body:{...purchase,operation_id:'unrelated-inventory-op'},operation_id:'unrelated-inventory-op',timestamp:Date.now(),attempts:0});
+  assert.equal(await Storage.syncPending(),1);
+  assert.deepEqual(calls,['updateAmazonPricingPreference','addInventoryPurchase']);
+  assert.equal((await Storage.getPendingActions()).length,1);
+});
+
 test('unknown rejects instead of reporting saved, and edited re-entry keeps one receipt', async () => {
   const requests = [];
   const { API, Storage } = harness(memoryIndexedDb(), async (_url, options) => { requests.push(JSON.parse(options.body)); return unknown(); });

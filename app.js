@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v198';
+  const ASSET_VER = 'v199';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -691,6 +691,14 @@ const App = (() => {
     Router.register('more', renderMore);
     Router.register('analytics', renderAnalytics);
     Router.register('haiban', renderHaiban);
+    Router.register('amazon-pricing', container => {
+      setTitle('Amazon価格管理');
+      if (typeof AmazonPricing !== 'undefined' && AmazonPricing.render) {
+        AmazonPricing.render(container);
+      } else {
+        container.innerHTML = '<div class="card"><div class="card-title">Amazon価格管理を読み込めませんでした</div><p>アプリを再読み込みして、もう一度お試しください。</p></div>';
+      }
+    });
     Router.register('quiz', (container) => {
       if (typeof Quiz !== 'undefined' && Quiz.renderQuiz) {
         Quiz.renderQuiz(container);
@@ -1105,6 +1113,10 @@ const App = (() => {
     container.innerHTML = `
       ${buildPatrolBanner()}
       ${buildPlannedRouteBanner()}
+      <button type="button" class="amazon-pricing-entry" id="btn-amazon-pricing">
+        <span><strong>Amazon価格管理</strong><span>現在価格・在庫を確認（価格提案は準備中）</span></span>
+        <span class="amazon-pricing-entry-arrow" aria-hidden="true">›</span>
+      </button>
       <div class="map-toolbar">
         <label class="sr-only" for="map-store-search">店舗名・地域・住所で検索</label>
         <input type="search" class="form-input" id="map-store-search" placeholder="店舗名・地域・住所で検索" value="${esc(mapSearchQuery)}">
@@ -1144,6 +1156,7 @@ const App = (() => {
     // 予定ルート・巡回中バナーのボタン
     wirePlannedRouteHandlers();
     wirePatrolBannerHandlers();
+    document.getElementById('btn-amazon-pricing')?.addEventListener('click', () => Router.navigate('amazon-pricing'));
 
     // チェーンチップ: 押したチェーンだけ表示
     container.querySelectorAll('.chain-chip').forEach(chip => {

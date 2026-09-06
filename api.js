@@ -17,7 +17,7 @@ const API = (() => {
     'getStores', 'getConfig', 'getRouteHistory', 'getRouteStops',
     'getRouteAreaVisits', 'getRouteCorrectionSuggestions', 'getPurchases',
     'getMemos', 'getFinds', 'getInventoryPurchases', 'getTunnelUrl',
-    'getAnalyticsData',
+    'getAnalyticsData', 'getAmazonPricing',
     '_debugInventory'
   ]);
   if (localStorage.getItem(API_URL_MIGRATION_KEY) !== '1') {
@@ -291,9 +291,12 @@ const API = (() => {
     }
     if (!data.success) {
       const message = String(data.error || 'API error');
+      const pricingRejection = action === 'updateAmazonPricingPreference'
+        ? message.match(/^(INVALID_INPUT|PRICING_REFRESH_REQUIRED|PRICING_REVISION_CONFLICT):/)?.[1] : '';
       const code = message.startsWith('UNAUTHORIZED') ? 'UNAUTHORIZED'
         : message.startsWith('BUSY') ? 'BUSY'
           : message.startsWith('OPERATION_OUTCOME_UNKNOWN') ? 'OPERATION_OUTCOME_UNKNOWN'
+          : pricingRejection ? pricingRejection
           : 'API_ERROR';
       if (code === 'UNAUTHORIZED') {
         window.dispatchEvent(new CustomEvent('api-auth-error', { detail: { action } }));
@@ -332,7 +335,8 @@ const API = (() => {
       ...(operationId ? { operation_id: operationId } : {})
     };
     if (!isRead) {
-      const reservation = await Storage.reservePendingAction({ action, body: { ...body, operation_id: operationId }, operation_id: operationId, timestamp: Date.now(), attempts: 0 });
+      const reservation = await Storage.reservePendingAction({ action, body: { ...body, operation_id: operationId }, operation_id: operationId, timestamp: Date.now(), attempts: 0,
+        ...(action === 'updateAmazonPricingPreference' ? { last_error_code: 'OPERATION_OUTCOME_UNKNOWN' } : {}) });
       if (reservation.conflictId) throw apiError_(`同じ内容を確認中です。再入力せず受付ID ${reservation.conflictId} の送信待ちを確認してください`, 'PENDING_OPERATION_EXISTS');
     }
     const controller = new AbortController();
@@ -348,6 +352,9 @@ const API = (() => {
         signal: controller.signal
       });
       const result = await readJson_(res, action);
+      if (typeof options.validateResult === 'function' && !options.validateResult(result)) {
+        throw apiError_('保存結果の形式を確認できませんでした。再送せず一覧を再確認してください', 'OPERATION_OUTCOME_UNKNOWN');
+      }
       if (!isRead) {
         try { await Storage.settlePendingAction(operationId, { remove: true, result }); }
         catch (error) { throw apiError_('保存後の端末側の記録確認に失敗しました', 'UNKNOWN_RESPONSE', error); }
@@ -360,7 +367,11 @@ const API = (() => {
         || ['UNKNOWN_RESPONSE', 'OPERATION_OUTCOME_UNKNOWN'].includes(error.code)
         || /load failed|failed to fetch|networkerror/i.test(String(error.message || error));
       if (!isRead) {
-        await Storage.settlePendingAction(operationId, retryable ? {
+        const pricingDefinitelyRejected = action === 'updateAmazonPricingPreference' &&
+          ['INVALID_INPUT','PRICING_REFRESH_REQUIRED','PRICING_REVISION_CONFLICT','BUSY','UNAUTHORIZED'].includes(error.code);
+        await Storage.settlePendingAction(operationId, pricingDefinitelyRejected ? { remove: true } : action === 'updateAmazonPricingPreference' ? {
+          last_error: '価格管理設定の保存結果を再確認してください', last_error_code: 'OPERATION_OUTCOME_UNKNOWN', last_attempt_at: Date.now()
+        } : retryable ? {
           last_error: String(error.message || error), last_error_code: String(error.code || ''), last_attempt_at: Date.now()
         } : (options.queueOnFailure === false ? {
           last_error: String(error.message || error), last_error_code: String(error.code || ''), last_attempt_at: Date.now()
@@ -415,6 +426,23 @@ const API = (() => {
     addInventoryPurchase:(b)      => post('addInventoryPurchase', b),
     getInventoryPurchases:(p={})  => get('getInventoryPurchases', p),
     getAnalyticsData:  (p={})     => get('getAnalyticsData', p),
+    getAmazonPricing: () => get('getAmazonPricing'),
+    updateAmazonPricingPreference: (b) => {
+      if (!b || !['snooze', 'exclude', 'restore', 'set_size'].includes(b.action) || !b.sku ||
+          !Number.isInteger(b.expectedRevision) || b.expectedRevision < 0 ||
+          !b.operation_id || (b.action === 'snooze' && ![3, 7].includes(b.days)) ||
+          (b.action === 'set_size' && (!['normal','large'].includes(b.sizeClass) || !/^[A-Z0-9]{10}$/.test(b.asin || '')))) {
+        return Promise.reject(apiError_('価格管理設定を再読込してから操作してください', 'INVALID_INPUT'));
+      }
+      // API dispatch uses action; the preference action must have a distinct wire field.
+      return post('updateAmazonPricingPreference', {
+        sku: b.sku, preference_action: b.action, ...(b.action === 'snooze' ? { days: b.days } : {}),
+        ...(b.action === 'set_size' ? {asin:b.asin,sizeClass:b.sizeClass} : {}),
+        expectedRevision: b.expectedRevision, operation_id: b.operation_id,
+      }, { queueOnFailure: false, validateResult: result => result?.ok === true && result?.verified === true &&
+        result?.item?.sku === b.sku && result?.item?.preference?.revision === b.expectedRevision + 1 &&
+        result?.item?.canChangePrice === false });
+    },
     recalcRoutePurchases:(p={})   => post('recalcRoutePurchases', p),
     updateInventoryShop:(b)       => post('updateInventoryShop', b),
     bulkUpdateInventoryShop:(b)   => post('bulkUpdateInventoryShop', b),

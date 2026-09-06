@@ -7,6 +7,7 @@ const Router = (() => {
   let currentView = null;
   const navViewByRoute = {
     home: 'home',
+    'amazon-pricing': 'home',
     'route-select': 'home',
     patrol: 'home',
     summary: 'home',

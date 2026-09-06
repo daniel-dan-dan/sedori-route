@@ -3141,6 +3141,66 @@ body {
   min-height: 44px;
 }
 
+/* Amazon価格管理: 商品ごとの価格比較と、確認が必要な情報を優先する。 */
+.amazon-pricing-entry {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 13px 15px; margin-bottom: 12px; text-align: left;
+  border: 1px solid #b5d9de; border-left: 4px solid var(--primary); border-radius: 8px;
+  background: #fff; color: var(--primary-dark); cursor: pointer; font: inherit;
+}
+.amazon-pricing-entry strong { display: block; font-size: 15px; }
+.amazon-pricing-entry span span { display: block; margin-top: 3px; font-size: 12px; color: #49636e; }
+.amazon-pricing-entry-arrow { font-size: 28px; line-height: 1; }
+.amazon-pricing { color: var(--text); line-height: 1.6; }
+.amazon-pricing-heading h1 { margin: 10px 0 5px; font-size: 24px; line-height: 1.3; }
+.amazon-pricing-back { min-height: 44px; padding: 6px 0; border: 0; background: none; color: var(--primary-dark); font: inherit; font-size: 13px; cursor: pointer; }
+.amazon-pricing-mode { display: inline-block; padding: 4px 9px; border: 1px solid #a7d4c3; border-radius: 4px; color: #145b46; background: #effaf5; font-size: 12px; font-weight: 700; }
+.amazon-pricing-intro { margin: 13px 0 15px; color: #49616b; font-size: 13px; }
+.amazon-pricing-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 14px; margin-bottom: 14px; }
+.amazon-pricing-toolbar .btn { min-height: 44px; font-size: 13px; box-shadow: none; background: var(--primary); }
+.amazon-pricing-updated { font-size: 11px; color: #536572; }
+.amazon-pricing-notice { padding: 11px 13px; margin-bottom: 15px; border-left: 3px solid var(--primary); background: #edf8f9; font-size: 13px; }
+.amazon-pricing-notice p + p { margin-top: 7px; }
+.amazon-pricing-notice.has-warning { border-color: #b77a11; background: #fff7e8; color: #67440b; }
+.amazon-pricing-controls { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 17px 0 10px; }
+.amazon-pricing-controls label { display: grid; gap: 4px; font-size: 12px; font-weight: 700; }
+.amazon-pricing-controls input, .amazon-pricing-controls select { min-height: 46px; width: 100%; min-width: 0; font-size: 16px; }
+.amazon-pricing-count { margin: 10px 0; font-size: 12px; color: #49616b; }
+.amazon-pricing-scope { margin: 0 0 12px; font-size: 11px; line-height: 1.6; color: #49616b; }
+.amazon-pricing-pagination { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 13px; }
+.amazon-pricing-pagination .btn { min-height: 46px; font-size: 13px; }
+.amazon-pricing-list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff; }
+.amazon-pricing-item { padding: 18px 15px; overflow-wrap: anywhere; }
+.amazon-pricing-item + .amazon-pricing-item { border-top: 5px solid var(--bg); }
+.amazon-pricing-item h2 { font-size: 16px; line-height: 1.6; margin: 8px 0; font-weight: 750; }
+.amazon-pricing-item-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; align-items: center; }
+.amazon-pricing-status { font-size: 12px; font-weight: 750; border-radius: 4px; padding: 3px 8px; color: #174f60; background: #e8f4f8; }
+.amazon-pricing-status.state-lower, .amazon-pricing-status.state-review, .amazon-pricing-status.state-blocked { color: #77510c; background: #fff1d5; }
+.amazon-pricing-status.state-raise { color: #0c6948; background: #e4f6eb; }
+.amazon-pricing-status.state-excluded, .amazon-pricing-status.state-snoozed { color: #596672; background: #edf1f4; }
+.amazon-pricing-quantity, .amazon-pricing-identifiers, .amazon-pricing-conditions { color: #536572; font-size: 11px; }
+.amazon-pricing-prices, .amazon-pricing-costs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.amazon-pricing-prices { margin: 15px 0 10px; padding: 12px 0; border-top: 1px solid #e2eaee; border-bottom: 1px solid #e2eaee; }
+.amazon-pricing-metric dt { font-size: 11px; color: #526672; }
+.amazon-pricing-metric dd { font-size: 23px; font-weight: 750; line-height: 1.6; font-variant-numeric: tabular-nums; }
+.amazon-pricing-metric.emphasized dd { color: var(--primary-dark); }
+.amazon-pricing-costs .amazon-pricing-metric dd { font-size: 17px; }
+.amazon-pricing-reasons { margin-top: 14px; font-size: 13px; }
+.amazon-pricing-reasons h3 { font-size: 12px; color: #49616b; margin-bottom: 4px; }
+.amazon-pricing-reasons p + p { margin-top: 4px; }
+.amazon-pricing-item-warning { border-left: 2px solid #c38719; padding-left: 9px; margin-top: 10px; color: #77510c; }
+.amazon-pricing-review { margin-top: 15px; font-size: 13px; font-weight: 750; }
+.amazon-pricing-observed { margin-top: 3px; font-size: 11px; color: #536572; }
+.amazon-pricing-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 13px; }
+.amazon-pricing-actions .btn { min-height: 46px; padding: 8px 6px; font-size: 12px; box-shadow: none; }
+.amazon-pricing-actions .btn:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.amazon-pricing-action-note { font-size: 11px; color: #536572; margin-top: 7px; }
+.amazon-pricing-empty { padding: 25px 16px; font-size: 14px; }
+.amazon-pricing-footnote { margin: 16px 0 24px; font-size: 11px; color: #536572; }
+.amazon-pricing button:focus-visible, .amazon-pricing-entry:focus-visible { outline: 3px solid #0c8290; outline-offset: 3px; }
+@media (min-width: 500px) { .amazon-pricing-controls { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .amazon-pricing button, .amazon-pricing-entry { transition: none; transform: none; } }
+
 @media (max-width: 380px) {
   .nav-item {
     min-width: 50px;

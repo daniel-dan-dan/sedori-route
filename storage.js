@@ -170,6 +170,7 @@ const Storage = (() => {
       return uuids(right).some(uuid => existing.has(uuid));
     }
     if (left.action !== right.action) return false;
+    if (left.action === 'updateAmazonPricingPreference') return String(left.body?.sku || '') === String(right.body?.sku || '');
     if (left.action === 'addInventoryPurchase') {
       return ['product_name', 'purchase_date', 'store_id', 'store_name'].every(key => String(left.body?.[key] || '').trim() === String(right.body?.[key] || '').trim());
     }
@@ -300,6 +301,9 @@ const Storage = (() => {
             });
           }
           notifyPendingBlocked_(act, blockedReason);
+          // Price-review preferences do not depend on purchase/route writes.
+          // Keep their uncertain receipt, but do not freeze unrelated work.
+          if (act.action === 'updateAmazonPricingPreference') continue;
           // 書込順序を守るため、この項目より後も自動送信しない。
           break;
         }

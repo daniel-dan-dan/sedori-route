@@ -17,7 +17,7 @@ const cacheVersion = cacheMatch && cacheMatch[1];
 const badgeVersion = badgeMatch && badgeMatch[1];
 const errors = [];
 
-const cacheBustVersions = [...html.matchAll(/(?:vendor\/leaflet\/leaflet\.(?:css|js)|style\.css|storage\.js|api\.js|route-optimizer\.js|router\.js|quiz\.js|app\.js|bootstrap\.js)\?v=(\d+)/g)]
+const cacheBustVersions = [...html.matchAll(/(?:vendor\/leaflet\/leaflet\.(?:css|js)|style\.css|storage\.js|api\.js|route-optimizer\.js|router\.js|quiz\.js|amazon-pricing\.js|app\.js|bootstrap\.js)\?v=(\d+)/g)]
   .map((match) => `v${match[1]}`);
 const pairStyleVersion = (pair.match(/style\.css\?v=(\d+)/) || [])[1];
 const pairScriptVersion = (pair.match(/pair\.js\?v=(\d+)/) || [])[1];
@@ -41,7 +41,7 @@ if (!/CACHE_PREFIX\s*=\s*['"]sedori-route-['"]/.test(sw)) {
 if (!/\.filter\(k\s*=>\s*k\.startsWith\(CACHE_PREFIX\)\s*&&\s*k\s*!==\s*CACHE_NAME\)/.test(sw)) {
   errors.push('旧cache削除がsedori-route専用prefixへ限定されていません。');
 }
-if (cacheBustVersions.length !== 10 || cacheBustVersions.some((version) => version !== badgeVersion)) {
+if (cacheBustVersions.length !== 11 || cacheBustVersions.some((version) => version !== badgeVersion)) {
   errors.push(`CSS/JSのcache bustが画面版数(${badgeVersion})と一致していません。`);
 }
 if (`v${pairStyleVersion}` !== badgeVersion) errors.push('pair.html のcache bustが画面版数と一致していません。');
@@ -51,7 +51,7 @@ if (!requiredCsp.test(html) || !requiredCsp.test(pair)) errors.push('index/pair�
 if (/<script(?![^>]*\bsrc=)[^>]*>/i.test(html) || /<script(?![^>]*\bsrc=)[^>]*>/i.test(pair)) {
   errors.push('inline scriptが残っています。');
 }
-['bootstrap.js?v=', 'pair.js?v='].forEach(asset => {
+['bootstrap.js?v=', 'pair.js?v=', 'amazon-pricing.js?v='].forEach(asset => {
   if (!sw.includes(`./${asset}${badgeVersion.slice(1)}`)) errors.push(`Service Worker未登録: ${asset}`);
 });
 
