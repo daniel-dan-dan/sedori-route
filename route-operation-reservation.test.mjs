@@ -302,11 +302,25 @@ test('pending and unknown receipts never appear registered, including after a re
   assert.equal((await review.Storage.getInventoryReceiptStatus())[0].status,'review');
 });
 
-for (const emptyResult of [null, undefined, false, '', 0, {}]) test('empty success data persists as review before clearing its pending receipt: '+String(emptyResult),async()=>{
+for (const emptyResult of [null, false, '', 0, {}]) test('empty success data persists as review before clearing its pending receipt: '+String(emptyResult),async()=>{
   const {API,Storage}=harness(memoryIndexedDb(),async()=>response(emptyResult));
   await API.addInventoryPurchase({...purchase,route_id:'route-empty'});
   assert.equal((await Storage.getPendingActions()).length,0);
   const receipts=await Storage.getInventoryReceiptStatus('route-empty');
   assert.equal(receipts.length,1);assert.equal(receipts[0].status,'review');assert.equal(receipts[0].row,null);
   assert.match(receipts[0].reason,/登録先を確認できません/);
+});
+
+test('missing success data retains the original pending receipt across reload', async () => {
+  const db=memoryIndexedDb();
+  const {API,Storage}=harness(db,async()=>response(undefined));
+  const result=await API.addInventoryPurchase({...purchase,route_id:'route-empty'});
+  assert.equal(result._queued,true);
+  const pending=await Storage.getPendingActions();
+  assert.equal(pending.length,1);
+  assert.equal(pending[0].last_error_code,'UNKNOWN_RESPONSE');
+  const reloaded=harness(db,async()=>{throw Error('must not request during reload');});
+  await reloaded.API.ready();
+  assert.equal((await reloaded.Storage.getPendingActions())[0].operation_id,result.operation_id);
+  assert.equal((await reloaded.Storage.getInventoryReceiptStatus('route-empty'))[0].status,'pending');
 });

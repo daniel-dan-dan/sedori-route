@@ -29,52 +29,61 @@ const API = (() => {
   if (baseUrl !== storedBaseUrl) localStorage.setItem('gas_api_url', baseUrl);
   const credentialCache = new Map();
   let credentialDbPromise = null;
-  const credentialReadyPromise = initializeCredentials_();
+  let credentialReadyPromise = initializeCredentials_();
+  // Startup may fail before the view awaits ready(). Keep that rejection
+  // handled, and allow a later explicit attempt to reopen storage safely.
+  credentialReadyPromise.catch(() => {});
 
   function openCredentialDb_() {
     if (credentialDbPromise) return credentialDbPromise;
     credentialDbPromise = new Promise((resolve, reject) => {
       const request = indexedDB.open(CREDENTIAL_DB_NAME, CREDENTIAL_DB_VERSION);
+      let blocked = false;
       request.onupgradeneeded = event => {
         const database = event.target.result;
         if (!database.objectStoreNames.contains(CREDENTIAL_STORE_NAME)) {
           database.createObjectStore(CREDENTIAL_STORE_NAME, { keyPath: 'key' });
         }
       };
-      request.onsuccess = event => resolve(event.target.result);
+      request.onsuccess = event => {
+        const database = event.target.result;
+        if (blocked) { database.close(); return; }
+        database.onversionchange = () => {
+          if (credentialDbPromise === pending) credentialDbPromise = null;
+          database.close();
+        };
+        database.onclose = () => { if (credentialDbPromise === pending) credentialDbPromise = null; };
+        resolve(database);
+      };
       request.onerror = event => reject(event.target.error || new Error('credential_db_open_failed'));
-      request.onblocked = () => reject(new Error('credential_db_blocked'));
+      request.onblocked = () => { blocked = true; reject(new Error('credential_db_blocked')); };
     });
-    return credentialDbPromise;
+    const pending = credentialDbPromise;
+    pending.catch(() => { if (credentialDbPromise === pending) credentialDbPromise = null; });
+    return pending;
   }
 
   async function credentialTransaction_(mode, callback) {
     const database = await openCredentialDb_();
     return new Promise((resolve, reject) => {
       const transaction = database.transaction(CREDENTIAL_STORE_NAME, mode);
-      const store = transaction.objectStore(CREDENTIAL_STORE_NAME);
       let result;
-      try {
-        result = callback(store);
-      } catch (error) {
-        transaction.abort();
-        reject(error);
-        return;
-      }
       transaction.oncomplete = () => resolve(result);
       transaction.onerror = event => reject(event.target.error || new Error('credential_db_write_failed'));
       transaction.onabort = event => reject(event.target.error || new Error('credential_db_aborted'));
+      try {
+        callback(transaction.objectStore(CREDENTIAL_STORE_NAME), value => { result = value; });
+      } catch (error) {
+        try { transaction.abort(); } catch (_) { /* Already inactive. */ }
+        reject(error);
+      }
     });
   }
 
   async function readCredential_(key) {
-    const database = await openCredentialDb_();
-    return new Promise((resolve, reject) => {
-      const request = database.transaction(CREDENTIAL_STORE_NAME, 'readonly')
-        .objectStore(CREDENTIAL_STORE_NAME)
-        .get(key);
-      request.onsuccess = () => resolve(String(request.result?.value || ''));
-      request.onerror = event => reject(event.target.error || new Error('credential_db_read_failed'));
+    return credentialTransaction_('readonly', (store, setResult) => {
+      const request = store.get(key);
+      request.onsuccess = () => setResult(String(request.result?.value || ''));
     });
   }
 
@@ -112,9 +121,11 @@ const API = (() => {
   }
 
   async function ready() {
+    const pending = credentialReadyPromise || (credentialReadyPromise = initializeCredentials_());
     try {
-      return await credentialReadyPromise;
+      return await pending;
     } catch (error) {
+      if (credentialReadyPromise === pending) credentialReadyPromise = null;
       throw apiError_('端末の接続情報を安全に読み込めませんでした。再読み込みしてください', 'CREDENTIAL_STORAGE_FAILED', error);
     }
   }
@@ -289,7 +300,14 @@ const API = (() => {
         error
       );
     }
-    if (!data.success) {
+    // A JSON body alone is not proof of a completed write. Preserve its receipt
+    // when HTTP failed or the GAS success envelope cannot be verified.
+    if (res.ok === false || !data || typeof data !== 'object' || Array.isArray(data)
+      || typeof data.success !== 'boolean'
+      || (data.success === true && !Object.prototype.hasOwnProperty.call(data, 'data'))) {
+      throw apiError_(`${action}の結果を確認できませんでした。再送せず保存結果を確認してください`, 'UNKNOWN_RESPONSE');
+    }
+    if (data.success === false) {
       const message = String(data.error || 'API error');
       const pricingRejection = action === 'updateAmazonPricingPreference'
         ? message.match(/^(INVALID_INPUT|PRICING_REFRESH_REQUIRED|PRICING_REVISION_CONFLICT):/)?.[1] : '';
@@ -318,7 +336,7 @@ const API = (() => {
       const timer = setTimeout(() => controller.abort(), options.timeoutMs || 10000);
       try {
         const res = await fetch(`${baseUrl}?action=ping`, { redirect: 'follow', signal: controller.signal });
-        return readJson_(res, action);
+        return await readJson_(res, action);
       } finally {
         clearTimeout(timer);
       }

@@ -82,7 +82,7 @@ function mimeFor(asset) {
 function workerHarness({ badStatus, badMime, badNetwork, failPut } = {}) {
   const listeners = {};
   const cacheMaps = new Map([['sedori-route-v195', new Map([['old', 'preserved']])], ['other-app-v1', new Map()]]);
-  const calls = { skip: 0, claim: 0, puts: 0, deleted: [] };
+  const calls = { skip: 0, claim: 0, puts: 0, fetches: 0, deleted: [] };
   const key = request => new URL(typeof request === 'string' ? request : request.url, 'https://example.test/route/').href;
   const caches = {
     async open(name) {
@@ -107,6 +107,7 @@ function workerHarness({ badStatus, badMime, badNetwork, failPut } = {}) {
     clients: { async claim() { calls.claim++; } },
   };
   const fetch = async asset => {
+    calls.fetches++;
     const target = typeof asset === 'string' ? asset : asset.url;
     if (badNetwork && target.includes('app.js')) throw new Error('offline');
     return new Response('fixture', {
@@ -162,4 +163,16 @@ test('early skip-waiting message cannot bypass the complete cache gate', async (
   await assert.rejects(h.event('activate'), /未完成/);
   assert.equal(h.calls.claim, 0);
   assert.ok(h.cacheMaps.has('sedori-route-v195'));
+});
+
+test('active worker serves one verified release without mixing fresh deployment files', async () => {
+  const h = workerHarness(); await h.event('install'); await h.event('activate');
+  const before = h.calls.fetches;
+  const assets = [...h.cacheMaps.get(currentWorkerCache).keys()].filter(url => /app\.js|index\.html/.test(url));
+  for (const url of assets) {
+    let response;
+    await h.event('fetch', { request: new Request(url), respondWith(value) { response = value; } });
+    assert.equal(await (await response).text(), 'fixture');
+  }
+  assert.equal(h.calls.fetches, before, 'known files remain in the active release until waiting worker activation');
 });

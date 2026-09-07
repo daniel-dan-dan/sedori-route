@@ -19,39 +19,54 @@
   function openCredentialDb() {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(credentialDbName, 1);
+      let blocked = false;
       request.onupgradeneeded = event => {
         const database = event.target.result;
         if (!database.objectStoreNames.contains(credentialStoreName)) {
           database.createObjectStore(credentialStoreName, { keyPath: 'key' });
         }
       };
-      request.onsuccess = event => resolve(event.target.result);
+      request.onsuccess = event => {
+        const database = event.target.result;
+        database.onversionchange = () => database.close();
+        if (blocked) { database.close(); return; }
+        resolve(database);
+      };
       request.onerror = event => reject(event.target.error || new Error('credential_db_open_failed'));
-      request.onblocked = () => reject(new Error('credential_db_blocked'));
+      request.onblocked = () => { blocked = true; reject(new Error('credential_db_blocked')); };
+    });
+  }
+
+  async function credentialTransaction(mode, callback) {
+    const database = await openCredentialDb();
+    return new Promise((resolve, reject) => {
+      let transaction, result;
+      const fail = error => { database.close(); reject(error); };
+      try {
+        transaction = database.transaction(credentialStoreName, mode);
+        transaction.oncomplete = () => { database.close(); resolve(result); };
+        transaction.onerror = event => fail(event.target.error || new Error('credential_db_write_failed'));
+        transaction.onabort = event => fail(event.target.error || new Error('credential_db_aborted'));
+        callback(transaction.objectStore(credentialStoreName), value => { result = value; });
+      } catch (error) {
+        try { transaction?.abort(); } catch (_) { /* Already inactive. */ }
+        fail(error);
+      }
     });
   }
 
   async function readCredential(key) {
-    const database = await openCredentialDb();
-    return new Promise((resolve, reject) => {
-      const request = database.transaction(credentialStoreName, 'readonly')
-        .objectStore(credentialStoreName).get(key);
-      request.onsuccess = () => resolve(String(request.result?.value || ''));
-      request.onerror = event => reject(event.target.error || new Error('credential_db_read_failed'));
+    return credentialTransaction('readonly', (store, setResult) => {
+      const request = store.get(key);
+      request.onsuccess = () => setResult(String(request.result?.value || ''));
     });
   }
 
   async function writeCredential(key, value) {
-    const database = await openCredentialDb();
     const normalized = String(value || '').trim();
-    return new Promise((resolve, reject) => {
-      const transaction = database.transaction(credentialStoreName, 'readwrite');
-      const store = transaction.objectStore(credentialStoreName);
+    return credentialTransaction('readwrite', store => {
       if (normalized) store.put({ key, value: normalized, updatedAt: Date.now() });
       else store.delete(key);
-      transaction.oncomplete = resolve;
-      transaction.onerror = event => reject(event.target.error || new Error('credential_db_write_failed'));
-      transaction.onabort = event => reject(event.target.error || new Error('credential_db_aborted'));
     });
   }
 
@@ -102,7 +117,9 @@
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      return await fetch(url, { ...options, signal: controller.signal });
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      await response.clone().text();
+      return response;
     } finally {
       clearTimeout(timer);
     }

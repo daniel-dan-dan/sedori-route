@@ -1,21 +1,21 @@
 const CACHE_PREFIX = 'sedori-route-';
-const CACHE_NAME = 'sedori-route-v199';
+const CACHE_NAME = 'sedori-route-v200';
 const ASSETS = [
   './',
   './index.html',
   './pair.html',
-  './style.css?v=199',
-  './app.js?v=199',
-  './router.js?v=199',
-  './api.js?v=199',
-  './route-optimizer.js?v=199',
-  './storage.js?v=199',
-  './quiz.js?v=199',
-  './amazon-pricing.js?v=199',
-  './bootstrap.js?v=199',
-  './pair.js?v=199',
-  './vendor/leaflet/leaflet.css?v=199',
-  './vendor/leaflet/leaflet.js?v=199',
+  './style.css?v=200',
+  './app.js?v=200',
+  './router.js?v=200',
+  './api.js?v=200',
+  './route-optimizer.js?v=200',
+  './storage.js?v=200',
+  './quiz.js?v=200',
+  './amazon-pricing.js?v=200',
+  './bootstrap.js?v=200',
+  './pair.js?v=200',
+  './vendor/leaflet/leaflet.css?v=200',
+  './vendor/leaflet/leaflet.js?v=200',
   './vendor/leaflet/images/layers-2x.png',
   './vendor/leaflet/images/layers.png',
   './vendor/leaflet/images/marker-icon-2x.png',
@@ -130,11 +130,16 @@ self.addEventListener('fetch', e => {
   // 地図タイルやLeaflet CDNなどの外部リソースは、ブラウザ標準キャッシュに任せる
   if (url.origin !== self.location.origin) return;
 
-  // 自前ファイルだけネットワーク優先で更新確認（失敗時にSWキャッシュ）
+  // 検証済みの同一リリースを使い、次版waiting中に新旧ファイルを混在させない。
   const req = new Request(e.request, { cache: 'no-cache' });
   const knownAsset = ASSETS.find(asset => new URL(asset, self.location.href).href === e.request.url);
-  e.respondWith(
-    fetch(req)
+  e.respondWith((async () => {
+    if (knownAsset) {
+      const cache = await caches.open(CACHE_NAME);
+      const saved = await cache.match(e.request);
+      if (validAssetResponse_(knownAsset, saved)) return saved;
+    }
+    return fetch(req)
       .then(res => {
         if (knownAsset && !validAssetResponse_(knownAsset, res)) throw new Error('更新ファイルが不正なため保存済み版を使います');
         if (knownAsset) {
@@ -143,6 +148,6 @@ self.addEventListener('fetch', e => {
         }
         return res;
       })
-      .catch(() => caches.open(CACHE_NAME).then(c => c.match(e.request)))
-  );
+      .catch(() => caches.open(CACHE_NAME).then(c => c.match(e.request)));
+  })());
 });

@@ -52,6 +52,7 @@ function createFakeIndexedDb(initial = {}) {
           queueMicrotask(() => {
             request.result = values.has(key) ? { key, value: values.get(key) } : undefined;
             request.onsuccess?.();
+            complete();
           });
           return request;
         },

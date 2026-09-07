@@ -8,12 +8,15 @@ const Storage = (() => {
   const MAX_AUTO_RETRY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
   const MAX_AUTO_RETRY_ATTEMPTS = 12;
   let db = null;
+  let opening = null;
   let syncInFlight = null;
 
   function open() {
-    return new Promise((resolve, reject) => {
-      if (db) return resolve(db);
+    if (db) return Promise.resolve(db);
+    if (opening) return opening;
+    opening = new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
+      let blocked = false;
       req.onupgradeneeded = e => {
         const d = e.target.result;
         if (!d.objectStoreNames.contains('stores'))
@@ -28,133 +31,136 @@ const Storage = (() => {
         if (!d.objectStoreNames.contains('viewCache'))
           d.createObjectStore('viewCache', { keyPath: 'id' });
       };
-      req.onsuccess = e => { db = e.target.result; resolve(db); };
+      req.onsuccess = e => {
+        const connection = e.target.result;
+        // A blocked open can succeed later. Do not retain that abandoned handle.
+        if (blocked) { connection.close(); return; }
+        connection.onversionchange = () => {
+          if (db === connection) db = null;
+          connection.close();
+        };
+        connection.onclose = () => { if (db === connection) db = null; };
+        db = connection;
+        resolve(connection);
+      };
       req.onerror = e => reject(e.target.error);
+      req.onblocked = () => {
+        blocked = true;
+        reject(new Error('別の画面で古い店舗アプリが開いているため保存を開始できません。ほかの店舗アプリ画面を閉じてから再度お試しください。'));
+      };
+    });
+    const pending = opening;
+    const release = () => { if (opening === pending) opening = null; };
+    pending.then(release, release);
+    return pending;
+  }
+
+  // Set handlers before any requests. A synchronous DataCloneError/DataError
+  // after clear()/earlier puts must abort the entire transaction, not commit a
+  // partial replacement. Success always means transaction completion.
+  async function transact(storeName, mode, work) {
+    const d = await open();
+    return new Promise((resolve, reject) => {
+      const tx = d.transaction(storeName, mode);
+      let result;
+      const fail = error => {
+        try { tx.abort(); } catch (_) { /* Already completed/aborted. */ }
+        reject(error);
+      };
+      tx.oncomplete = () => resolve(result);
+      tx.onerror = e => reject(e.target.error || tx.error || new Error('端末への保存・読込に失敗しました'));
+      tx.onabort = () => reject(tx.error || new Error('端末への保存・読込が中断されました'));
+      try {
+        work(tx.objectStore(storeName), value => { result = value; }, fail);
+      } catch (error) {
+        fail(error);
+      }
     });
   }
 
-  async function putAll(storeName, items) {
-    const d = await open();
-    const tx = d.transaction(storeName, 'readwrite');
-    const store = tx.objectStore(storeName);
-    items.forEach(item => store.put(item));
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = resolve;
-      tx.onerror = e => reject(e.target.error);
+  function putAll(storeName, items) {
+    return transact(storeName, 'readwrite', store => items.forEach(item => store.put(item)));
+  }
+
+  function replaceAll(storeName, items) {
+    return transact(storeName, 'readwrite', store => {
+      store.clear();
+      items.forEach(item => store.put(item));
     });
   }
 
-  async function replaceAll(storeName, items) {
-    const d = await open();
-    const tx = d.transaction(storeName, 'readwrite');
-    const store = tx.objectStore(storeName);
-    store.clear();
-    items.forEach(item => store.put(item));
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = resolve;
-      tx.onerror = e => reject(e.target.error);
-    });
-  }
-
-  async function getAll(storeName) {
-    const d = await open();
-    const tx = d.transaction(storeName, 'readonly');
-    const store = tx.objectStore(storeName);
-    return new Promise((resolve, reject) => {
+  function getAll(storeName) {
+    return transact(storeName, 'readonly', (store, setResult) => {
       const req = store.getAll();
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = e => reject(e.target.error);
+      req.onsuccess = () => setResult(req.result);
     });
   }
 
-  async function put(storeName, item) {
-    const d = await open();
-    const tx = d.transaction(storeName, 'readwrite');
-    tx.objectStore(storeName).put(item);
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = resolve;
-      tx.onerror = e => reject(e.target.error);
+  function put(storeName, item) {
+    return transact(storeName, 'readwrite', store => store.put(item));
+  }
+
+  function putWithKey(storeName, key, item) {
+    return transact(storeName, 'readwrite', store => store.put(item, key));
+  }
+
+  function get(storeName, key) {
+    return transact(storeName, 'readonly', (store, setResult) => {
+      const req = store.get(key);
+      req.onsuccess = () => setResult(req.result);
     });
   }
 
-  async function putWithKey(storeName, key, item) {
-    const d = await open();
-    const tx = d.transaction(storeName, 'readwrite');
-    tx.objectStore(storeName).put(item, key);
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = resolve;
-      tx.onerror = e => reject(e.target.error);
-    });
+  function clear(storeName) {
+    return transact(storeName, 'readwrite', store => store.clear());
   }
 
-  async function get(storeName, key) {
-    const d = await open();
-    const tx = d.transaction(storeName, 'readonly');
-    return new Promise((resolve, reject) => {
-      const req = tx.objectStore(storeName).get(key);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = e => reject(e.target.error);
-    });
-  }
-
-  async function clear(storeName) {
-    const d = await open();
-    const tx = d.transaction(storeName, 'readwrite');
-    tx.objectStore(storeName).clear();
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = resolve;
-      tx.onerror = e => reject(e.target.error);
-    });
-  }
-
-  async function del(storeName, key) {
-    const d = await open();
-    const tx = d.transaction(storeName, 'readwrite');
-    tx.objectStore(storeName).delete(key);
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = resolve;
-      tx.onerror = e => reject(e.target.error);
-    });
+  function del(storeName, key) {
+    return transact(storeName, 'readwrite', store => store.delete(key));
   }
 
   // 同期キュー
   async function addPendingAction(actionObj) {
     const operationId = String(actionObj?.operation_id || actionObj?.body?.operation_id || '');
     if (!operationId) throw new Error('operation_id is required for offline queue');
-    if (operationId) {
-      const existing = await getPendingActions();
-      if (existing.some(item => String(item.operation_id || item.body?.operation_id || '') === operationId)) {
-        return existing.find(item => String(item.operation_id || item.body?.operation_id || '') === operationId)._queueKey;
-      }
-    }
-    const d = await open();
-    const tx = d.transaction('pendingActions', 'readwrite');
-    tx.objectStore('pendingActions').add({
-      ...actionObj,
-      operation_id: operationId,
-      timestamp: Number(actionObj?.timestamp) || Date.now(),
-      attempts: Math.max(0, Number(actionObj?.attempts) || 0),
-    });
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = resolve;
-      tx.onerror = e => reject(e.target.error);
+    return transact('pendingActions', 'readwrite', (store, setResult, fail) => {
+      const req = store.openCursor();
+      req.onsuccess = () => {
+        try {
+          const cursor = req.result;
+          if (cursor) {
+            if (String(cursor.value.operation_id || cursor.value.body?.operation_id || '') === operationId) {
+              setResult(cursor.primaryKey);
+              return;
+            }
+            cursor.continue();
+            return;
+          }
+          const added = store.add({
+            ...actionObj,
+            operation_id: operationId,
+            timestamp: Number(actionObj?.timestamp) || Date.now(),
+            attempts: Math.max(0, Number(actionObj?.attempts) || 0),
+          });
+          added.onsuccess = () => setResult(added.result);
+        } catch (error) { fail(error); }
+      };
     });
   }
 
-  async function getPendingActions() {
-    const d = await open();
-    const tx = d.transaction('pendingActions', 'readonly');
-    const store = tx.objectStore('pendingActions');
-    return new Promise((resolve, reject) => {
+  function getPendingActions() {
+    return transact('pendingActions', 'readonly', (store, setResult, fail) => {
       const rows = [];
+      setResult(rows);
       const req = store.openCursor();
       req.onsuccess = () => {
-        const cursor = req.result;
-        if (!cursor) return resolve(rows);
-        rows.push({ ...cursor.value, _queueKey: cursor.primaryKey });
-        cursor.continue();
+        try {
+          const cursor = req.result;
+          if (!cursor) return;
+          rows.push({ ...cursor.value, _queueKey: cursor.primaryKey });
+          cursor.continue();
+        } catch (error) { fail(error); }
       };
-      req.onerror = e => reject(e.target.error);
     });
   }
 
@@ -184,21 +190,17 @@ const Storage = (() => {
 
   // 読取と追加を同一readwrite transaction内に置き、別タブ・同時押しにも対応する。
   async function reservePendingAction(actionObj) {
-    const d = await open();
-    const tx = d.transaction('pendingActions', 'readwrite');
-    const store = tx.objectStore('pendingActions');
-    let conflictId = '';
-    const request = store.getAll();
-    request.onsuccess = () => {
-      const rows = request.result || [];
-      const conflict = rows.find(item => String(item.operation_id || item.body?.operation_id || '') !== actionObj.operation_id && pendingActionsConflict_(item, actionObj));
-      if (conflict) { conflictId = String(conflict.operation_id || conflict.body?.operation_id || '旧受付'); return; }
-      if (!rows.some(item => String(item.operation_id || item.body?.operation_id || '') === actionObj.operation_id)) store.add(actionObj);
-    };
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = () => resolve({ conflictId });
-      tx.onerror = event => reject(event.target.error);
-      tx.onabort = event => reject(event.target.error || new Error('受付IDを端末に保存できません'));
+    return transact('pendingActions', 'readwrite', (store, setResult, fail) => {
+      setResult({ conflictId: '' });
+      const request = store.getAll();
+      request.onsuccess = () => {
+        try {
+          const rows = request.result || [];
+          const conflict = rows.find(item => String(item.operation_id || item.body?.operation_id || '') !== actionObj.operation_id && pendingActionsConflict_(item, actionObj));
+          if (conflict) { setResult({ conflictId: String(conflict.operation_id || conflict.body?.operation_id || '旧受付') }); return; }
+          if (!rows.some(item => String(item.operation_id || item.body?.operation_id || '') === actionObj.operation_id)) store.add(actionObj);
+        } catch (error) { fail(error); }
+      };
     });
   }
 
@@ -401,8 +403,13 @@ const Storage = (() => {
 
   // online復帰時の自動同期
   window.addEventListener('online', async () => {
-    const n = await syncPending();
-    if (n > 0) console.log(`Synced ${n} pending actions`);
+    try {
+      const n = await syncPending();
+      if (n > 0) console.log(`Synced ${n} pending actions`);
+    } catch (error) {
+      // Keep the durable queue intact if the browser cannot access storage.
+      console.warn('Online sync could not access pending data:', error);
+    }
   });
 
   return {
