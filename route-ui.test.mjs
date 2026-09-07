@@ -32,11 +32,11 @@ function appHarness({ storage = {}, api = {} } = {}) {
   let operationSequence = 0;
   const context = vm.createContext({
     document: { addEventListener() {}, createElement:makeElement, body:{appendChild: el => overlays.push(el)}, getElementById: id => id === 'toast' ? toastElement : null },
-    window: { addEventListener() {} }, console, setTimeout, clearTimeout,
+    window: { addEventListener() {} }, console, setTimeout, clearTimeout, L: {divIcon: options => options},
     Storage: { savePurchaseDraft:async()=>{},getPurchaseDraft:async()=>null,clearPurchaseDraft:async()=>{},clearViewCache:async()=>{}, ...storage },
     API: { createOperationId:()=> ++operationSequence === 1 ? 'fixture-operation-id' : 'fixture-operation-id-' + operationSequence, ...api }, Intl, Date,
   });
-  vm.runInContext(source.replace('return { init, loadData, toggleMapSelection };','return { showInventoryPurchaseModal, mustHoldInventorySubmission_, reorderRouteStores_, groupNearbyStores_, storeMatchesSearch_, esc };')+'\nglobalThis.subject=App;',context);
+  vm.runInContext(source.replace('return { init, loadData, toggleMapSelection };','return { showInventoryPurchaseModal, mustHoldInventorySubmission_, reorderRouteStores_, buildPinIcon, storeMatchesSearch_, esc };')+'\nglobalThis.subject=App;',context);
   return { app:context.subject, overlays };
 }
 const fixtureStore = {store_id:'fixture-store',name:'検証店舗'};
@@ -52,11 +52,44 @@ test('route reordering preserves inputs, adjusts adjacent order, and permits rem
   assert.equal(app.reorderRouteStores_([stores[0]],0,0,true).length,0);
   assert.deepEqual(stores.map(s=>s.store_id),['a','b','c']);
 });
-test('clusters keep selected pins independent and split after zoom changes projection', () => {
-  const {app}=appHarness();const stores=[{store_id:'a',lat:1,lng:1},{store_id:'b',lat:1,lng:2},{store_id:'c',lat:1,lng:3}];
-  const groups=app.groupNearbyStores_(stores,([x,y])=>({x,y}),new Set(['b']));
-  assert.equal(groups.length,2); assert.equal(groups[0][0].store_id,'b');assert.equal(groups[1].length,2);
-  assert.equal(app.groupNearbyStores_(stores,([x,y])=>({x:x*100,y:y*100})).length,3);
+test('original logo pins use 36px artwork and retain selected route numbers', () => {
+  const css=readFileSync(new URL('./style.css',import.meta.url),'utf8');
+  assert.equal([...css.matchAll(/\.map-pin\s*\{/g)].length,1,'no later size override');
+  assert.match(css,/\.map-pin\s*\{\s*width: 36px;\s*height: 36px;/);
+  assert.doesNotMatch(css,/\.map-cluster|\.cluster-store-list/);
+  const {app}=appHarness();
+  const store={store_id:'a',name:'セカンドストリート 検証店'};
+  const normal=app.buildPinIcon(store,-1),selected=app.buildPinIcon(store,0);
+  assert.deepEqual(Array.from(normal.iconSize),[36,36]);
+  assert.deepEqual(Array.from(normal.iconAnchor),[18,18]);
+  assert.match(normal.html,/map-pin-logo/);
+  assert.doesNotMatch(normal.html,/map-pin-badge/);
+  assert.match(selected.html,/map-pin selected/);
+  assert.match(selected.html,/map-pin-badge/);
+});
+test('all zoom levels retain individual nearby pins, overlap offsets and selected pins outside search', () => {
+  const {app}=appHarness();
+  const slice=(name,next)=>source.slice(source.indexOf('  function '+name+'('),source.indexOf(next,source.indexOf('  function '+name+'(')));
+  for(const zoom of [9,11,14,18]) {
+    const markers=[];
+    const stores=[{store_id:'a',name:'A',lat:38.2,lng:140.8},{store_id:'b',name:'B',lat:38.2,lng:140.8},{store_id:'c',name:'C',lat:38.3,lng:140.9}];
+    const before=JSON.stringify(stores);
+    const context=vm.createContext({stores,selectedStoreIds:['c'],patrolState:null,plannedRoute:null,mapMarkers:new Map(),
+      mapInstance:{getZoom:()=>zoom,project:()=>({x:1,y:1})}, mapCluster:{clearLayers(){markers.length=0;},addLayer:marker=>markers.push(marker)},
+      renderMapStoreList_(){},getMapFilteredStores_:()=>stores.slice(0,2),drawPatrolPolyline(){},
+      getLatLngKey:s=>`${s.lat},${s.lng}`,buildPinIcon:app.buildPinIcon,buildMapPopupElement:(s,index)=>({id:s.store_id,index}),
+      buildClusterMarker_:()=>({cluster:true}),
+      L:{marker:(position,options)=>({position,options,bindPopup(popup){this.popup=popup;}})}
+    });
+    const grouping=source.includes('function groupNearbyStores_(')?slice('groupNearbyStores_','  function buildClusterMarker_'):'';
+    vm.runInContext(slice('buildMarkerPositions','  function storeMatchesSearch_')+grouping+slice('refreshMapMarkers','  let patrolPolyline')+'\nrefreshMapMarkers();',context);
+    assert.equal(markers.length,3,`zoom ${zoom}: each store has its own pin`);
+    assert.ok(markers.every(marker=>!marker.cluster));
+    assert.deepEqual(markers.map(marker=>marker.popup.id),['a','b','c']);
+    assert.notDeepEqual(markers[0].position,markers[1].position);
+    assert.match(markers[2].options.icon.html,/map-pin-badge/);
+    assert.equal(JSON.stringify(stores),before,'display offsets must not change store coordinates');
+  }
 });
 test('store search normalizes width and combines words across name and address',()=>{
   const {app}=appHarness();const store={name:'サンプル ＡＢＣ 店',address:'仙台市泉区',lat:38.32,lng:140.88};

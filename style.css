@@ -3243,12 +3243,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .store-select-mark { color: var(--primary); font-weight: 750; font-size: 20px; }
 .store-list-details > summary { min-height: 44px; cursor: pointer; padding: 10px 0; color: var(--primary-dark); font-weight: 650; }
 .empty-state { padding: 20px 14px; color: var(--text-dim); font-size: 14px; }
-.map-cluster { min-width: 64px; height: 52px; padding: 3px 9px; border: 2px solid white; border-radius: 16px; display: grid; place-content: center; text-align: center; color: #fff; background: #087f8c; box-shadow: 0 1px 6px #3456; line-height: 1.2; }
-.map-cluster strong { font-size: 20px; }
-.map-cluster span { font-size: 11px; }
-.cluster-store-list { display: grid; gap: 6px; max-height: 240px; overflow: auto; }
-.cluster-store-list .btn { justify-content: flex-start; text-align: left; }
-.map-pin { width: 44px; height: 44px; }
 .leaflet-control-zoom a { width: 44px !important; height: 44px !important; line-height: 44px !important; }
 .leaflet-control-attribution { font-size: 10px; }
 .stop-order-actions { display: flex; gap: 5px; grid-column: 2; justify-content: flex-end; }

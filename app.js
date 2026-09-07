@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v201';
+  const ASSET_VER = 'v202';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -1082,8 +1082,8 @@ const App = (() => {
     return L.divIcon({
       className: '',
       html: `<div class="${cls}" style="${style}">${inner}${badge}</div>`,
-      iconSize: [44, 44],
-      iconAnchor: [22, 22],
+      iconSize: [36, 36],
+      iconAnchor: [18, 18],
     });
   }
 
@@ -1588,48 +1588,6 @@ const App = (() => {
     list.querySelectorAll('[data-select-store]').forEach(button => button.addEventListener('click', () => toggleMapSelection(button.dataset.selectStore)));
   }
 
-  // 画面上で近い未選択店舗だけをまとめる。選択順のピンと元座標は変更しない。
-  function groupNearbyStores_(items, project, excludedIds = new Set(), cellSize = 64) {
-    const groups = new Map();
-    const singles = [];
-    items.forEach(store => {
-      if (excludedIds.has(store.store_id)) { singles.push([store]); return; }
-      const point = project([Number(store.lat), Number(store.lng)]);
-      const key = `${Math.floor(point.x / cellSize)}:${Math.floor(point.y / cellSize)}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(store);
-    });
-    return [...singles, ...groups.values()];
-  }
-
-  function buildClusterMarker_(map, group, onSelect) {
-    const lat = group.reduce((sum, item) => sum + Number(item.lat), 0) / group.length;
-    const lng = group.reduce((sum, item) => sum + Number(item.lng), 0) / group.length;
-    const areaNames = [...new Set(group.map(item => AREAS.find(area => area.id === getArea(item))?.name || '近隣'))];
-    const label = areaNames.length === 1 ? areaNames[0] : '近隣';
-    const marker = L.marker([lat, lng], { title: `${label} ${group.length}店舗`, icon: L.divIcon({
-      className: '', iconSize: [64, 52], iconAnchor: [32, 26],
-      html: `<div class="map-cluster"><strong>${group.length}</strong><span>${esc(label)}</span></div>`
-    }) });
-    marker.on('click', () => {
-      if (map.getZoom() < 17) {
-        map.fitBounds(L.latLngBounds(group.map(item => [Number(item.lat), Number(item.lng)])), { maxZoom: Math.min(17, map.getZoom() + 2), padding: [30, 30] });
-      } else {
-        const popup = document.createElement('div');
-        popup.className = 'cluster-store-list';
-        group.forEach(item => {
-          const button = document.createElement('button');
-          button.className = 'btn btn-outline';
-          button.textContent = String(item.name || '店舗');
-          button.addEventListener('click', () => onSelect(item));
-          popup.appendChild(button);
-        });
-        marker.bindPopup(popup, { autoPan: false }).openPopup();
-      }
-    });
-    return marker;
-  }
-
   function refreshMapMarkers() {
     renderMapStoreList_();
     if (!mapInstance || !mapCluster) return;
@@ -1641,12 +1599,9 @@ const App = (() => {
     const markerPositions = buildMarkerPositions(wanted);
     mapCluster.clearLayers();
     mapMarkers.clear();
-    groupNearbyStores_(wanted, point => mapInstance.project(point, mapInstance.getZoom()), routeIdSet).forEach(group => {
-      if (group.length > 1) {
-        mapCluster.addLayer(buildClusterMarker_(mapInstance, group, store => toggleMapSelection(store.store_id)));
-        return;
-      }
-      const s = group[0], sid = s.store_id;
+    // 広域表示でも店舗ごとの元のロゴピンを維持する。件数表示へまとめない。
+    wanted.forEach(s => {
+      const sid = s.store_id;
       const patrolIdx = patrolIds.indexOf(sid);
       const selectedIdx = selectedStoreIds.indexOf(sid);
       const plannedIdx = plannedIds.indexOf(sid);
