@@ -7,6 +7,7 @@ const sw = readFileSync(join(here, 'sw.js'), 'utf8');
 const html = readFileSync(join(here, 'index.html'), 'utf8');
 const pair = readFileSync(join(here, 'pair.html'), 'utf8');
 const app = readFileSync(join(here, 'app.js'), 'utf8');
+const bootstrap = readFileSync(join(here, 'bootstrap.js'), 'utf8');
 
 const cacheMatch = sw.match(/CACHE_NAME\s*=\s*['"][^'"]*?(v\d+)['"]/);
 const badgeMatch =
@@ -22,6 +23,7 @@ const cacheBustVersions = [...html.matchAll(/(?:vendor\/leaflet\/leaflet\.(?:css
 const pairStyleVersion = (pair.match(/style\.css\?v=(\d+)/) || [])[1];
 const pairScriptVersion = (pair.match(/pair\.js\?v=(\d+)/) || [])[1];
 const assetVersion = (app.match(/ASSET_VER\s*=\s*['"](v\d+)['"]/) || [])[1];
+const registrationVersion = (bootstrap.match(/serviceWorker\.register\(['"]sw\.js\?v=(\d+)['"]/) || [])[1];
 const requiredCsp = /Content-Security-Policy" content="[^"]*script-src 'self'[^"]*object-src 'none'/;
 
 if (!cacheVersion) errors.push('sw.js の CACHE_NAME から版数を読み取れません。');
@@ -47,6 +49,7 @@ if (cacheBustVersions.length !== 11 || cacheBustVersions.some((version) => versi
 if (`v${pairStyleVersion}` !== badgeVersion) errors.push('pair.html のcache bustが画面版数と一致していません。');
 if (`v${pairScriptVersion}` !== badgeVersion) errors.push('pair.js のcache bustが画面版数と一致していません。');
 if (assetVersion !== badgeVersion) errors.push('チェーン画像のcache bustが画面版数と一致していません。');
+if (`v${registrationVersion}` !== badgeVersion) errors.push('bootstrap.jsのService Worker登録URLが画面版数と一致していません。');
 if (!requiredCsp.test(html) || !requiredCsp.test(pair)) errors.push('index/pairの厳格なCSPが見つかりません。');
 if (/<script(?![^>]*\bsrc=)[^>]*>/i.test(html) || /<script(?![^>]*\bsrc=)[^>]*>/i.test(pair)) {
   errors.push('inline scriptが残っています。');
