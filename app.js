@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v202';
+  const ASSET_VER = 'v203';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -478,6 +478,7 @@ const App = (() => {
         const latestConfig = await API.getConfig();
         config = latestConfig || {};
         await Storage.cacheConfig(config);
+        refreshBaseMaps_();
         plannedRouteRefreshedAt = Date.now();
         return await reconcilePlannedRoute_(false);
       } catch (error) {
@@ -644,6 +645,7 @@ const App = (() => {
         toast('データ取得に失敗しました');
       }
     }
+    refreshBaseMaps_();
     const plannedRouteChanged = await reconcilePlannedRoute_(fetchedFromApi);
     return { fetchedFromApi, plannedRouteChanged };
   }
@@ -1225,20 +1227,46 @@ const App = (() => {
   // 初期中心は常に仙台駅固定
   const SENDAI_STATION = [38.2603, 140.8828];
 
-  // 公式仕様: https://maps.gsi.go.jp/development/ichiran.html (2026-09-06確認)
-  const BASE_MAP_URL = 'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png';
-  function showMapFailure_(statusId) {
+  // CARTO-issued key arrives through authenticated config, never in the public bundle.
+  // https://carto.com/basemaps/apikey/ (2026-09-10)
+  const BASE_MAP_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
+  const baseMapRefreshers = new Set();
+  function refreshBaseMaps_() {
+    baseMapRefreshers.forEach(refresh => refresh());
+  }
+  function showMapFailure_(statusId, message) {
     const status = document.getElementById(statusId);
     if (!status) return;
     status.hidden = false;
-    status.textContent = '地図を読み込めません。店舗一覧から選択できます。';
+    status.textContent = message || '地図を読み込めません。店舗一覧から選択できます。';
   }
   function addBaseMap_(map, statusId) {
+    let layer = null;
+    let appliedKey = null;
+    const refresh = () => {
+      const nextKey = String(config.carto_basemap_key || '').trim();
+      if (nextKey === appliedKey) return;
+      appliedKey = nextKey;
+      if (layer) map.removeLayer(layer);
+      layer = createBaseMapLayer_(map, statusId);
+    };
+    baseMapRefreshers.add(refresh);
+    map.on('unload', () => baseMapRefreshers.delete(refresh));
+    refresh();
+    return layer;
+  }
+  function createBaseMapLayer_(map, statusId) {
+    const key = String(config.carto_basemap_key || '').trim();
+    // Do not send keyless requests (watermarked tiles) or silently change the map provider.
+    if (!key || key.length > 512 || /[\s{}]/.test(key)) {
+      showMapFailure_(statusId, '地図の接続設定を取得できません。オンラインで更新してください。店舗一覧は利用できます。');
+      return null;
+    }
     let failed = false;
-    const layer = L.tileLayer(BASE_MAP_URL, {
-      minZoom: 9, maxZoom: 19, maxNativeZoom: 18,
+    const layer = L.tileLayer(BASE_MAP_URL + '?key=' + encodeURIComponent(key), {
+      minZoom: 9, maxZoom: 19, subdomains: 'abcd',
       updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 2,
-      attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>に店舗情報を追記',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>',
     });
     layer.on('loading', () => { failed = false; });
     layer.on('tileerror', () => { failed = true; showMapFailure_(statusId); });

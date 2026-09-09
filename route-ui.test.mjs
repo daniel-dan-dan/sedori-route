@@ -99,8 +99,8 @@ test('store search normalizes width and combines words across name and address',
 test('map fallback, five-menu navigation and waiting updates preserve safe controls',()=>{
   assert.equal([...index.matchAll(/class="nav-item(?: active)?"/g)].length,5);
   assert.match(index,/data-view="more"/);
-  assert.doesNotMatch(source,/basemaps\.cartocdn\.com/);
-  assert.match(source,/cyberjapandata\.gsi\.go\.jp\/xyz\/pale/);
+  assert.match(source,/basemaps\.cartocdn\.com\/rastertiles\/voyager/);
+  assert.doesNotMatch(source,/cyberjapandata\.gsi\.go\.jp\/xyz\/pale/);
   assert.match(source,/renderMapStoreList_\(\);\s*if \(!mapInstance/);
   assert.doesNotMatch(bootstrap,/location\.reload|type: 'SKIP_WAITING'/);
   assert.doesNotMatch(sw,/self\.skipWaiting\(/);
