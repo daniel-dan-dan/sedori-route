@@ -165,7 +165,23 @@ const BrandGuide = (() => {
     const status = el('p', 'bg-status', '保存済みの資料を確認中…'); status.setAttribute('role', 'status'); root.append(status);
     const offlineStatus = el('p', 'bg-muted bg-offline-status', '通信なしで開くための画面を準備しています。'); root.append(offlineStatus);
     if (navigator.serviceWorker) {
-      navigator.serviceWorker.ready.then(() => { if (isLive()) offlineStatus.textContent = '画面の保存も完了 · 取り込み済みの資料は通信なしで開けます'; }).catch(() => {});
+      navigator.serviceWorker.ready.then(registration => {
+        const expected = document.getElementById('app-version-badge')?.dataset.version;
+        const timer = setTimeout(() => {
+          navigator.serviceWorker.removeEventListener('message', versionReceived);
+          if (isLive()) offlineStatus.textContent = '画面の保存を確認できません。通信できる場所で開き直してください。';
+        }, 5000);
+        function versionReceived(event) {
+          if (event.data?.type !== 'SW_VERSION') return;
+          clearTimeout(timer); navigator.serviceWorker.removeEventListener('message', versionReceived);
+          if (!isLive()) return;
+          offlineStatus.textContent = event.data.cacheName === 'sedori-route-' + expected
+            ? '画面の保存も完了 · 取り込み済みの資料は通信なしで開けます'
+            : '画面の更新準備中です。店舗アプリの全タブを閉じ、開き直してください。';
+        }
+        navigator.serviceWorker.addEventListener('message', versionReceived);
+        registration.active?.postMessage({ type: 'GET_VERSION' });
+      }).catch(() => {});
     } else offlineStatus.textContent = 'このブラウザでは通信なしでの起動に対応していません。';
     const controls = el('details', 'bg-import'); controls.append(el('summary', '', '資料の取り込み・更新'));
     controls.append(el('p', '', '専用ファイルを一度取り込むと、この端末で通信なしでも見られます。資料は送信・公開しません。'));

@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v205';
+  const ASSET_VER = 'v206';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -502,17 +502,18 @@ const App = (() => {
   // ---------- 初期化 ----------
 
   async function init() {
+    // 旧hashリンクも、在庫APIを読み込まない図鑑専用ページへ案内する。
+    if (window.location.hash === '#brand-guide') {
+      window.location.replace('brand-guide.html');
+      return;
+    }
     setupNav();
     registerViews();
-    const guideRequested = window.location.hash === '#brand-guide';
-    if (guideRequested) Router.navigate('brand-guide');
     // API URL 確認
     if (!API.getUrl()) {
       Router.register('home', renderSettings);
-      if (!guideRequested) {
-        Router.navigate('home');
-        toast('API URLを設定してください');
-      }
+      Router.navigate('home');
+      toast('API URLを設定してください');
       return;
     }
 
@@ -698,8 +699,7 @@ const App = (() => {
   function registerViews() {
     Router.register('home', renderHome);
     Router.register('brand-guide', container => {
-      setTitle('ブランド図鑑');
-      BrandGuide.render(container);
+      window.location.assign('brand-guide.html');
     });
     Router.register('route-select', renderRouteSelect);
     Router.register('history', renderHistory);
@@ -5150,7 +5150,7 @@ const App = (() => {
     setTitle('設定');
     const url = API.getUrl();
     let html = `
-      <a class="amazon-pricing-entry brand-guide-entry" href="#brand-guide"><span><strong>ブランド図鑑</strong><span>接続設定なしでも図鑑を開けます</span></span><span aria-hidden="true">›</span></a>
+      <a class="amazon-pricing-entry brand-guide-entry" href="brand-guide.html"><span><strong>ブランド図鑑</strong><span>接続設定なしでも図鑑を開けます</span></span><span aria-hidden="true">›</span></a>
       <div class="settings-section-title">基本設定</div>
       <div class="card settings-card">
         <div class="card-title">店舗スコアの集計状況</div>

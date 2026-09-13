@@ -8,6 +8,7 @@ const html = readFileSync(join(here, 'index.html'), 'utf8');
 const pair = readFileSync(join(here, 'pair.html'), 'utf8');
 const app = readFileSync(join(here, 'app.js'), 'utf8');
 const bootstrap = readFileSync(join(here, 'bootstrap.js'), 'utf8');
+const guideHtml = readFileSync(join(here, 'brand-guide.html'), 'utf8');
 
 const cacheMatch = sw.match(/CACHE_NAME\s*=\s*['"][^'"]*?(v\d+)['"]/);
 const badgeMatch =
@@ -57,6 +58,8 @@ if (/<script(?![^>]*\bsrc=)[^>]*>/i.test(html) || /<script(?![^>]*\bsrc=)[^>]*>/
 ['bootstrap.js?v=', 'pair.js?v=', 'amazon-pricing.js?v=', 'brand-guide.js?v=', 'brand-guide.css?v='].forEach(asset => {
   if (!sw.includes(`./${asset}${badgeVersion.slice(1)}`)) errors.push(`Service Worker未登録: ${asset}`);
 });
+if (!guideHtml.includes(`data-version="${badgeVersion}"`) || [...guideHtml.matchAll(/\?v=(\d+)/g)].some(m => `v${m[1]}` !== badgeVersion)) errors.push('図鑑専用ページの版数が一致していません。');
+if (!sw.includes('./brand-guide.html') || !sw.includes(`./brand-guide-entry.js?v=${badgeVersion.slice(1)}`)) errors.push('図鑑専用ページがオフライン対象に含まれていません。');
 
 const chainIcons = readdirSync(join(here, 'icons', 'chains')).filter(name => name.endsWith('.png'));
 const missingChainIcons = chainIcons.filter(name => !sw.includes(`./icons/chains/${name}`));

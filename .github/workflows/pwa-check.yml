@@ -18,6 +18,7 @@ jobs:
       - run: node --check api.js
       - run: node --check amazon-pricing.js
       - run: node --check brand-guide.js
+      - run: node --check brand-guide-entry.js
       - run: node --test route-brand-guide.test.mjs
       - run: node --check app.js
       - run: node --check storage.js

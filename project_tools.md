@@ -2,7 +2,8 @@
 
 ## ブランド図鑑
 
-- ホームの「ブランド図鑑」または `#brand-guide` から利用。
+- ホームの「ブランド図鑑」または `brand-guide.html` から利用。旧 `#brand-guide` は専用ページへ案内。
+- 図鑑専用ページは在庫API・認証・同期コードを読み込まない。外部通信・画像の外部読み込みはCSPでも禁止。
 - 画面: `brand-guide.js` / `brand-guide.css`。既存のhashルーターへ登録。
 - 調査資料は公開しない。別途受け取った専用JSONファイルを端末内に保存する。
 - データ形式: `format=private-brand-guide`, `schemaVersion=1`, `payload`（JSON文字列）, `sha256`（payloadのUTF-8 SHA-256）。payloadは30ブランド、タグ年表、画像、平易な型番説明、出典、ベイクルーズ付録を含む。

@@ -125,3 +125,27 @@ test('public viewer has no network/upload, inventory DB, HTML injection or bundl
   assert.match(read('app.js'), /if \(Router.getCurrentView\(\) === 'brand-guide'\) return/);
   assert.match(read('router.js'), /'brand-guide': 'home'/);
 });
+test('direct guide startup never opens inventory API or synchronizes pending writes', async () => {
+  const app = read('app.js');
+  const start = app.indexOf('async function init()');
+  const end = app.indexOf('\n  async function loadData()', start);
+  const routes = new Map(); let redirected = '';
+  const context = {
+    window: { location: { hash: '#brand-guide', replace: value => { redirected = value; } } },
+    document: { getElementById: () => null },
+    Router: { register: (name, fn) => routes.set(name, fn), navigate: name => routes.get(name)({}) },
+    setTitle() {},
+    setupNav() { assert.fail('business UI init must not run'); }, registerViews() { assert.fail('business route init must not run'); },
+    API: new Proxy({}, { get() { assert.fail('API must not be accessed'); } }),
+    Storage: new Proxy({}, { get() { assert.fail('inventory storage must not be accessed'); } }),
+  };
+  vm.runInNewContext(app.slice(start, end) + '\nthis.run = init;', context);
+  await context.run(); assert.equal(redirected, 'brand-guide.html');
+});
+test('standalone guide excludes inventory scripts and prohibits remote connections', () => {
+  const html = read('brand-guide.html');
+  assert.doesNotMatch(html, /src="(?:storage|api|app|quiz|amazon-pricing)\.js/);
+  assert.match(html, /connect-src 'self';/);
+  assert.match(html, /img-src 'self' data: blob:;/);
+  assert.match(html, /brand-guide-entry\.js/);
+});
