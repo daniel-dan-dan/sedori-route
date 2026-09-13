@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v203';
+  const ASSET_VER = 'v205';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -502,16 +502,20 @@ const App = (() => {
   // ---------- 初期化 ----------
 
   async function init() {
+    setupNav();
+    registerViews();
+    const guideRequested = window.location.hash === '#brand-guide';
+    if (guideRequested) Router.navigate('brand-guide');
     // API URL 確認
     if (!API.getUrl()) {
       Router.register('home', renderSettings);
-      Router.navigate('home');
-      toast('API URLを設定してください');
+      if (!guideRequested) {
+        Router.navigate('home');
+        toast('API URLを設定してください');
+      }
       return;
     }
 
-    setupNav();
-    registerViews();
     if (!authFailureListenerReady) {
       window.addEventListener('api-auth-error', handleApiAuthError_);
       authFailureListenerReady = true;
@@ -539,8 +543,10 @@ const App = (() => {
     } catch (error) {
       stores = normalizeStores(await Storage.getCachedStores());
       config = await Storage.getCachedConfig();
-      Router.navigate('settings');
-      toast(error.message, 7000);
+      if (Router.getCurrentView() !== 'brand-guide') {
+        Router.navigate('settings');
+        toast(error.message, 7000);
+      }
       return;
     }
 
@@ -556,8 +562,10 @@ const App = (() => {
     if (!API.hasToken()) {
       stores = normalizeStores(await Storage.getCachedStores());
       config = await Storage.getCachedConfig();
-      Router.navigate('settings');
-      toast('端末接続コードを設定してください', 5000);
+      if (Router.getCurrentView() !== 'brand-guide') {
+        Router.navigate('settings');
+        toast('端末接続コードを設定してください', 5000);
+      }
       return;
     }
 
@@ -593,6 +601,7 @@ const App = (() => {
     }
 
     const navigateInitial = () => {
+      if (Router.getCurrentView() === 'brand-guide') return;
       if (patrolState) {
         Router.navigate('patrol');
       } else if (pendingStartState && optimizedRoute) {
@@ -651,6 +660,8 @@ const App = (() => {
   }
 
   async function handleApiAuthError_() {
+    // 図鑑は端末内の資料だけを読む。接続エラーで閲覧を中断させない。
+    if (Router.getCurrentView() === 'brand-guide') return;
     if (authFailureHandling) return;
     authFailureHandling = true;
     try {
@@ -686,6 +697,10 @@ const App = (() => {
 
   function registerViews() {
     Router.register('home', renderHome);
+    Router.register('brand-guide', container => {
+      setTitle('ブランド図鑑');
+      BrandGuide.render(container);
+    });
     Router.register('route-select', renderRouteSelect);
     Router.register('history', renderHistory);
     Router.register('history-detail', renderHistoryDetail);
@@ -1119,6 +1134,10 @@ const App = (() => {
         <span><strong>Amazon価格管理</strong><span>現在価格・在庫を確認（価格提案は準備中）</span></span>
         <span class="amazon-pricing-entry-arrow" aria-hidden="true">›</span>
       </button>
+      <button type="button" class="amazon-pricing-entry brand-guide-entry" id="btn-brand-guide">
+        <span><strong>ブランド図鑑</strong><span>タグ写真・型番から年代を調べる</span></span>
+        <span class="amazon-pricing-entry-arrow" aria-hidden="true">›</span>
+      </button>
       <div class="map-toolbar">
         <label class="sr-only" for="map-store-search">店舗名・地域・住所で検索</label>
         <input type="search" class="form-input" id="map-store-search" placeholder="店舗名・地域・住所で検索" value="${esc(mapSearchQuery)}">
@@ -1159,6 +1178,7 @@ const App = (() => {
     wirePlannedRouteHandlers();
     wirePatrolBannerHandlers();
     document.getElementById('btn-amazon-pricing')?.addEventListener('click', () => Router.navigate('amazon-pricing'));
+    document.getElementById('btn-brand-guide')?.addEventListener('click', () => Router.navigate('brand-guide'));
 
     // チェーンチップ: 押したチェーンだけ表示
     container.querySelectorAll('.chain-chip').forEach(chip => {
@@ -5130,6 +5150,7 @@ const App = (() => {
     setTitle('設定');
     const url = API.getUrl();
     let html = `
+      <a class="amazon-pricing-entry brand-guide-entry" href="#brand-guide"><span><strong>ブランド図鑑</strong><span>接続設定なしでも図鑑を開けます</span></span><span aria-hidden="true">›</span></a>
       <div class="settings-section-title">基本設定</div>
       <div class="card settings-card">
         <div class="card-title">店舗スコアの集計状況</div>

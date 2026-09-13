@@ -8,6 +8,7 @@ const Router = (() => {
   const navViewByRoute = {
     home: 'home',
     'amazon-pricing': 'home',
+    'brand-guide': 'home',
     'route-select': 'home',
     patrol: 'home',
     summary: 'home',

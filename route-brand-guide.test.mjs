@@ -1,0 +1,127 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createHash, webcrypto } from 'node:crypto';
+import vm from 'node:vm';
+
+const source = readFileSync(new URL('./brand-guide.js', import.meta.url), 'utf8');
+const read = name => readFileSync(new URL(name, import.meta.url), 'utf8');
+function harness(options = {}) {
+  let durable = options.old ? structuredClone(options.old) : null;
+  let closes = 0;
+  const fake = {
+    open(name) {
+      assert.equal(name, 'sedori-private-brand-guide');
+      const req = {};
+      const db = { close() { closes++; }, transaction() {
+        let draft = structuredClone(durable); let finished = false; let timer;
+        const tx = { error: null, abort() { if (finished) return; finished = true; clearTimeout(timer); queueMicrotask(() => tx.onabort?.()); } };
+        function finish() {
+          clearTimeout(timer);
+          timer = setTimeout(() => {
+            if (finished) return;
+            if (options.abort) { tx.error = new Error('transaction aborted'); tx.abort(); return; }
+            finished = true; durable = draft; tx.oncomplete?.();
+          }, 0);
+        }
+        tx.objectStore = () => ({
+          get(key) {
+            assert.equal(key, 'active'); const r = {};
+            queueMicrotask(() => { if (finished) return; r.result = structuredClone(draft); r.onsuccess?.({ target: r }); finish(); }); return r;
+          },
+          put(value, key) {
+            assert.equal(key, 'active');
+            if (options.quota) throw Object.assign(new Error('quota'), { name: 'QuotaExceededError' });
+            draft = structuredClone(value); if (options.mismatch) draft.sha = 'wrong';
+            const r = {}; queueMicrotask(() => { if (!finished) { r.onsuccess?.(); finish(); } }); return r;
+          },
+        });
+        return tx;
+      } };
+      queueMicrotask(() => {
+        if (options.blocked) { req.onblocked?.(); req.result = db; req.onsuccess?.(); }
+        else { req.result = db; req.onsuccess?.(); }
+      });
+      return req;
+    },
+  };
+  const context = { module: { exports: {} }, URL, TextEncoder, Uint8Array, crypto: webcrypto, indexedDB: fake, setTimeout, clearTimeout };
+  vm.runInNewContext(source, context);
+  return { guide: context.module.exports, durable: () => durable, closes: () => closes };
+}
+function fixture() {
+  return {
+    version: 1, updatedAt: '2026-09-13',
+    brands: Array.from({ length: 30 }, (_, i) => ({ id: `brand-${i}`, name: `Brand ${i}`, aliases: ['バトナー', 'BATONER'],
+      groups: [{ period: '2024年', photos: [{ image: 'data:image/jpeg;base64,/9j/2Q==', source: 'https://example.org/photo', basis: '掲載年', currentOfficial: false }] }],
+      method: { code: 'TEST', highlight: '', result: '不明', how: '検索', caution: '未確認', mode: '検索' },
+      sources: [{ title: 'source', url: 'https://example.org' }],
+    })),
+    baycrews: { title: 'test', how: 'test', caution: 'test', confirmed: Array(5).fill('a'), unconfirmed: Array(15).fill('b'), examples: Array(2).fill({ brand: 'a', code: '24', year: '2024', url: 'https://example.org' }), source: 'https://example.org' },
+  };
+}
+function envelope(data) {
+  const payload = JSON.stringify(data);
+  return JSON.stringify({ format: 'private-brand-guide', schemaVersion: 1, payload, sha256: createHash('sha256').update(payload).digest('hex') });
+}
+test('30-brand package passes checksum and preserves text', async () => {
+  const { guide } = harness(); const data = fixture(); const parsed = await guide.parsePackage(envelope(data));
+  assert.equal(JSON.stringify(parsed.data), JSON.stringify(data));
+  assert.equal(guide.validate(parsed.data).photos, 30);
+});
+test('Japanese/English, hiragana/katakana and full-width search', () => {
+  const { guide } = harness(); const b = fixture().brands[0];
+  for (const q of ['バトナー', 'ばとなー', 'ﾊﾞﾄﾅｰ', 'ＢＡＴＯＮＥＲ', 'batoner', 'Brand 0']) assert.equal(guide.matches(b, q), true);
+  assert.equal(guide.matches(b, 'nothing'), false);
+});
+test('changed bytes and invalid JSON cannot replace saved data', async () => {
+  const { guide } = harness();
+  await assert.rejects(guide.parsePackage(envelope(fixture()).replace('掲載年', '購入年')), /壊れ/);
+  await assert.rejects(guide.parsePackage('{'), /読めません/);
+});
+for (const [name, change] of [
+  ['wrong schema', d => d.version = 2],
+  ['non-string date', d => d.updatedAt = ['2026-09-13']],
+  ['impossible date', d => d.updatedAt = '2026-02-31'],
+  ['missing brand', d => d.brands.pop()],
+  ['duplicate id', d => d.brands[1].id = d.brands[0].id],
+  ['duplicate brand', d => d.brands[1].name = d.brands[0].name],
+  ['remote photo', d => d.brands[0].groups[0].photos[0].image = 'https://example.org/a.jpg'],
+  ['SVG photo', d => d.brands[0].groups[0].photos[0].image = 'data:image/svg+xml;base64,PHN2Zz4='],
+  ['script link', d => d.brands[0].sources[0].url = 'javascript:alert(1)'],
+  ['local-file source', d => d.brands[0].groups[0].photos[0].source = 'file:///Users/private'],
+  ['credential URL', d => d.brands[0].sources[0].url = 'https://password@example.org'],
+  ['missing caution', d => delete d.brands[0].method.caution],
+  ['missing appendix', d => delete d.baycrews],
+]) test(`reject ${name}`, async () => {
+  const { guide } = harness(); const data = fixture(); change(data); await assert.rejects(guide.parsePackage(envelope(data)));
+});
+test('file size limit is enforced before file reading', async () => {
+  const { guide } = harness(); await assert.rejects(guide.importFile({ size: 41*1024*1024, text() { assert.fail('must not read'); } }), /40MB/);
+});
+test('successful transaction persists and closes database', async () => {
+  const h = harness(); const record = { data: fixture(), sha: 'new' }; await h.guide.save(record);
+  assert.equal(h.durable().sha, 'new'); assert.equal((await h.guide.load()).sha, 'new'); assert.equal(h.closes(), 2);
+});
+for (const mode of ['abort', 'quota', 'mismatch']) test(`${mode} retains previously saved library`, async () => {
+  const old = { data: fixture(), sha: 'old' }; const h = harness({ old, [mode]: true });
+  await assert.rejects(h.guide.save({ data: fixture(), sha: 'new' }));
+  assert.equal(h.durable().sha, 'old'); assert.equal(h.closes(), 1);
+});
+test('older package cannot downgrade library in another tab', async () => {
+  const old = { data: fixture(), sha: 'old' }; const h = harness({ old }); const next = fixture(); next.updatedAt = '2026-09-12';
+  await assert.rejects(h.guide.save({ data: next, sha: 'older' }), /古い/); assert.equal(h.durable().sha, 'old');
+});
+test('blocked open closes late connection and does not change data', async () => {
+  const h = harness({ blocked: true }); await assert.rejects(h.guide.load(), /他のタブ/); assert.equal(h.closes(), 1);
+});
+test('public viewer has no network/upload, inventory DB, HTML injection or bundled pictures', () => {
+  assert.doesNotMatch(source, /\bfetch\s*\(|XMLHttpRequest|sendBeacon|innerHTML|Storage\.|API\.|data:image\/jpeg;base64,\/9/);
+  assert.match(source, /textContent/); assert.match(source, /referrerPolicy = 'no-referrer'/);
+  for (const file of ['brand-guide.js', 'brand-guide.css']) {
+    assert.ok(read('sw.js').includes(`./${file}?v=`)); assert.ok(read('index.html').includes(`${file}?v=`));
+  }
+  assert.match(read('app.js'), /id="btn-brand-guide"/);
+  assert.match(read('app.js'), /if \(Router.getCurrentView\(\) === 'brand-guide'\) return/);
+  assert.match(read('router.js'), /'brand-guide': 'home'/);
+});

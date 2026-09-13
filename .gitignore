@@ -10,3 +10,6 @@ backups/
 output/
 .playwright-cli/
 node_modules/
+brand_guide_private/
+*.brandguide.json
+*スマホ取込用*.json
