@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v207';
+  const ASSET_VER = 'v208';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -921,10 +921,6 @@ const App = (() => {
     container.innerHTML = `
       ${buildPatrolBanner()}
       ${buildPlannedRouteBanner()}
-      <button type="button" class="amazon-pricing-entry brand-guide-entry" id="btn-brand-guide">
-        <span><strong>ブランド図鑑</strong><span>タグ写真・型番から年代を調べる</span></span>
-        <span class="amazon-pricing-entry-arrow" aria-hidden="true">›</span>
-      </button>
       <div class="map-toolbar">
         <label class="sr-only" for="map-store-search">店舗名・地域・住所で検索</label>
         <input type="search" class="form-input" id="map-store-search" placeholder="店舗名・地域・住所で検索" value="${esc(mapSearchQuery)}">
@@ -964,7 +960,6 @@ const App = (() => {
     // 予定ルート・巡回中バナーのボタン
     wirePlannedRouteHandlers();
     wirePatrolBannerHandlers();
-    document.getElementById('btn-brand-guide')?.addEventListener('click', () => Router.navigate('brand-guide'));
 
     // チェーンチップ: 押したチェーンだけ表示
     container.querySelectorAll('.chain-chip').forEach(chip => {

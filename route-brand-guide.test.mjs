@@ -121,7 +121,8 @@ test('public viewer has no network/upload, inventory DB, HTML injection or bundl
   for (const file of ['brand-guide.js', 'brand-guide.css']) {
     assert.ok(read('sw.js').includes(`./${file}?v=`)); assert.ok(read('index.html').includes(`${file}?v=`));
   }
-  assert.match(read('app.js'), /id="btn-brand-guide"/);
+  assert.doesNotMatch(read('app.js'), /btn-brand-guide/);
+  assert.match(read('index.html'), /data-view="brand-guide"/);
   assert.match(read('app.js'), /if \(Router.getCurrentView\(\) === 'brand-guide'\) return/);
   assert.match(read('router.js'), /'brand-guide': 'brand-guide'/);
 });
