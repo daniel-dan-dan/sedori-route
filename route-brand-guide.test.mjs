@@ -83,7 +83,7 @@ for (const [name, change] of [
   ['wrong schema', d => d.version = 2],
   ['non-string date', d => d.updatedAt = ['2026-09-13']],
   ['impossible date', d => d.updatedAt = '2026-02-31'],
-  ['missing brand', d => d.brands.pop()],
+  ['empty library', d => d.brands = []],
   ['duplicate id', d => d.brands[1].id = d.brands[0].id],
   ['duplicate brand', d => d.brands[1].name = d.brands[0].name],
   ['remote photo', d => d.brands[0].groups[0].photos[0].image = 'https://example.org/a.jpg'],
@@ -146,7 +146,15 @@ test('direct guide startup never opens inventory API or synchronizes pending wri
 test('standalone guide excludes inventory scripts and prohibits remote connections', () => {
   const html = read('brand-guide.html');
   assert.doesNotMatch(html, /src="(?:storage|api|app|quiz|amazon-pricing)\.js/);
-  assert.match(html, /connect-src 'self';/);
+  assert.match(html, /connect-src 'self' https:\/\/script.google.com/);
   assert.match(html, /img-src 'self' data: blob:;/);
   assert.match(html, /brand-guide-entry\.js/);
+  assert.match(html, /brand-guide-sync\.js/);
+});
+
+test('future additions accept 31 brands and expanded appendix', async () => {
+  const { guide } = harness(); const data = fixture();
+  const extra = structuredClone(data.brands[0]); extra.id = 'new-brand'; extra.name = 'NEW BRAND'; data.brands.push(extra);
+  data.baycrews.confirmed.push('NEW BRAND'); data.baycrews.examples.push(structuredClone(data.baycrews.examples[0]));
+  const record = await guide.parsePackage(envelope(data)); assert.equal(record.data.brands.length, 31);
 });

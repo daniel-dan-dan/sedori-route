@@ -5,20 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#123f33">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://*.googleusercontent.com; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests">
   <title>古着図鑑 | 店舗アプリ</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon-96.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="style.css?v=208">
-  <link rel="stylesheet" href="brand-guide.css?v=208">
+  <link rel="stylesheet" href="style.css?v=209">
+  <link rel="stylesheet" href="brand-guide.css?v=209">
 </head>
 <body>
   <main id="app"><p>図鑑を読み込み中…</p></main>
-  <div class="app-version-badge" id="app-version-badge" data-version="v208">v208</div>
+  <div class="app-version-badge" id="app-version-badge" data-version="v209">v209</div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="brand-guide.js?v=208"></script>
-  <script src="brand-guide-entry.js?v=208"></script>
-  <script src="bootstrap.js?v=208"></script>
+  <script src="brand-guide-sync.js?v=209"></script>
+  <script src="brand-guide.js?v=209"></script>
+  <script src="brand-guide-entry.js?v=209"></script>
+  <script src="bootstrap.js?v=209"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-/* Private, offline brand encyclopedia. No network requests or inventory DB access. */
+/* Private, offline encyclopedia. Transport is isolated in brand-guide-sync.js. */
 const BrandGuide = (() => {
   'use strict';
   const DB_NAME = 'sedori-private-brand-guide';
@@ -21,7 +21,7 @@ const BrandGuide = (() => {
   function validate(data) {
     check(data && data.version === 1 && text(data.updatedAt, 10) && /^\d{4}-\d{2}-\d{2}$/.test(data.updatedAt) && Number.isFinite(Date.parse(data.updatedAt)));
     check(new Date(data.updatedAt).toISOString().slice(0, 10) === data.updatedAt);
-    check(Array.isArray(data.brands) && data.brands.length === 30, '30ブランド入りの図鑑ファイルを選んでください。');
+    check(Array.isArray(data.brands) && data.brands.length >= 1 && data.brands.length <= 200, '1〜200ブランド入りの図鑑ファイルを選んでください。');
     const ids = new Set(); const names = new Set(); let photos = 0; let size = 0;
     for (const b of data.brands) {
       check(b && /^[a-z0-9-]{1,60}$/.test(b.id) && !ids.has(b.id)); ids.add(b.id);
@@ -42,9 +42,9 @@ const BrandGuide = (() => {
     check(photos <= 600 && size <= MAX_BYTES);
     const a = data.baycrews;
     check(a && text(a.title) && text(a.how) && text(a.caution));
-    check(Array.isArray(a.confirmed) && a.confirmed.length === 5 && a.confirmed.every(s => text(s, 100)));
-    check(Array.isArray(a.unconfirmed) && a.unconfirmed.length === 15 && a.unconfirmed.every(s => text(s, 100)));
-    check(Array.isArray(a.examples) && a.examples.length === 2 && a.examples.every(e => text(e.brand) && text(e.code) && text(e.year) && sourceOK(e.url)));
+    check(Array.isArray(a.confirmed) && a.confirmed.length <= 200 && a.confirmed.every(s => text(s, 100)));
+    check(Array.isArray(a.unconfirmed) && a.unconfirmed.length <= 200 && a.unconfirmed.every(s => text(s, 100)));
+    check(Array.isArray(a.examples) && a.examples.length <= 200 && a.examples.every(e => text(e.brand) && text(e.code) && text(e.year) && sourceOK(e.url)));
     check(sourceOK(a.source));
     return { brands: data.brands.length, photos };
   }
@@ -99,6 +99,8 @@ const BrandGuide = (() => {
           try {
           const old = event.target.result;
           if (old && old.data.updatedAt > record.data.updatedAt) { abort(new Error('保存済みの資料より古いファイルです。新しい資料を選んでください。')); return; }
+          if (old?.remoteRevision && record.remoteRevision && old.remoteRevision > record.remoteRevision) { abort(new Error('以前の版への更新は行いません。')); return; }
+          if (old?.sha === record.sha && old.remoteRevision) record.remoteRevision = Math.max(old.remoteRevision, record.remoteRevision || 0);
           const write = store.put(record, 'active');
           write.onsuccess = () => {
             store.get('active').onsuccess = read => {
@@ -123,12 +125,17 @@ const BrandGuide = (() => {
       });
     }
   }
-  async function importFile(file) {
+  async function importFile(file, expected = null) {
     if (importing) throw new Error('取り込み中です。完了までお待ちください。');
     importing = true;
     try {
       check(file && file.size <= MAX_BYTES, '40MB以下の専用ファイルを選んでください。');
       const record = await parsePackage(await file.text());
+      if (expected) {
+        check(record.sha === expected.sha256 && record.data.updatedAt === expected.updatedAt, '更新情報と資料が一致しません。次回もう一度確認します。');
+        check(Number.isSafeInteger(expected.revision) && expected.revision > 0);
+        record.remoteRevision = expected.revision;
+      }
       await verifyImages(record.data);
       await save({ ...record, savedAt: new Date().toISOString() });
       return record;
@@ -183,14 +190,37 @@ const BrandGuide = (() => {
         registration.active?.postMessage({ type: 'GET_VERSION' });
       }).catch(() => {});
     } else offlineStatus.textContent = 'このブラウザでは通信なしでの起動に対応していません。';
-    const controls = el('details', 'bg-import'); controls.append(el('summary', '', '資料の取り込み・更新'));
-    controls.append(el('p', '', '専用ファイルを一度取り込むと、この端末で通信なしでも見られます。資料は送信・公開しません。'));
+    const syncStatus = el('p', 'bg-status', '図鑑を開くと、自動で最新版を確認します。'); syncStatus.setAttribute('role', 'status'); root.append(syncStatus);
+    const controls = el('details', 'bg-import'); controls.append(el('summary', '', '更新・接続設定'));
+    controls.append(el('p', '', '店舗アプリに接続済みなら、非公開の配信先から自動で保存します。開いている間は15分ごとに更新を確認します。'));
+    const retry = button('今すぐ更新を確認', () => sync(true));
+    controls.append(retry, button('店舗アプリの接続設定', () => window.location.assign('index.html#settings'), 'bg-text-button'));
+    const manual = el('details'); manual.append(el('summary', '', '予備のファイルから取り込む'));
     const input = el('input'); input.type = 'file'; input.accept = '.json,application/json'; input.setAttribute('aria-label', '図鑑の専用ファイル');
     input.disabled = true;
-    controls.append(input, el('p', 'bg-muted', '元のファイルは「ファイル」アプリなどに保管してください。端末のデータを消した場合は、再取り込みが必要です。'));
+    manual.append(input, el('p', 'bg-muted', '通常はファイル選択不要です。圏外での復旧用に使えます。')); controls.append(manual);
     root.append(controls);
     const body = el('div', 'bg-body'); root.append(body);
+    let currentRecord = null;
+    async function sync(force = false) {
+      if (!isLive() || typeof BrandGuideSync === 'undefined') return;
+      retry.disabled = true; input.disabled = true;
+      try {
+        await BrandGuideSync.run({ guide: { load, importFile, MAX_BYTES }, force,
+          onStatus: message => { if (isLive()) syncStatus.textContent = message; },
+          onSaved: record => {
+            if (!isLive()) return;
+            // Keep an open photo/article intact; switch contents after returning to list.
+            if (currentRecord && root.classList.contains('bg-viewing')) {
+              const notice = button('新しい資料を表示', () => { showLibrary(record); notice.remove(); });
+              root.insertBefore(notice, body);
+            } else showLibrary(record);
+          },
+        });
+      } finally { if (isLive()) { retry.disabled = false; if (!importing) input.disabled = false; } }
+    }
     function showLibrary(record) {
+      currentRecord = record;
       root.classList.remove('bg-viewing');
       const data = record.data; const counts = validate(data);
       status.textContent = `保存済み · ${counts.brands}ブランド / 写真${counts.photos}枚 · 資料更新 ${data.updatedAt}`;
@@ -247,7 +277,7 @@ const BrandGuide = (() => {
         for (const e of a.examples) {
           const card = el('section', 'bg-tag-card'); card.append(el('h4', '', e.brand), el('div', 'bg-code', e.code), el('p', 'bg-result', e.year), link('公式の商品ページ（通信が必要）', e.url)); detail.append(card);
         }
-        detail.append(el('h3', 'bg-section-title', '当てはまる商品が見つかった5ブランド'), el('p', '', a.confirmed.join(' / ')), el('p', 'bg-caution', 'この5ブランドも、全商品・すべての年に使えるとは確認できていません。'), el('h3', 'bg-section-title', '読み方をまだ確認していない15ブランド'), el('p', '', a.unconfirmed.join(' / ')), el('p', 'bg-caution', a.caution), link('系列一覧の出典（通信が必要）', a.source));
+        detail.append(el('h3', 'bg-section-title', `当てはまる商品が見つかった${a.confirmed.length}ブランド`), el('p', '', a.confirmed.join(' / ')), el('p', 'bg-caution', '掲載ブランドも、全商品・すべての年に使えるとは確認できていません。'), el('h3', 'bg-section-title', `読み方をまだ確認していない${a.unconfirmed.length}ブランド`), el('p', '', a.unconfirmed.join(' / ')), el('p', 'bg-caution', a.caution), link('系列一覧の出典（通信が必要）', a.source));
       }
       search.addEventListener('input', () => { query = search.value; drawList(); }); drawList();
     }
@@ -263,9 +293,18 @@ const BrandGuide = (() => {
     try {
       const record = await load(); if (!isLive()) return;
       if (record) showLibrary(record);
-      else { status.textContent = 'この端末には、まだ図鑑を保存していません。'; controls.open = true; }
+      else { status.textContent = 'この端末に図鑑を自動で保存します。'; }
     } catch { if (isLive()) { status.textContent = '保存済みの図鑑を読めませんでした。画面を開き直してください。'; controls.open = true; } }
     finally { if (!importing) input.disabled = false; }
+    const foreground = () => { if (document.visibilityState !== 'hidden') sync(); };
+    const online = () => sync(true);
+    window.addEventListener('online', online);
+    document.addEventListener('visibilitychange', foreground);
+    const tick = setInterval(() => {
+      if (!isLive()) { clearInterval(tick); window.removeEventListener('online', online); document.removeEventListener('visibilitychange', foreground); return; }
+      foreground();
+    }, 15 * 60 * 1000);
+    await sync();
   }
   return { render, validate, parsePackage, normalize, matches, importFile, load, save, DB_NAME, MAX_BYTES };
 })();

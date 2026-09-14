@@ -55,7 +55,7 @@ if (!requiredCsp.test(html) || !requiredCsp.test(pair)) errors.push('index/pair�
 if (/<script(?![^>]*\bsrc=)[^>]*>/i.test(html) || /<script(?![^>]*\bsrc=)[^>]*>/i.test(pair)) {
   errors.push('inline scriptが残っています。');
 }
-['bootstrap.js?v=', 'pair.js?v=', 'brand-guide.js?v=', 'brand-guide.css?v='].forEach(asset => {
+['bootstrap.js?v=', 'pair.js?v=', 'brand-guide.js?v=', 'brand-guide-sync.js?v=', 'brand-guide.css?v='].forEach(asset => {
   if (!sw.includes(`./${asset}${badgeVersion.slice(1)}`)) errors.push(`Service Worker未登録: ${asset}`);
 });
 if (!guideHtml.includes(`data-version="${badgeVersion}"`) || [...guideHtml.matchAll(/\?v=(\d+)/g)].some(m => `v${m[1]}` !== badgeVersion)) errors.push('図鑑専用ページの版数が一致していません。');
