@@ -123,7 +123,7 @@ test('public viewer has no network/upload, inventory DB, HTML injection or bundl
   }
   assert.match(read('app.js'), /id="btn-brand-guide"/);
   assert.match(read('app.js'), /if \(Router.getCurrentView\(\) === 'brand-guide'\) return/);
-  assert.match(read('router.js'), /'brand-guide': 'home'/);
+  assert.match(read('router.js'), /'brand-guide': 'brand-guide'/);
 });
 test('direct guide startup never opens inventory API or synchronizes pending writes', async () => {
   const app = read('app.js');

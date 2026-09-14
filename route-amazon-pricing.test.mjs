@@ -245,13 +245,13 @@ test('異なる商品・同一revision・意図と違う設定では保存照合
   assert.equal(pricing.preferenceMatches(pricing.normalizeItem(item({ sku: 'other', preference: { revision: 1, excluded: true } })), pending), false);
   assert.equal(pricing.preferenceMatches(pricing.normalizeItem(item({ preference: { revision: 1, excluded: true } })), pending), true);
 });
-test('新JSのcache bust・Service Worker登録と画面版数が揃っている', () => {
+test('店舗アプリは廃盤とAmazon価格管理を読み込まず図鑑を下部に表示する', () => {
   const index = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   const sw = readFileSync(new URL('./sw.js', import.meta.url), 'utf8');
-  const version = index.match(/data-version="v(\d+)"/)[1];
-  assert.ok(index.includes(`amazon-pricing.js?v=${version}`));
-  assert.ok(sw.includes(`amazon-pricing.js?v=${version}`));
-  assert.equal((index.match(/class="nav-item/g) || []).length, 5, '公開済みv198の5タブを維持する');
-  assert.ok(index.includes('data-view="more"'));
-  assert.ok(!index.includes('data-view="amazon-pricing"'), 'Amazon価格管理はホーム入口のみ');
+  const app = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(index + sw, /amazon-pricing\.js/);
+  assert.doesNotMatch(app, /btn-amazon-pricing|AmazonPricing|renderHaiban|HAIBAN_API_URL/);
+  assert.equal((index.match(/class="nav-item/g) || []).length, 5);
+  assert.match(index, /data-view="brand-guide"/);
+  assert.doesNotMatch(index, /data-view="(?:haiban|amazon-pricing)"/);
 });

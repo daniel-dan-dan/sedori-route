@@ -7,15 +7,13 @@ const Router = (() => {
   let currentView = null;
   const navViewByRoute = {
     home: 'home',
-    'amazon-pricing': 'home',
-    'brand-guide': 'home',
+    'brand-guide': 'brand-guide',
     'route-select': 'home',
     patrol: 'home',
     summary: 'home',
     history: 'history',
     'history-detail': 'history',
     analytics: 'analytics',
-    haiban: 'haiban',
     quiz: 'more',
     settings: 'more',
     more: 'more'

@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v206';
+  const ASSET_VER = 'v207';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -707,15 +707,6 @@ const App = (() => {
     Router.register('settings', renderSettings);
     Router.register('more', renderMore);
     Router.register('analytics', renderAnalytics);
-    Router.register('haiban', renderHaiban);
-    Router.register('amazon-pricing', container => {
-      setTitle('Amazon価格管理');
-      if (typeof AmazonPricing !== 'undefined' && AmazonPricing.render) {
-        AmazonPricing.render(container);
-      } else {
-        container.innerHTML = '<div class="card"><div class="card-title">Amazon価格管理を読み込めませんでした</div><p>アプリを再読み込みして、もう一度お試しください。</p></div>';
-      }
-    });
     Router.register('quiz', (container) => {
       if (typeof Quiz !== 'undefined' && Quiz.renderQuiz) {
         Quiz.renderQuiz(container);
@@ -725,206 +716,6 @@ const App = (() => {
     });
     Router.register('patrol', renderPatrol);
     Router.register('summary', renderSummary);
-  }
-
-  // ---------- 廃盤タブ ----------
-  // 廃盤チェッカーWebApp（独立GAS）から高ホット商品を取得し表示する。
-  const HAIBAN_API_URL = 'https://script.google.com/macros/s/AKfycbwhJtRnWe_BBJmEfHv5sNzDyQq3HtxjgRhA6az_ieNplKyKRzsOh0x_32_F6kpIi0q4/exec';
-  let haibanCache = null; // { items, updatedAt, fetchedAt }
-  const HAIBAN_CACHE_TTL_MS = 30 * 60 * 1000;
-
-  async function fetchHaibanAllHotItems() {
-    const res = await fetch(HAIBAN_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'getAllHotItems' }),
-      redirect: 'follow',
-    });
-    const text = await res.text();
-    let parsed;
-    try { parsed = JSON.parse(text); }
-    catch { throw new Error('廃盤APIレスポンス不正'); }
-    if (parsed && parsed.ok === false) throw new Error(parsed.error || 'API error');
-    // getAllHotItems は { updatedAt, count, items } を返す
-    return parsed;
-  }
-
-  function haibanScoreRank(preScore, purScore) {
-    const preMap = { 'A': 4, 'B': 3, 'C': 2, 'D': 1 };
-    const purMap = { 'S': 5, 'A': 4, 'B': 3, 'C': 2 };
-    return (purMap[purScore] || 0) * 5 + (preMap[preScore] || 0) * 4;
-  }
-
-  async function renderHaiban(container) {
-    setTitle('廃盤リスト');
-
-    const now = Date.now();
-
-    // セッションキャッシュがTTL内 → 即表示して終わり
-    if (haibanCache && (now - haibanCache.fetchedAt) < HAIBAN_CACHE_TTL_MS) {
-      renderHaibanContent_(container, haibanCache);
-      return;
-    }
-
-    // IDBキャッシュがあれば即表示（スピナーなし）
-    let dbCache = null;
-    try { dbCache = await Storage.getViewCache('haiban'); } catch (e) {}
-
-    if (dbCache && dbCache.data) {
-      haibanCache = { ...dbCache.data, fetchedAt: dbCache.savedAt || 0 };
-      renderHaibanContent_(container, haibanCache);
-    } else {
-      container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-    }
-
-    // バックグラウンドで最新データ取得・IDB更新
-    try {
-      const resp = await fetchHaibanAllHotItems();
-      const data = {
-        items: Array.isArray(resp.items) ? resp.items : [],
-        updatedAt: resp.updatedAt || '',
-        totalMatched: resp.totalMatched || 0,
-        fetchedAt: Date.now(),
-      };
-      haibanCache = data;
-      Storage.saveViewCache('haiban', { items: data.items, updatedAt: data.updatedAt, totalMatched: data.totalMatched }).catch(() => {});
-      renderHaibanContent_(container, data);
-    } catch (e) {
-      if (Router.getCurrentView() !== 'haiban') return;
-      if (!haibanCache) {
-        container.innerHTML = `
-          <div class="card">
-            <div class="card-title">廃盤リスト取得失敗</div>
-            <div class="text-dim text-sm mb-8">${esc(e.message)}</div>
-            <button class="btn btn-outline btn-sm" id="btn-haiban-retry">再読み込み</button>
-          </div>`;
-        document.getElementById('btn-haiban-retry')?.addEventListener('click', () => {
-          haibanCache = null;
-          Storage.clearViewCache('haiban').catch(() => {});
-          renderHaiban(container);
-        });
-      }
-    }
-  }
-
-  function renderHaibanContent_(container, data) {
-    if (Router.getCurrentView() !== 'haiban') return;
-
-    updateHaibanNavBadge(data.items.length);
-
-    // 廃盤タブUI
-    const html = `
-      <div class="haiban-toolbar">
-        <input type="text" class="form-input" id="haiban-search" placeholder="ブランド・商品名で検索" autocomplete="off">
-        <select class="form-input" id="haiban-sort">
-          <option value="score">総合ランク順</option>
-          <option value="pre">プレ値スコア順</option>
-          <option value="purchase">仕入れスコア順</option>
-          <option value="price-asc">最安値が安い順</option>
-          <option value="price-desc">最安値が高い順</option>
-        </select>
-      </div>
-      <div class="haiban-updated" id="haiban-updated"></div>
-      <div id="haiban-list"></div>`;
-
-    container.innerHTML = html;
-
-    const updEl = document.getElementById('haiban-updated');
-    updEl.textContent = `最終更新: ${data.updatedAt || '-'}（表示${data.items.length}件／該当${data.totalMatched}件）`;
-
-    const searchEl = document.getElementById('haiban-search');
-    const sortEl = document.getElementById('haiban-sort');
-    const listEl = document.getElementById('haiban-list');
-
-    function render() {
-      const q = String(searchEl.value || '').trim().toLowerCase();
-      const sortKey = sortEl.value;
-      let items = data.items.slice();
-      if (q) {
-        items = items.filter(it =>
-          String(it.ブランド名 || '').toLowerCase().includes(q) ||
-          String(it.商品名 || '').toLowerCase().includes(q)
-        );
-      }
-      items.sort((a, b) => {
-        if (sortKey === 'pre') {
-          return haibanScoreRank(b.プレ値スコア, 'C') - haibanScoreRank(a.プレ値スコア, 'C');
-        }
-        if (sortKey === 'purchase') {
-          return haibanScoreRank('D', b.仕入れスコア) - haibanScoreRank('D', a.仕入れスコア);
-        }
-        if (sortKey === 'price-asc') return (a.最安値 || 0) - (b.最安値 || 0);
-        if (sortKey === 'price-desc') return (b.最安値 || 0) - (a.最安値 || 0);
-        return haibanScoreRank(b.プレ値スコア, b.仕入れスコア) - haibanScoreRank(a.プレ値スコア, a.仕入れスコア);
-      });
-      if (items.length === 0) {
-        listEl.innerHTML = `<div class="haiban-empty">該当する商品がありません</div>`;
-        return;
-      }
-      listEl.innerHTML = items.map(it => {
-        const preRaw = String(it.プレ値スコア || '').trim();
-        const purRaw = String(it.仕入れスコア || '').trim();
-        const pre = ['A', 'B', 'C', 'D'].includes(preRaw) ? preRaw : '';
-        const pur = ['S', 'A', 'B', 'C'].includes(purRaw) ? purRaw : '';
-        const price = it.最安値 ? `¥${Number(it.最安値).toLocaleString()}` : '価格未取得';
-        const profit = it.月間期待利益 ? `月間利益 ¥${Number(it.月間期待利益).toLocaleString()}` : '';
-        const amazonUrl = safeHttpsUrl_(it.AmazonURL, ['amazon.co.jp', 'www.amazon.co.jp']);
-        const keepaUrl = safeHttpsUrl_(it.KeepaURL, ['keepa.com', 'www.keepa.com']);
-        const asinRaw = String(it.ASIN || '').trim().toUpperCase();
-        const asin = /^[A-Z0-9]{10}$/.test(asinRaw) ? asinRaw : '';
-        const imageFileRaw = String(it.画像ファイル || '').trim();
-        const imageFile = /^[A-Za-z0-9._-]{1,160}$/.test(imageFileRaw) ? imageFileRaw : '';
-        // 画像: Keepa提供のimagesCSVファイル名があれば正確なURLを優先、無ければASINベースにフォールバック
-        const imgSrc = imageFile
-          ? `https://m.media-amazon.com/images/I/${esc(imageFile)}`
-          : asin
-          ? `https://images-na.ssl-images-amazon.com/images/P/${esc(asin)}.09._SL200_.jpg`
-          : '';
-        const imgHtml = imgSrc
-          ? `<div class="haiban-thumb-wrap"><img class="haiban-thumb" src="${imgSrc}" alt="" loading="lazy" data-image-error="hide-parent"></div>`
-          : '';
-        // Keepa 180日(6ヶ月)価格推移グラフ
-        const graphHtml = asin
-          ? `<img class="haiban-keepa-graph" src="https://graph.keepa.com/pricehistory.png?asin=${esc(asin)}&domain=co.jp&range=180&width=320&height=120&salesrank=1&used=1&new=1&amazon=1" alt="Keepa価格推移" loading="lazy" data-image-error="hide-self">`
-          : '';
-        return `
-          <div class="haiban-item">
-            <div class="haiban-badges">
-              ${pre ? `<span class="score-badge pre-${pre}">プレ値 ${pre}</span>` : ''}
-              ${pur ? `<span class="score-badge pur-${pur}">仕入 ${pur}</span>` : ''}
-            </div>
-            <div class="haiban-head">
-              ${imgHtml}
-              <div class="haiban-text">
-                <div class="brand">${esc(it.ブランド名 || '')}</div>
-                <div class="title">${esc(it.商品名 || '')}</div>
-                <div class="meta">${price}${profit ? ' ・ ' + profit : ''}</div>
-              </div>
-            </div>
-            ${graphHtml}
-            <div class="links">
-              ${amazonUrl ? `<a class="amazon" href="${esc(amazonUrl)}" target="_blank" rel="noopener">Amazonで見る</a>` : ''}
-              ${keepaUrl ? `<a class="keepa" href="${esc(keepaUrl)}" target="_blank" rel="noopener">Keepaで見る</a>` : ''}
-            </div>
-          </div>`;
-      }).join('');
-    }
-
-    searchEl.addEventListener('input', render);
-    sortEl.addEventListener('change', render);
-    render();
-  }
-
-  // 廃盤タブ横の新着件数バッジ更新
-  function updateHaibanNavBadge(count) {
-    const el = document.getElementById('haiban-nav-badge');
-    if (!el) return;
-    if (count > 0) {
-      el.textContent = count > 99 ? '99+' : String(count);
-      el.hidden = false;
-    } else {
-      el.hidden = true;
-    }
   }
 
   // ---------- 優先度スコア計算 ----------
@@ -1130,10 +921,6 @@ const App = (() => {
     container.innerHTML = `
       ${buildPatrolBanner()}
       ${buildPlannedRouteBanner()}
-      <button type="button" class="amazon-pricing-entry" id="btn-amazon-pricing">
-        <span><strong>Amazon価格管理</strong><span>現在価格・在庫を確認（価格提案は準備中）</span></span>
-        <span class="amazon-pricing-entry-arrow" aria-hidden="true">›</span>
-      </button>
       <button type="button" class="amazon-pricing-entry brand-guide-entry" id="btn-brand-guide">
         <span><strong>ブランド図鑑</strong><span>タグ写真・型番から年代を調べる</span></span>
         <span class="amazon-pricing-entry-arrow" aria-hidden="true">›</span>
@@ -1177,7 +964,6 @@ const App = (() => {
     // 予定ルート・巡回中バナーのボタン
     wirePlannedRouteHandlers();
     wirePatrolBannerHandlers();
-    document.getElementById('btn-amazon-pricing')?.addEventListener('click', () => Router.navigate('amazon-pricing'));
     document.getElementById('btn-brand-guide')?.addEventListener('click', () => Router.navigate('brand-guide'));
 
     // チェーンチップ: 押したチェーンだけ表示
