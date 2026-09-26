@@ -73,3 +73,11 @@ node verify-pwa-version.mjs
 ## 公開
 
 `main` へのpushでGitHub Pagesへ反映されます。CSS/JavaScript/Service Workerを変えた場合は、`CACHE_NAME`、全cache bust、画面版数、`ASSET_VER`を同じ版へ更新します。
+
+## 独立したブランド図鑑アプリ
+
+ブランド図鑑は `https://daniel-dan-dan.github.io/sedori-route/brand-guide/` から単独起動・ホーム画面追加できます。店舗アプリのアイコンとは別になります。
+
+`brand-guide/` に専用manifest・アイコン・起動処理・接続設定・Service Workerを置き、閲覧部品 `brand-guide.js` と読み取り配信 `brand-guide-sync.js` を共用します。図鑑専用キャッシュ以外は削除しません。資料の保存先と非公開配信元を維持し、既存ブラウザの接続を一度読み取って図鑑専用DBへ引き継ぎます。新規端末の接続登録は既存GAS契約を使用します。
+
+独立アプリの変更時は、専用画面の版数・manifest内の起動URL・専用SWの版数・全assetのcache bustを照合してください。共有の閲覧・配信部品を変える場合は独立アプリの版数も更新します。店舗PWAのSWを変えた場合は店舗側の版数も更新します。

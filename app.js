@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v211';
+  const ASSET_VER = 'v212';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -4946,7 +4946,7 @@ const App = (() => {
     setTitle('設定');
     const url = API.getUrl();
     let html = `
-      <a class="amazon-pricing-entry brand-guide-entry" href="brand-guide.html"><span><strong>ブランド図鑑</strong><span>接続設定なしでも図鑑を開けます</span></span><span aria-hidden="true">›</span></a>
+      <a class="amazon-pricing-entry brand-guide-entry" href="brand-guide.html"><span><strong>ブランド図鑑</strong><span>独立したブランド図鑑アプリを開きます</span></span><span aria-hidden="true">›</span></a>
       <div class="settings-section-title">基本設定</div>
       <div class="card settings-card">
         <div class="card-title">店舗スコアの集計状況</div>

@@ -164,16 +164,17 @@ const BrandGuide = (() => {
     dialog.addEventListener('click', event => { if (event.target === dialog) close(); });
     root.append(dialog); dialog.showModal();
   }
-  async function render(container) {
+  async function render(container, options = {}) {
     const root = el('section', 'brand-guide'); container.replaceChildren(root);
     const isLive = () => root.isConnected && container.contains(root);
     const top = el('div', 'bg-top');
-    top.append(button('‹ 店舗アプリ', () => Router.navigate('home'), 'bg-text-button'), el('span', 'bg-eyebrow', 'PRIVATE LIBRARY'));
-    root.append(top, el('h1', 'bg-title', '古着図鑑'), el('p', 'bg-subtitle', 'タグと型番で、何年ごろの服かを調べる'));
+    top.append(button(options.standalone ? '使い方・ホーム画面に追加' : '‹ 店舗アプリ', options.standalone ? options.onHelp : () => Router.navigate('home'), 'bg-text-button'), el('span', 'bg-eyebrow', 'PRIVATE LIBRARY'));
+    root.append(top, el('h1', 'bg-title', options.standalone ? 'ブランド図鑑' : '古着図鑑'), el('p', 'bg-subtitle', 'タグと型番で、何年ごろの服かを調べる'));
     const status = el('p', 'bg-status', '保存済みの資料を確認中…'); status.setAttribute('role', 'status'); root.append(status);
     const offlineStatus = el('p', 'bg-muted bg-offline-status', '通信なしで開くための画面を準備しています。'); root.append(offlineStatus);
     if (navigator.serviceWorker) {
-      navigator.serviceWorker.ready.then(registration => {
+      (options.serviceWorkerReady || navigator.serviceWorker.ready).then(registration => {
+        if (!registration) { if (isLive()) offlineStatus.textContent = '画面の保存を確認できません。通信できる場所で開き直してください。'; return; }
         const expected = document.getElementById('app-version-badge')?.dataset.version;
         const timer = setTimeout(() => {
           navigator.serviceWorker.removeEventListener('message', versionReceived);
@@ -183,9 +184,9 @@ const BrandGuide = (() => {
           if (event.data?.type !== 'SW_VERSION') return;
           clearTimeout(timer); navigator.serviceWorker.removeEventListener('message', versionReceived);
           if (!isLive()) return;
-          offlineStatus.textContent = event.data.cacheName === 'sedori-route-' + expected
+          offlineStatus.textContent = event.data.cacheName === (options.cachePrefix || 'sedori-route-') + expected
             ? '画面の保存も完了 · 取り込み済みの資料は通信なしで開けます'
-            : '画面の更新準備中です。店舗アプリの全タブを閉じ、開き直してください。';
+            : (options.standalone ? '画面の更新準備中です。ブランド図鑑の全タブを閉じ、開き直してください。' : '画面の更新準備中です。店舗アプリの全タブを閉じ、開き直してください。');
         }
         navigator.serviceWorker.addEventListener('message', versionReceived);
         registration.active?.postMessage({ type: 'GET_VERSION' });
@@ -193,9 +194,9 @@ const BrandGuide = (() => {
     } else offlineStatus.textContent = 'このブラウザでは通信なしでの起動に対応していません。';
     const syncStatus = el('p', 'bg-status', '図鑑を開くと、自動で最新版を確認します。'); syncStatus.setAttribute('role', 'status'); root.append(syncStatus);
     const controls = el('details', 'bg-import'); controls.append(el('summary', '', '更新・接続設定'));
-    controls.append(el('p', '', '店舗アプリに接続済みなら、非公開の配信先から自動で保存します。開いている間は15分ごとに更新を確認します。'));
+    controls.append(el('p', '', options.standalone ? '非公開の資料をこの図鑑に保存します。開いている間は15分ごとに更新を確認します。' : '店舗アプリに接続済みなら、非公開の配信先から自動で保存します。開いている間は15分ごとに更新を確認します。'));
     const retry = button('今すぐ更新を確認', () => sync(true));
-    controls.append(retry, button('店舗アプリの接続設定', () => window.location.assign('index.html#settings'), 'bg-text-button'));
+    controls.append(retry, button(options.standalone ? '図鑑の接続設定' : '店舗アプリの接続設定', options.standalone ? options.onConnection : () => window.location.assign('index.html#settings'), 'bg-text-button'));
     const manual = el('details'); manual.append(el('summary', '', '予備のファイルから取り込む'));
     const input = el('input'); input.type = 'file'; input.accept = '.json,application/json'; input.setAttribute('aria-label', '図鑑の専用ファイル');
     input.disabled = true;

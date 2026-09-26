@@ -6,20 +6,21 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#123f33">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://*.googleusercontent.com; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests">
-  <title>古着図鑑 | 店舗アプリ</title>
+  <title>ブランド図鑑</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" href="icons/icon-96.png">
+  <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="style.css?v=212">
-  <link rel="stylesheet" href="brand-guide.css?v=212">
+  <link rel="stylesheet" href="app.css?v=1">
+  <link rel="stylesheet" href="../brand-guide.css?v=212">
 </head>
 <body>
   <main id="app"><p>図鑑を読み込み中…</p></main>
-  <div class="app-version-badge" id="app-version-badge" data-version="v212">v212</div>
+  <div class="app-version-badge" id="app-version-badge" data-version="v1">v1</div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="brand-guide-sync.js?v=212"></script>
-  <script src="brand-guide.js?v=212"></script>
-  <script src="brand-guide-entry.js?v=212"></script>
-  <script src="bootstrap.js?v=212"></script>
+  <script src="credentials.js?v=1"></script>
+  <script src="../brand-guide-sync.js?v=212"></script>
+  <script src="../brand-guide.js?v=212"></script>
+  <script src="bootstrap.js?v=1"></script>
+  <script src="app.js?v=1"></script>
 </body>
 </html>

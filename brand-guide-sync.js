@@ -4,6 +4,8 @@ const BrandGuideSync = (() => {
   const ENDPOINT = 'https://script.google.com/macros/s/AKfycbwYfwDG7Kqplk2oVeX7kF_gsAKTlK087ToE4LGp5R7PglTFMARP2lrA6ZV9m3MD0LEs/exec';
   const INTERVAL = 15 * 60 * 1000;
   let pending = null;
+  let credentialProvider = null;
+  function configureCredential(provider) { credentialProvider = provider; }
   let lastAttempt = 0;
   function fail(message) { throw new Error(message); }
   async function credential() {
@@ -61,7 +63,7 @@ const BrandGuideSync = (() => {
       const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       const parsed = JSON.parse(raw);
       if (parsed.success === false) {
-        if (String(parsed.error).startsWith('UNAUTHORIZED')) fail('店舗アプリの接続設定を確認してください。');
+        if (String(parsed.error).startsWith('UNAUTHORIZED')) fail(credentialProvider ? '図鑑の接続設定を確認してください。' : '店舗アプリの接続設定を確認してください。');
         fail('最新版を取得できませんでした。次回もう一度確認します。');
       }
       if (action === 'getBrandGuideManifest' && parsed.success !== true) fail('図鑑の更新情報を確認できませんでした。');
@@ -82,8 +84,8 @@ const BrandGuideSync = (() => {
     pending = (async () => {
       try {
         onStatus('最新版を確認しています…');
-        const token = await credential();
-        if (!/^[A-Za-z0-9._~-]{32,256}$/.test(token)) fail('店舗アプリの接続設定を一度行うと、自動で図鑑を保存できます。');
+        const token = await (credentialProvider ? credentialProvider() : credential());
+        if (!/^[A-Za-z0-9._~-]{32,256}$/.test(token)) fail(credentialProvider ? '図鑑の接続設定を行うと、自動で資料を保存できます。' : '店舗アプリの接続設定を一度行うと、自動で図鑑を保存できます。');
         const manifest = validateManifest(await request('getBrandGuideManifest', token));
         const old = await guide.load();
         if (old?.sha === manifest.sha256) { onStatus('最新版を保存済みです。ファイル選択は不要です。'); return; }
@@ -100,6 +102,6 @@ const BrandGuideSync = (() => {
     })();
     return pending;
   }
-  return { run, validateManifest, INTERVAL };
+  return { run, validateManifest, INTERVAL, configureCredential };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = BrandGuideSync;
