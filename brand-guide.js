@@ -27,7 +27,8 @@ const BrandGuide = (() => {
       check(b && /^[a-z0-9-]{1,60}$/.test(b.id) && !ids.has(b.id)); ids.add(b.id);
       check(text(b.name, 100) && b.name && !names.has(b.name)); names.add(b.name);
       check(Array.isArray(b.aliases) && b.aliases.length < 20 && b.aliases.every(a => text(a, 100)));
-      check(Array.isArray(b.groups) && b.groups.length > 0 && b.groups.length <= 20);
+      check(Array.isArray(b.groups) && b.groups.length <= 20);
+      check(b.groups.length > 0 || (b.photoStatus === 'uncollected' && Array.isArray(b.sources) && b.sources.length > 0));
       for (const g of b.groups) {
         check(text(g.period, 150) && Array.isArray(g.photos) && g.photos.length > 0 && g.photos.length <= 20);
         for (const p of g.photos) {
@@ -248,6 +249,7 @@ const BrandGuide = (() => {
       function showBrand(b) {
         startDetail(b.name);
         detail.append(el('h3', 'bg-section-title', '01  タグの年表'), el('p', 'bg-muted', '年は写真や記事で確認できた時期です。服が作られた年とは限りません。'));
+        if (!b.groups.length) detail.append(el('p', 'bg-muted', 'タグ写真は未収集です。型番・年代の参考情報を先に掲載しています。'));
         for (const g of b.groups) {
           const card = el('section', 'bg-tag-card'); card.append(el('h4', 'bg-period', g.period));
           for (const p of g.photos) {
@@ -260,7 +262,7 @@ const BrandGuide = (() => {
           }
           detail.append(card);
         }
-        const m = b.method; const method = el('section', 'bg-method'); method.append(el('h3', 'bg-section-title', '02  型番の読み方'), el('p', 'bg-muted', '上のタグ写真とは別の商品を使った説明です。'));
+        const m = b.method; const method = el('section', 'bg-method'); method.append(el('h3', 'bg-section-title', '02  型番の読み方'), el('p', 'bg-muted', b.groups.length ? '上のタグ写真とは別の商品を使った説明です。' : '参考記事の品番例です。実物のタグ写真は未確認です。'));
         const code = el('div', 'bg-code'); let start = m.highlight ? m.code.indexOf(m.highlight) : -1;
         if (b.name === 'TOMORROWLAND' && m.highlight) start = 6;
         if (start >= 0) { code.append(document.createTextNode(m.code.slice(0, start)), el('mark', '', m.code.slice(start, start + m.highlight.length)), document.createTextNode(m.code.slice(start + m.highlight.length))); } else code.textContent = m.code;

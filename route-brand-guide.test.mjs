@@ -158,3 +158,15 @@ test('future additions accept 31 brands and expanded appendix', async () => {
   data.baycrews.confirmed.push('NEW BRAND'); data.baycrews.examples.push(structuredClone(data.baycrews.examples[0]));
   const record = await guide.parsePackage(envelope(data)); assert.equal(record.data.brands.length, 31);
 });
+
+
+test('source-backed research-only brands require explicit missing-photo status', async () => {
+  const { guide } = harness(); const data = fixture();
+  data.brands[0].groups = [];
+  await assert.rejects(guide.parsePackage(envelope(data)));
+  data.brands[0].photoStatus = 'uncollected';
+  const parsed = await guide.parsePackage(envelope(data));
+  assert.equal(guide.validate(parsed.data).photos, 29);
+  data.brands[0].sources = [];
+  await assert.rejects(guide.parsePackage(envelope(data)));
+});
