@@ -175,6 +175,12 @@ const Storage = (() => {
       const existing = new Set(uuids(left));
       return uuids(right).some(uuid => existing.has(uuid));
     }
+    const stopWrites = new Set(['updateStop', 'endRoute']);
+    if (stopWrites.has(left.action) && stopWrites.has(right.action)
+        && String(left.body?.route_id || '') === String(right.body?.route_id || '')) {
+      return left.action === 'endRoute' || right.action === 'endRoute'
+        || String(left.body?.store_id || '') === String(right.body?.store_id || '');
+    }
     if (left.action !== right.action) return false;
     if (left.action === 'updateAmazonPricingPreference') return String(left.body?.sku || '') === String(right.body?.sku || '');
     if (left.action === 'addInventoryPurchase') {
@@ -247,6 +253,9 @@ const Storage = (() => {
   function clearPurchaseDraft(key) { return del('currentRoute', 'purchase-draft-' + key); }
 
   function pendingActionBlockReason_(action, now = Date.now()) {
+    if (action?.action === 'updateStop' && !/^[a-f0-9]{64}$/.test(action.body?.expected_stop_revision || '')) {
+      return '旧版の店舗更新は変更前の状態を確認できません。受付を残し、自動再送を停止しました';
+    }
     if (action?.last_error_code === 'OPERATION_OUTCOME_UNKNOWN') return '保存結果が不明です。受付IDを確認してから個別に処理してください';
     if (['API_ERROR', 'PENDING_OPERATION_EXISTS'].includes(action?.last_error_code)) return '入力内容または先行する受付の確認が必要なため自動再送を停止しました';
     const createdAt = Number(action?.timestamp);
@@ -318,6 +327,12 @@ const Storage = (() => {
           synced++;
         } catch (e) {
           console.warn('Sync failed:', e);
+          // These are explicit pre-write rejections. API already released only
+          // this receipt; do not recreate it and permanently block a fresh edit.
+          if (act.action === 'updateStop' && ['STOP_REFRESH_REQUIRED', 'STOP_UPDATE_REQUIRED'].includes(e.code)) {
+            notifyPendingBlocked_(act, e.message);
+            break;
+          }
           const attempts = Number(act.attempts || 0) + 1;
           await putWithKey('pendingActions', act._queueKey, {
             ...act,
@@ -371,6 +386,57 @@ const Storage = (() => {
   async function getCurrentRoute() {
     return get('currentRoute', 'current');
   }
+  // Read and reserve in one transaction shared by every tab. A crashed tab
+  // leaves the same startOperationId available for recovery, never a new start.
+  function reserveRouteStart(candidate) {
+    return transact('currentRoute', 'readwrite', (store, setResult, fail) => {
+      const req = store.get('current');
+      req.onsuccess = () => {
+        try {
+          const existing = req.result;
+          if (existing) {
+            if (!existing.routeId || (existing.routeId === 'pending' && (!existing.startOperationId || !existing.startRequest))) {
+              throw new Error('保存中の巡回を確認できません。新しい巡回を開始せず再読み込みしてください');
+            }
+            setResult(existing);
+            return;
+          }
+          const record = { ...candidate, id: 'current' };
+          if (record.routeId !== 'pending' || !record.startOperationId || !record.startRequest) throw new Error('巡回開始の受付が不正です');
+          store.put(record);
+          setResult(record);
+        } catch (error) { fail(error); }
+      };
+    });
+  }
+  function confirmRouteStart(operationId, confirmed) {
+    return transact('currentRoute', 'readwrite', (store, setResult, fail) => {
+      const req = store.get('current');
+      req.onsuccess = () => {
+        try {
+          const existing = req.result;
+          if (!existing || existing.startOperationId !== operationId) throw new Error('巡回開始の受付が変わっています。保存済みの巡回を再確認してください');
+          if (existing.routeId !== 'pending') {
+            if (existing.routeId !== confirmed.routeId) throw new Error('巡回開始の結果が一致しません');
+            // Another tab may already have advanced this route.
+            setResult(existing);
+            return;
+          }
+          const record = { ...confirmed, id: 'current' };
+          store.put(record);
+          setResult(record);
+        } catch (error) { fail(error); }
+      };
+    });
+  }
+  function clearRejectedRouteStart(operationId) {
+    return transact('currentRoute', 'readwrite', (store) => {
+      const req = store.get('current');
+      req.onsuccess = () => {
+        if (req.result?.routeId === 'pending' && req.result.startOperationId === operationId) store.delete('current');
+      };
+    });
+  }
   async function clearCurrentRoute() {
     return del('currentRoute', 'current');
   }
@@ -395,6 +461,10 @@ const Storage = (() => {
   }
   async function getViewCache(id) {
     const rec = await get('viewCache', id);
+    // Read old releases' double-wrapped lists without discarding offline data.
+    if (/^(inventory_|stops_)/.test(id) && rec && !Array.isArray(rec.data) && Array.isArray(rec.data?.data)) {
+      return { ...rec, data: rec.data.data };
+    }
     return rec ? rec : null;
   }
   async function clearViewCache(id) {
@@ -416,7 +486,7 @@ const Storage = (() => {
     addPendingAction, reservePendingAction, settlePendingAction, getPendingActions, clearPendingActions, getPendingQueueStatus, syncPending,
     cacheStores, getCachedStores,
     cacheConfig, getCachedConfig,
-    saveCurrentRoute, getCurrentRoute, clearCurrentRoute,
+    saveCurrentRoute, getCurrentRoute, clearCurrentRoute, reserveRouteStart, confirmRouteStart, clearRejectedRouteStart,
     savePlannedRoute, getPlannedRoute, clearPlannedRoute,
     saveViewCache, getViewCache, clearViewCache, clearRemoteCaches,
     getInventoryReceiptStatus, savePurchaseDraft, getPurchaseDraft, clearPurchaseDraft,

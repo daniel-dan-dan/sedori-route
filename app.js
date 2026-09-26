@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v209';
+  const ASSET_VER = 'v210';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -2305,9 +2305,15 @@ const App = (() => {
       startTime: parseServerTimestamp_(result.start_time) || pending.startTime || Date.now(),
     };
     delete confirmed.startRequest;
-    patrolState = confirmed;
+    try {
+      patrolState = await Storage.confirmRouteStart(pending.startOperationId, confirmed);
+    } catch (cause) {
+      const error = new Error('巡回は受け付けましたが端末の保存を確認できません。同じ受付で再確認してください');
+      error.code = 'OPERATION_OUTCOME_UNKNOWN';
+      error.cause = cause;
+      throw error;
+    }
     pendingStartState = null;
-    await Storage.saveCurrentRoute(confirmed);
     if (confirmed.clearPlannedOnSuccess) {
       try {
         await deletePlannedRouteEverywhere_();
@@ -2315,13 +2321,13 @@ const App = (() => {
         console.warn('開始済み予定ルートの削除同期に失敗しました:', error);
       }
     }
-    return confirmed;
+    return patrolState;
   }
 
   function isRetryableRouteStartError_(error, duringStartRequest) {
     if (!duringStartRequest) return false;
     const code = String(error?.code || '').toUpperCase();
-    if (['TIMEOUT', 'UNKNOWN_RESPONSE', 'OPERATION_OUTCOME_UNKNOWN', 'BUSY'].includes(code)) return true;
+    if (['TIMEOUT', 'UNKNOWN_RESPONSE', 'OPERATION_OUTCOME_UNKNOWN', 'BUSY', 'PENDING_OPERATION_EXISTS'].includes(code)) return true;
     if (error?.name === 'AbortError') return true;
     // fetchの通信失敗はSafariを含む各ブラウザでTypeErrorになる。
     if (error?.name === 'TypeError') return true;
@@ -2336,11 +2342,7 @@ const App = (() => {
         && patrolState.startOperationId === pending?.startOperationId) {
       patrolState = null;
     }
-    const saved = await Storage.getCurrentRoute().catch(() => null);
-    if (saved?.routeId === 'pending'
-        && saved.startOperationId === pending?.startOperationId) {
-      await Storage.clearCurrentRoute();
-    }
+    if (pending?.startOperationId) await Storage.clearRejectedRouteStart(pending.startOperationId);
   }
 
   function startPatrol({ clearPlannedOnSuccess = false } = {}) {
@@ -2360,18 +2362,8 @@ const App = (() => {
       let confirmingStart = false;
       try {
         const storeIds = routeToStart.orderedStores.map(s => s.store_id);
-        let pending = await Storage.getCurrentRoute().catch(() => null);
-        if (pending?.routeId && pending.routeId !== 'pending') {
-          // 別タブで開始済みの巡回を、新しい保留データで上書きしない。
-          patrolState = pending;
-          pendingStartState = null;
-          toast('すでに開始済みの巡回を開きました', 4000);
-          Router.navigate('patrol');
-          return patrolState;
-        }
-        if (pending?.routeId !== 'pending') {
-          const operationId = API.createOperationId('startRoute');
-          pending = {
+        const operationId = API.createOperationId('startRoute');
+        const pending = await Storage.reserveRouteStart({
             routeId: 'pending',
             startOperationId: operationId,
             startTime: Date.now(),
@@ -2389,14 +2381,18 @@ const App = (() => {
               purchaseItems: 0
             })),
             currentIdx: 0,
-          };
-          await Storage.saveCurrentRoute(pending);
-        } else {
-          optimizedRoute = {
+        });
+        if (pending.routeId !== 'pending') {
+          patrolState = pending;
+          pendingStartState = null;
+          toast('すでに開始済みの巡回を開きました', 4000);
+          Router.navigate('patrol');
+          return patrolState;
+        }
+        optimizedRoute = {
             orderedStores: pending.stops || [],
             totalDistanceKm: Number(pending.startRequest?.total_distance_km) || 0,
-          };
-        }
+        };
         pendingStartState = pending;
         confirmingStart = true;
         await confirmPendingRouteStart_(pending);
@@ -2408,7 +2404,7 @@ const App = (() => {
           toast(`巡回開始の結果を確認できませんでした。同じ内容で再確認できます: ${error.message}`, 6000);
         } else {
           try {
-            await clearRejectedPendingRouteStart_(pendingStartState);
+            if (confirmingStart) await clearRejectedPendingRouteStart_(pendingStartState);
           } catch (clearError) {
             console.warn('却下された巡回開始データの破棄に失敗しました:', clearError);
           }
@@ -3859,6 +3855,7 @@ const App = (() => {
   // ---------- 履歴・分析 ----------
 
   let historyCache = []; // renderHistoryDetail用に保持
+  let historyRenderSequence = 0;
   const stopsCacheByRouteId = {}; // route_id → stops[]、セッションキャッシュ
   let historyApiCache = null;       // { ts, routes } — 履歴一覧の APIレスポンスキャッシュ
   const HISTORY_CACHE_TTL_MS = 60 * 60 * 1000; // 60分
@@ -4046,7 +4043,7 @@ const App = (() => {
     recent.forEach(route => {
       if (route.stops && !stopsCacheByRouteId[route.route_id]) {
         stopsCacheByRouteId[route.route_id] = route.stops;
-        Storage.saveViewCache('stops_' + route.route_id, { data: route.stops }).catch(() => {});
+        Storage.saveViewCache('stops_' + route.route_id, route.stops).catch(() => {});
       }
     });
 
@@ -4056,7 +4053,7 @@ const App = (() => {
       if (date && !inventoryByDateCache[date]) {
         try {
           const rec = await Storage.getViewCache('inventory_' + date);
-          if (rec && rec.data && rec.data.length > 0) inventoryByDateCache[date] = rec.data;
+          if (rec && Array.isArray(rec.data)) inventoryByDateCache[date] = rec.data;
         } catch (e) {}
       }
     }));
@@ -4069,13 +4066,15 @@ const App = (() => {
         const items = await API.getInventoryPurchases({ from: date, to: date });
         if (items && items.length > 0) {
           inventoryByDateCache[date] = items;
-          Storage.saveViewCache('inventory_' + date, { data: items }).catch(() => {});
+          Storage.saveViewCache('inventory_' + date, items).catch(() => {});
         }
       } catch (e) {}
     }));
   }
 
   async function renderHistory(container) {
+    const sequence = ++historyRenderSequence;
+    const isCurrent = () => sequence === historyRenderSequence && Router.getCurrentView() === 'history' && container.isConnected;
     setTitle('履歴・分析');
 
     const now = Date.now();
@@ -4093,6 +4092,7 @@ const App = (() => {
       dbCache = await Storage.getViewCache('history');
     } catch (e) { /* ignore */ }
 
+    if (!isCurrent()) return;
     if (dbCache && dbCache.data) {
       historyCache = dbCache.data;
       renderHistoryContent(container, dbCache.data);
@@ -4104,14 +4104,14 @@ const App = (() => {
     try {
       // 一覧表示には stops 不要（詳細画面に入った時に個別取得）
       const routes = await API.getRouteHistory({ limit: 20, include_stops: 'true' });
-      if (Router.getCurrentView() !== 'history') return;
+      if (!isCurrent()) return;
       historyApiCache = { ts: Date.now(), routes };
       historyCache = routes;
       // IndexedDB に永続化
       Storage.saveViewCache('history', routes).catch(() => {});
       renderHistoryContent(container, routes);
     } catch (e) {
-      if (Router.getCurrentView() !== 'history') return;
+      if (!isCurrent()) return;
       // 前回キャッシュ表示中であればエラー上書きしない
       if (!dbCache) {
         container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
@@ -4123,9 +4123,20 @@ const App = (() => {
   const inventoryByDateCache = {};
   const inventoryRefreshInFlightByDate = {};
 
+  function inventorySectionForRoute_(route) {
+    const section = document.getElementById('inventory-section');
+    if (!section || Router.getCurrentView() !== 'history-detail'
+        || section.dataset.routeId !== String(route.route_id)
+        || section.dataset.routeDate !== normalizeRouteDate_(route.date)) return null;
+    return section;
+  }
+  function inventorySectionCurrent_(route, section) {
+    return Boolean(section?.isConnected && inventorySectionForRoute_(route) === section);
+  }
+
   // 在庫管理シートの仕入れ品を取得し、巡回ルートの訪問店舗に紐付けて表示
   async function loadInventoryForRoute(route, options = {}) {
-    const section = document.getElementById('inventory-section');
+    const section = inventorySectionForRoute_(route);
     if (!section) return;
     const date = normalizeRouteDate_(route.date);
     if (!date) return;
@@ -4136,12 +4147,13 @@ const App = (() => {
       // IDB から試みる
       try {
         const idbRec = await Storage.getViewCache('inventory_' + date);
-        if (idbRec && idbRec.data && idbRec.data.length > 0) {
+        if (idbRec && Array.isArray(idbRec.data)) {
           items = idbRec.data;
           inventoryByDateCache[date] = items;
         }
       } catch (e) {}
     }
+    if (!inventorySectionCurrent_(route, section)) return;
     if (items) {
       renderInventoryForRoute(route, items);
       if (backgroundRefresh) {
@@ -4157,46 +4169,45 @@ const App = (() => {
       try {
         items = await fetchInventoryForDate_(date);
       } catch (e) {
-        renderInventoryFetchError_(route, e.message, false);
+        if (inventorySectionCurrent_(route, section)) renderInventoryFetchError_(route, e.message, false);
         return;
       }
     }
 
-    renderInventoryForRoute(route, items);
+    if (inventorySectionCurrent_(route, section)) renderInventoryForRoute(route, items);
   }
 
   async function fetchInventoryForDate_(date) {
     const items = await API.getInventoryPurchases({ from: date, to: date });
-    const list = Array.isArray(items) ? items : [];
-    if (list.length > 0) {
-      inventoryByDateCache[date] = list;
-      Storage.saveViewCache('inventory_' + date, { data: list }).catch(() => {});
-    } else {
-      delete inventoryByDateCache[date];
-      Storage.clearViewCache('inventory_' + date).catch(() => {});
-    }
+    if (!Array.isArray(items)) throw new Error('仕入れ品の応答形式を確認できません。保存済みの内容は残しています');
+    const list = items;
+    inventoryByDateCache[date] = list;
+    Storage.saveViewCache('inventory_' + date, list).catch(() => {});
     return list;
   }
 
   async function refreshInventoryForRoute(route, date, { showErrors = false } = {}) {
-    if (inventoryRefreshInFlightByDate[date]) return;
-    inventoryRefreshInFlightByDate[date] = true;
+    const section = inventorySectionForRoute_(route);
+    if (!section) return;
+    // Share the read, but give every newly opened route its own view check.
+    const pending = inventoryRefreshInFlightByDate[date]
+      || (inventoryRefreshInFlightByDate[date] = fetchInventoryForDate_(date));
     try {
-      const latest = await fetchInventoryForDate_(date);
-      if (Router.getCurrentView() === 'history-detail') {
+      const latest = await pending;
+      if (inventorySectionCurrent_(route, section)) {
         renderInventoryForRoute(route, latest);
       }
     } catch (e) {
-      if (showErrors && Router.getCurrentView() === 'history-detail') {
+      if (showErrors && inventorySectionCurrent_(route, section)) {
         renderInventoryFetchError_(route, e.message, true);
       }
     } finally {
-      delete inventoryRefreshInFlightByDate[date];
+      if (inventoryRefreshInFlightByDate[date] === pending) delete inventoryRefreshInFlightByDate[date];
     }
   }
 
   function renderInventoryFetchError_(route, message, hasCachedContent) {
-    const section = document.getElementById('inventory-section');
+    const section = inventorySectionForRoute_(route);
     if (!section) return;
     const alertHtml = `
       <div class="inventory-refresh-alert">
@@ -4223,7 +4234,7 @@ const App = (() => {
   }
 
   function renderInventoryForRoute(route, items) {
-    const section = document.getElementById('inventory-section');
+    const section = inventorySectionForRoute_(route);
     if (!section) return;
 
     // 訪問店舗（この巡回）
@@ -4662,6 +4673,8 @@ const App = (() => {
 
   async function renderHistoryDetail(container, { route } = {}) {
     if (!route) { Router.navigate('history'); return; }
+    const sequence = ++historyRenderSequence;
+    const isCurrent = () => sequence === historyRenderSequence && Router.getCurrentView() === 'history-detail' && container.isConnected;
     setTitle('履歴詳細');
 
     // stops が無ければオンデマンドで取得（セッション → IDB → API の順）
@@ -4674,34 +4687,36 @@ const App = (() => {
         let idbHit = false;
         try {
           const idbRec = await Storage.getViewCache('stops_' + route.route_id);
-          if (idbRec && idbRec.data && idbRec.data.length > 0) {
+          if (idbRec && Array.isArray(idbRec.data)) {
             stopsCacheByRouteId[route.route_id] = idbRec.data;
             route.stops = idbRec.data;
             idbHit = true;
           }
         } catch (e) {}
+        if (!isCurrent()) return;
         if (!idbHit) {
           container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
           try {
             const stops = await API.getRouteStops({ route_id: route.route_id });
-            if (Router.getCurrentView() !== 'history-detail') return;
+            if (!isCurrent()) return;
             stopsCacheByRouteId[route.route_id] = stops;
             route.stops = stops;
-            Storage.saveViewCache('stops_' + route.route_id, { data: stops }).catch(() => {});
+            Storage.saveViewCache('stops_' + route.route_id, stops).catch(() => {});
           } catch (e) {
-            container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
+            if (isCurrent()) container.innerHTML = `<div class="text-center text-dim">${esc(e.message)}</div>`;
             return;
           }
         } else {
           // IDB ヒット後もバックグラウンドで最新化
           API.getRouteStops({ route_id: route.route_id }).then(stops => {
             stopsCacheByRouteId[route.route_id] = stops;
-            Storage.saveViewCache('stops_' + route.route_id, { data: stops }).catch(() => {});
+            Storage.saveViewCache('stops_' + route.route_id, stops).catch(() => {});
           }).catch(() => {});
         }
       }
     }
 
+    if (!isCurrent()) return;
     const dateStr = formatRouteDate_(route.date);
     let html = '';
 
@@ -4756,7 +4771,7 @@ const App = (() => {
     }
 
     // 在庫管理からの仕入れ品（キャッシュ表示後、裏で最新化）
-    html += `<div id="inventory-section"></div>`;
+    html += `<div id="inventory-section" data-route-id="${esc(route.route_id)}" data-route-date="${esc(normalizeRouteDate_(route.date))}"></div>`;
 
     html += '<div class="history-actions">';
     // 巡回再開ボタン（停止した巡回をやり直せる）

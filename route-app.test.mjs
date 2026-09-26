@@ -124,6 +124,18 @@ function createAppConcurrencyHarness({ startRoute, updateStop, endRoute } = {}) 
   const storageMock = {
     async getCurrentRoute() { return savedCurrentRoute; },
     async saveCurrentRoute(value) { savedCurrentRoute = value; return value; },
+    async reserveRouteStart(value) {
+      if (!savedCurrentRoute) savedCurrentRoute = value;
+      return savedCurrentRoute;
+    },
+    async confirmRouteStart(operationId, value) {
+      assert.equal(savedCurrentRoute.startOperationId, operationId);
+      if (savedCurrentRoute.routeId === 'pending') savedCurrentRoute = value;
+      return savedCurrentRoute;
+    },
+    async clearRejectedRouteStart(operationId) {
+      if (savedCurrentRoute?.routeId === 'pending' && savedCurrentRoute.startOperationId === operationId) savedCurrentRoute = null;
+    },
     async clearCurrentRoute() { savedCurrentRoute = null; },
     async getPlannedRoute() { return savedPlannedRoute; },
     async savePlannedRoute(value) { savedPlannedRoute = value; return value; },
@@ -241,7 +253,7 @@ test('店舗完了はGAS保存を待ち、時刻を送り、失敗時に位置�
 test('巡回開始operationIdを送信前に永続化し、同じIDで再確認する', () => {
   const source = functionSource(app, 'startPatrol', 'renderPatrol');
   assert.match(source, /startOperationId:\s*operationId/);
-  assert.ok(source.indexOf('await Storage.saveCurrentRoute(pending)') < source.indexOf('confirmPendingRouteStart_(pending)'));
+  assert.ok(source.indexOf('await Storage.reserveRouteStart(') < source.indexOf('confirmPendingRouteStart_(pending)'));
   const recovery = functionSource(app, 'confirmPendingRouteStart_', 'startPatrol');
   assert.match(recovery, /operation_id:\s*pending\.startOperationId/);
   assert.match(recovery, /startTime:\s*parseServerTimestamp_\(result\.start_time\) \|\| pending\.startTime \|\| Date\.now\(\)/);

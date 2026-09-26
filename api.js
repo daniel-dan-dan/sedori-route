@@ -30,6 +30,7 @@ const API = (() => {
   const credentialCache = new Map();
   let credentialDbPromise = null;
   let credentialReadyPromise = initializeCredentials_();
+  const stopRevisions = new Map();
   // Startup may fail before the view awaits ready(). Keep that rejection
   // handled, and allow a later explicit attempt to reopen storage safely.
   credentialReadyPromise.catch(() => {});
@@ -311,10 +312,12 @@ const API = (() => {
       const message = String(data.error || 'API error');
       const pricingRejection = action === 'updateAmazonPricingPreference'
         ? message.match(/^(INVALID_INPUT|PRICING_REFRESH_REQUIRED|PRICING_REVISION_CONFLICT):/)?.[1] : '';
+      const stopRejection = action === 'updateStop'
+        ? message.match(/^(STOP_REFRESH_REQUIRED|STOP_UPDATE_REQUIRED):/)?.[1] : '';
       const code = message.startsWith('UNAUTHORIZED') ? 'UNAUTHORIZED'
         : message.startsWith('BUSY') ? 'BUSY'
           : message.startsWith('OPERATION_OUTCOME_UNKNOWN') ? 'OPERATION_OUTCOME_UNKNOWN'
-          : pricingRejection ? pricingRejection
+          : stopRejection || pricingRejection ? (stopRejection || pricingRejection)
           : 'API_ERROR';
       if (code === 'UNAUTHORIZED') {
         window.dispatchEvent(new CustomEvent('api-auth-error', { detail: { action } }));
@@ -370,6 +373,12 @@ const API = (() => {
         signal: controller.signal
       });
       const result = await readJson_(res, action);
+      if (action === 'updateStop') {
+        if (result?.updated !== true || !/^[a-f0-9]{64}$/.test(result.stop_revision || '')) {
+          throw apiError_('店舗の保存結果を確認できません。受付を残して再確認します', 'OPERATION_OUTCOME_UNKNOWN');
+        }
+        stopRevisions.set(JSON.stringify([body.route_id, body.store_id]), result.stop_revision);
+      }
       if (typeof options.validateResult === 'function' && !options.validateResult(result)) {
         throw apiError_('保存結果の形式を確認できませんでした。再送せず一覧を再確認してください', 'OPERATION_OUTCOME_UNKNOWN');
       }
@@ -385,9 +394,11 @@ const API = (() => {
         || ['UNKNOWN_RESPONSE', 'OPERATION_OUTCOME_UNKNOWN'].includes(error.code)
         || /load failed|failed to fetch|networkerror/i.test(String(error.message || error));
       if (!isRead) {
+        const stopDefinitelyRejected = action === 'updateStop' && ['STOP_REFRESH_REQUIRED', 'STOP_UPDATE_REQUIRED'].includes(error.code);
+        if (action === 'updateStop') stopRevisions.delete(JSON.stringify([body.route_id, body.store_id]));
         const pricingDefinitelyRejected = action === 'updateAmazonPricingPreference' &&
           ['INVALID_INPUT','PRICING_REFRESH_REQUIRED','PRICING_REVISION_CONFLICT','BUSY','UNAUTHORIZED'].includes(error.code);
-        await Storage.settlePendingAction(operationId, pricingDefinitelyRejected ? { remove: true } : action === 'updateAmazonPricingPreference' ? {
+        await Storage.settlePendingAction(operationId, (pricingDefinitelyRejected || stopDefinitelyRejected) ? { remove: true } : action === 'updateAmazonPricingPreference' ? {
           last_error: '価格管理設定の保存結果を再確認してください', last_error_code: 'OPERATION_OUTCOME_UNKNOWN', last_attempt_at: Date.now()
         } : retryable ? {
           last_error: String(error.message || error), last_error_code: String(error.code || ''), last_attempt_at: Date.now()
@@ -418,6 +429,21 @@ const API = (() => {
     return request_(action, body, options);
   }
 
+  async function updateStop(body, options = {}) {
+    const key = JSON.stringify([body.route_id, body.store_id]);
+    let revision = stopRevisions.get(key);
+    if (!revision) {
+      const stops = await get('getRouteStops', { route_id: body.route_id });
+      const stop = Array.isArray(stops) ? stops.find(item => String(item.store_id) === String(body.store_id)) : null;
+      revision = stop?.stop_revision;
+      if (!/^[a-f0-9]{64}$/.test(revision || '')) {
+        throw apiError_('店舗の変更前の状態を確認できません。アプリを更新して履歴を再読み込みしてください', 'STOP_UPDATE_REQUIRED');
+      }
+      stopRevisions.set(key, revision);
+    }
+    return post('updateStop', { ...body, expected_stop_revision: revision }, options);
+  }
+
   return {
     setUrl, getUrl, getCanonicalUrl, isValidUrl,
     ready, setToken, hasToken, hasDeviceCredential, pairDevice, ensureDeviceCredential, clearDeviceCredential,
@@ -436,7 +462,7 @@ const API = (() => {
     updateStore:      (b)         => post('updateStore', b),
     deleteStore:      (b)         => post('deleteStore', b),
     startRoute:       (b)         => post('startRoute', b, { queueOnFailure: false }),
-    updateStop:       (b, o = {}) => post('updateStop', b, o),
+    updateStop,
     endRoute:         (b)         => post('endRoute', b, { queueOnFailure: false }),
     addStopToRoute:   (b)         => post('addStopToRoute', b),
     addPurchase:      (b)         => post('addPurchase', b),

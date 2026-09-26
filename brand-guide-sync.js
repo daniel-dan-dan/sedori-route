@@ -88,7 +88,7 @@ const BrandGuideSync = (() => {
         const old = await guide.load();
         if (old?.sha === manifest.sha256) { onStatus('最新版を保存済みです。ファイル選択は不要です。'); return; }
         if (old && (old.data.updatedAt > manifest.updatedAt || (old.remoteRevision || 0) > manifest.revision)) fail('配信中の資料が古いため、保存済みの図鑑を使います。');
-        onStatus('図鑑を自動で保存しています… 初回は約11MBを読み込みます。');
+        onStatus('図鑑を保存しています…');
         const raw = await request('getBrandGuidePackage', token, { sha256: manifest.sha256 }, guide.MAX_BYTES);
         if (new TextEncoder().encode(raw).length !== manifest.bytes) fail('資料を最後まで受け取れませんでした。');
         const record = await guide.importFile({ size: manifest.bytes, text: async () => raw }, manifest);
