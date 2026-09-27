@@ -31,6 +31,10 @@
 .bg-source { display:block; color:#315e4d; padding:8px 0; text-decoration:underline; }
 .bg-method { padding-top:8px; }
 .bg-brand-detail { touch-action:pan-y pinch-zoom; }
+.bg-swipe-moving { overflow-x:clip; }
+.bg-swipe-moving .bg-brand-detail { position:relative; z-index:2; background:var(--bg-paper); box-shadow:-10px 0 24px #123f3326; min-height:100vh; will-change:transform; }
+.bg-swipe-home { position:fixed; top:0; bottom:0; z-index:1; overflow:hidden; background:var(--bg-paper); padding:18px 16px 100px; pointer-events:none; will-change:transform; }
+.bg-swipe-home .bg-title { display:block !important; font-size:36px; margin:8px 0; padding-bottom:14px; border-bottom:double 3px #123f33; }
 .bg-reading-steps { display:grid; grid-template-columns:70px minmax(0,1fr); margin:16px 0 20px; gap:10px 12px; font-size:15px; }
 .bg-reading-steps dt { font-weight:700; color:#58695e; }
 .bg-reading-steps dd { margin:0; }

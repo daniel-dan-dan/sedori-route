@@ -186,13 +186,13 @@ test('tag timeline displays years and observed ranges without seasons or provena
   ]) assert.equal(guide.tagPeriod(input).label, expected);
 });
 
-test('tag timeline is oldest first, stable within a year, unknown last, without altering evidence', () => {
+test('tag timeline is oldest first, stable within a year, unknown photos excluded, without altering evidence', () => {
   const { guide } = harness();
   const groups = ['2026年秋', '年代未確認', '2023年春夏', '2023年秋冬', '2011〜2014年']
     .map((period, id) => ({ period, id, photos: [{ basis: 'original source' }] }));
   const before = JSON.stringify(groups);
   const ordered = guide.tagTimeline(groups);
-  assert.equal(ordered.map(g => g.id).join(','), '4,2,3,0,1');
+  assert.equal(ordered.map(g => g.id).join(','), '4,2,3,0');
   assert.equal(JSON.stringify(groups), before);
   assert.equal(ordered[0].photos, groups[4].photos);
 });
@@ -204,7 +204,7 @@ test('right swipe returns only for a deliberate horizontal single gesture', () =
     { x: -100, y: 100, time: 500 }, // left swipe
     { x: 60, y: 100, time: 500 }, // tap / small movement
     { x: 140, y: 250, time: 500 }, // vertical scroll
-    { x: 140, y: 100, time: 1500 }, // slow drag
+    { x: 140, y: 100, time: 15000 }, // stale gesture
     { x: 140, y: 100, time: 50 },
   ]) assert.equal(guide.isBackSwipe(start, end), false);
   assert.equal(guide.isBackSwipe(null, { x: 140, y: 100, time: 500 }), false);

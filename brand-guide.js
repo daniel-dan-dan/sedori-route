@@ -37,10 +37,11 @@ const BrandGuide = (() => {
   }
   function tagTimeline(groups) {
     return groups.map(group => ({ ...group, displayPeriod: tagPeriod(group.period) }))
+      .filter(group => Number.isFinite(group.displayPeriod.year))
       .sort((a, b) => a.displayPeriod.year - b.displayPeriod.year);
   }
   function isBackSwipe(start, end) {
-    if (!start || !end || end.time < start.time || end.time - start.time > 1000) return false;
+    if (!start || !end || end.time < start.time || end.time - start.time > 10000) return false;
     const dx = end.x - start.x, dy = Math.abs(end.y - start.y);
     return dx >= 80 && dy <= 60 && dx > dy * 1.5;
   }
@@ -276,25 +277,77 @@ const BrandGuide = (() => {
       const list = el('div', 'bg-brand-list'); const detail = el('div', 'bg-brand-detail');
       const count = el('p', 'bg-muted'); count.setAttribute('role', 'status');
       body.append(label, count, list, detail);
+      let swipeStart = null, swipeHome = null, swipeMoving = false, swipeSettling = false, swipeTimer = null;
+      let swipeWidth = 0, swipeOffset = 0;
+      function clearSwipe() {
+        clearTimeout(swipeTimer); swipeTimer = null;
+        swipeHome?.remove(); swipeHome = null;
+        detail.style.removeProperty('transform'); detail.style.removeProperty('transition');
+        root.classList.remove('bg-swipe-moving');
+        swipeStart = null; swipeMoving = swipeSettling = false; swipeOffset = 0;
+      }
       function returnToList() {
+        clearSwipe();
         root.classList.remove('bg-viewing'); detail.replaceChildren();
         label.hidden = count.hidden = list.hidden = false;
         window.scrollTo(0, 0);
       }
-      let swipeStart = null;
+      function beginSwipe() {
+        swipeWidth = detail.getBoundingClientRect().width;
+        const bounds = root.getBoundingClientRect();
+        swipeHome = el('div', 'bg-swipe-home'); swipeHome.inert = true;
+        swipeHome.setAttribute('aria-hidden', 'true');
+        swipeHome.style.left = `${bounds.left}px`; swipeHome.style.width = `${bounds.width}px`;
+        const title = el('h1', 'bg-title', options.standalone ? 'ブランド図鑑' : '古着図鑑');
+        const copies = [label, count, list].map(node => { const copy = node.cloneNode(true); copy.hidden = false; return copy; });
+        swipeHome.append(title, ...copies); root.append(swipeHome);
+        root.classList.add('bg-swipe-moving'); swipeMoving = true;
+      }
+      function moveSwipe(offset) {
+        swipeOffset = Math.min(swipeWidth, Math.max(0, offset));
+        detail.style.transform = `translate3d(${swipeOffset}px,0,0)`;
+        swipeHome.style.transform = `translate3d(${(swipeOffset - swipeWidth) * .18}px,0,0)`;
+      }
+      function settleSwipe(back = false) {
+        swipeStart = null;
+        if (!swipeMoving) { clearSwipe(); return; }
+        swipeSettling = true;
+        const duration = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 220;
+        detail.style.transition = swipeHome.style.transition = `transform ${duration}ms cubic-bezier(.2,.7,.2,1)`;
+        moveSwipe(back ? swipeWidth : 0);
+        swipeTimer = setTimeout(() => { if (back && isLive()) returnToList(); else clearSwipe(); }, duration);
+      }
       detail.addEventListener('touchstart', event => {
+        if (swipeSettling) return;
+        clearSwipe();
         swipeStart = null;
         if (!root.classList.contains('bg-viewing') || event.touches.length !== 1 || event.target.closest('dialog,input,textarea,select')) return;
         const touch = event.touches[0];
         swipeStart = { x: touch.clientX, y: touch.clientY, time: event.timeStamp, id: touch.identifier };
       }, { passive: true });
-      detail.addEventListener('touchmove', event => { if (event.touches.length !== 1) swipeStart = null; }, { passive: true });
-      detail.addEventListener('touchcancel', () => { swipeStart = null; }, { passive: true });
+      detail.addEventListener('touchmove', event => {
+        if (swipeSettling || !swipeStart) return;
+        if (event.touches.length !== 1) { settleSwipe(); return; }
+        const touch = event.touches[0];
+        if (touch.identifier !== swipeStart.id) { settleSwipe(); return; }
+        const dx = touch.clientX - swipeStart.x, dy = Math.abs(touch.clientY - swipeStart.y);
+        if (!swipeMoving) {
+          if (dy > 12 && dy >= Math.abs(dx)) { clearSwipe(); return; }
+          if (dx < 12 || dx <= dy * 1.5) return;
+          beginSwipe();
+        }
+        if (event.cancelable) event.preventDefault();
+        moveSwipe(dx);
+      }, { passive: false });
+      detail.addEventListener('touchcancel', () => { if (!swipeSettling) settleSwipe(); }, { passive: true });
       detail.addEventListener('touchend', event => {
+        if (swipeSettling) return;
         const start = swipeStart; swipeStart = null;
-        if (!start || event.touches.length || !root.classList.contains('bg-viewing') || root.querySelector('dialog[open]')) return;
+        if (!start || event.touches.length || !root.classList.contains('bg-viewing') || root.querySelector('dialog[open]')) { settleSwipe(); return; }
         const touch = Array.from(event.changedTouches).find(t => t.identifier === start.id);
-        if (touch && isBackSwipe(start, { x: touch.clientX, y: touch.clientY, time: event.timeStamp })) returnToList();
+        const back = touch && isBackSwipe(start, { x: touch.clientX, y: touch.clientY, time: event.timeStamp });
+        if (back && !swipeMoving) { beginSwipe(); moveSwipe(touch.clientX - start.x); }
+        settleSwipe(Boolean(back));
       }, { passive: true });
       function drawList() {
         list.replaceChildren(); const found = data.brands.filter(b => matches(b, query)); count.textContent = `${found.length}ブランド`;
@@ -314,7 +367,7 @@ const BrandGuide = (() => {
       function showBrand(b) {
         startDetail(b.name);
         detail.append(el('h3', 'bg-section-title', '01  タグの年表'));
-        if (!b.groups.length) detail.append(el('p', 'bg-muted', 'タグ写真は未収集です。型番・年代の参考情報を先に掲載しています。'));
+        if (!tagTimeline(b.groups).length) detail.append(el('p', 'bg-muted', '年代の分かるタグ写真はまだありません。'));
         for (const g of tagTimeline(b.groups)) {
           const card = el('section', 'bg-tag-card'); card.append(el('h4', 'bg-period', g.displayPeriod.label));
           for (const p of g.photos) {
@@ -327,7 +380,6 @@ const BrandGuide = (() => {
           detail.append(card);
         }
         const m = b.method; const method = el('section', 'bg-method'); method.append(el('h3', 'bg-section-title', '02  型番の読み方'));
-        if (!b.groups.length) method.append(el('p', 'bg-muted', '参考記事の品番例です。実物のタグ写真は未確認です。'));
         const q = m.quickGuide;
         const steps = el('dl', 'bg-reading-steps');
         steps.append(el('dt', '', '見る場所'), el('dd', '', q?.target || '品質表示タグの品番・NO.欄'));
