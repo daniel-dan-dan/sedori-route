@@ -7,10 +7,10 @@ const GuideWorker = (() => {
   if(!('serviceWorker' in navigator)) return {ready:Promise.resolve(null)};
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type==='UPDATE_WAITING') notice();
-    if(event.data?.type==='SW_VERSION' && event.data.cacheName !== 'brand-guide-v1' && String(event.data.cacheName).startsWith('brand-guide-')) notice();
+    if(event.data?.type==='SW_VERSION' && event.data.cacheName !== 'brand-guide-v2' && String(event.data.cacheName).startsWith('brand-guide-')) notice();
   });
   navigator.serviceWorker.addEventListener('controllerchange',()=>navigator.serviceWorker.controller?.postMessage({type:'GET_VERSION'}));
-  const ready=navigator.serviceWorker.register('sw.js?v=1',{scope:'./',updateViaCache:'none'}).then(registration=>{
+  const ready=navigator.serviceWorker.register('sw.js?v=2',{scope:'./',updateViaCache:'none'}).then(registration=>{
     if(registration.waiting) notice();
     registration.addEventListener('updatefound',()=>{
       const worker=registration.installing;
