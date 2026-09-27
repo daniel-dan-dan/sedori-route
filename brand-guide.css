@@ -30,6 +30,17 @@
 .bg-refs { font-size:12px; color:#58695e; border-top:1px dotted #d8d7c5; margin-top:8px; }
 .bg-source { display:block; color:#315e4d; padding:8px 0; text-decoration:underline; }
 .bg-method { padding-top:8px; }
+.bg-brand-detail { touch-action:pan-y pinch-zoom; }
+.bg-reading-steps { display:grid; grid-template-columns:70px minmax(0,1fr); margin:16px 0 20px; gap:10px 12px; font-size:15px; }
+.bg-reading-steps dt { font-weight:700; color:#58695e; }
+.bg-reading-steps dd { margin:0; }
+.bg-example-label { font-size:12px; color:#58695e; margin:0 0 6px; }
+.bg-reading-note { font-size:13px; margin:0 0 18px; color:#58695e; }
+.bg-reading-table { width:100%; border-collapse:collapse; font-size:14px; margin:20px 0; background:#fffdf6; }
+.bg-reading-table caption { text-align:left; font-weight:700; padding-bottom:8px; }
+.bg-reading-table th,.bg-reading-table td { text-align:left; padding:9px 12px; border-bottom:1px solid #d8d7c5; }
+.bg-reading-table th { background:#e9ede2; font-size:12px; }
+.bg-method-details .bg-how,.bg-method-details .bg-caution { white-space:pre-line; }
 .bg-code { padding:18px 14px; font-size:21px; line-height:1.5; font-family:ui-monospace,monospace; background:#f0eddc; border-radius:6px; overflow-wrap:anywhere; }
 .bg-code mark { background:#b74931; color:white; border-radius:3px; padding:3px 1px; }
 .bg-result { font-size:19px; color:#a23c28; font-weight:700; }

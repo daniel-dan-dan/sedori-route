@@ -196,3 +196,26 @@ test('tag timeline is oldest first, stable within a year, unknown last, without 
   assert.equal(JSON.stringify(groups), before);
   assert.equal(ordered[0].photos, groups[4].photos);
 });
+
+test('right swipe returns only for a deliberate horizontal single gesture', () => {
+  const { guide } = harness(); const start = { x: 20, y: 100, time: 100 };
+  assert.equal(guide.isBackSwipe(start, { x: 140, y: 115, time: 500 }), true);
+  for (const end of [
+    { x: -100, y: 100, time: 500 }, // left swipe
+    { x: 60, y: 100, time: 500 }, // tap / small movement
+    { x: 140, y: 250, time: 500 }, // vertical scroll
+    { x: 140, y: 100, time: 1500 }, // slow drag
+    { x: 140, y: 100, time: 50 },
+  ]) assert.equal(guide.isBackSwipe(start, end), false);
+  assert.equal(guide.isBackSwipe(null, { x: 140, y: 100, time: 500 }), false);
+});
+
+test('optional quick guide rejects misplaced highlights and oversized tables; old packages remain valid', async () => {
+  const { guide } = harness(); const data = fixture();
+  const q = { target: '品番', reading: '検索', result: '年代不明', note: '', highlight: 'ES', start: 1, rows: [['24', '2024年']] };
+  data.brands[0].method.quickGuide = q;
+  await guide.parsePackage(envelope(data));
+  q.start = 0; await assert.rejects(guide.parsePackage(envelope(data)));
+  q.start = 1; q.rows = Array(41).fill(['24','2024年']); await assert.rejects(guide.parsePackage(envelope(data)));
+  delete data.brands[0].method.quickGuide; await guide.parsePackage(envelope(data));
+});

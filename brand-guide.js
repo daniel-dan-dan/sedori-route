@@ -39,6 +39,11 @@ const BrandGuide = (() => {
     return groups.map(group => ({ ...group, displayPeriod: tagPeriod(group.period) }))
       .sort((a, b) => a.displayPeriod.year - b.displayPeriod.year);
   }
+  function isBackSwipe(start, end) {
+    if (!start || !end || end.time < start.time || end.time - start.time > 1000) return false;
+    const dx = end.x - start.x, dy = Math.abs(end.y - start.y);
+    return dx >= 80 && dy <= 60 && dx > dy * 1.5;
+  }
   function validate(data) {
     check(data && data.version === 1 && text(data.updatedAt, 10) && /^\d{4}-\d{2}-\d{2}$/.test(data.updatedAt) && Number.isFinite(Date.parse(data.updatedAt)));
     check(new Date(data.updatedAt).toISOString().slice(0, 10) === data.updatedAt);
@@ -59,6 +64,13 @@ const BrandGuide = (() => {
         }
       }
       check(b.method && ['code', 'highlight', 'result', 'how', 'caution', 'mode'].every(k => text(b.method[k])));
+      if (b.method.quickGuide !== undefined) {
+        const q = b.method.quickGuide;
+        check(q && ['target', 'reading', 'result', 'note', 'highlight'].every(k => text(q[k], 180)));
+        check(Number.isSafeInteger(q.start) && q.start >= -1 && q.start <= b.method.code.length);
+        check(!q.highlight || (q.start >= 0 && b.method.code.slice(q.start, q.start + q.highlight.length) === q.highlight));
+        check(Array.isArray(q.rows) && q.rows.length <= 40 && q.rows.every(r => Array.isArray(r) && r.length === 2 && r.every(v => text(v, 100))));
+      }
       check(Array.isArray(b.sources) && b.sources.length <= 30 && b.sources.every(s => text(s.title, 400) && sourceOK(s.url)));
     }
     check(photos <= 600 && size <= MAX_BYTES);
@@ -261,9 +273,29 @@ const BrandGuide = (() => {
       body.replaceChildren();
       const label = el('label', 'bg-search-label', options.standalone ? '' : 'ブランドを探す');
       const search = el('input', 'bg-search'); search.type = 'search'; search.setAttribute('aria-label', 'ブランド検索'); search.placeholder = '例：バトナー / BATONER'; search.value = query; label.append(search);
-      const list = el('div', 'bg-brand-list'); const detail = el('div');
+      const list = el('div', 'bg-brand-list'); const detail = el('div', 'bg-brand-detail');
       const count = el('p', 'bg-muted'); count.setAttribute('role', 'status');
       body.append(label, count, list, detail);
+      function returnToList() {
+        root.classList.remove('bg-viewing'); detail.replaceChildren();
+        label.hidden = count.hidden = list.hidden = false;
+        window.scrollTo(0, 0);
+      }
+      let swipeStart = null;
+      detail.addEventListener('touchstart', event => {
+        swipeStart = null;
+        if (!root.classList.contains('bg-viewing') || event.touches.length !== 1 || event.target.closest('dialog,input,textarea,select')) return;
+        const touch = event.touches[0];
+        swipeStart = { x: touch.clientX, y: touch.clientY, time: event.timeStamp, id: touch.identifier };
+      }, { passive: true });
+      detail.addEventListener('touchmove', event => { if (event.touches.length !== 1) swipeStart = null; }, { passive: true });
+      detail.addEventListener('touchcancel', () => { swipeStart = null; }, { passive: true });
+      detail.addEventListener('touchend', event => {
+        const start = swipeStart; swipeStart = null;
+        if (!start || event.touches.length || !root.classList.contains('bg-viewing') || root.querySelector('dialog[open]')) return;
+        const touch = Array.from(event.changedTouches).find(t => t.identifier === start.id);
+        if (touch && isBackSwipe(start, { x: touch.clientX, y: touch.clientY, time: event.timeStamp })) returnToList();
+      }, { passive: true });
       function drawList() {
         list.replaceChildren(); const found = data.brands.filter(b => matches(b, query)); count.textContent = `${found.length}ブランド`;
         for (const b of found) {
@@ -276,7 +308,7 @@ const BrandGuide = (() => {
       function startDetail(title) {
         root.classList.add('bg-viewing');
         label.hidden = count.hidden = list.hidden = true; detail.replaceChildren();
-        detail.append(button('‹ 戻る', () => { root.classList.remove('bg-viewing'); detail.replaceChildren(); label.hidden = count.hidden = list.hidden = false; }, 'bg-text-button'));
+        detail.append(button('‹ 戻る', returnToList, 'bg-text-button'));
         const heading = el('h2', 'bg-brand-heading', title); heading.tabIndex = -1; detail.append(heading); heading.focus(); window.scrollTo(0, 0);
       }
       function showBrand(b) {
@@ -296,10 +328,28 @@ const BrandGuide = (() => {
         }
         const m = b.method; const method = el('section', 'bg-method'); method.append(el('h3', 'bg-section-title', '02  型番の読み方'));
         if (!b.groups.length) method.append(el('p', 'bg-muted', '参考記事の品番例です。実物のタグ写真は未確認です。'));
-        const code = el('div', 'bg-code'); let start = m.highlight ? m.code.indexOf(m.highlight) : -1;
-        if (b.name === 'TOMORROWLAND' && m.highlight) start = 6;
-        if (start >= 0) { code.append(document.createTextNode(m.code.slice(0, start)), el('mark', '', m.code.slice(start, start + m.highlight.length)), document.createTextNode(m.code.slice(start + m.highlight.length))); } else code.textContent = m.code;
-        method.append(code, el('p', 'bg-result', m.result), el('p', 'bg-how', m.how), el('p', 'bg-caution', m.caution));
+        const q = m.quickGuide;
+        const steps = el('dl', 'bg-reading-steps');
+        steps.append(el('dt', '', '見る場所'), el('dd', '', q?.target || '品質表示タグの品番・NO.欄'));
+        steps.append(el('dt', '', '読み方'), el('dd', '', q?.reading || m.how.split('\n')[0]));
+        method.append(steps, el('p', 'bg-example-label', '型番の例'));
+        const code = el('div', 'bg-code');
+        const highlight = q ? q.highlight : m.highlight;
+        let start = q ? q.start : (highlight ? m.code.indexOf(highlight) : -1);
+        if (!q && b.name === 'TOMORROWLAND' && highlight) start = 6;
+        if (highlight && start >= 0) { code.append(document.createTextNode(m.code.slice(0, start)), el('mark', '', highlight), document.createTextNode(m.code.slice(start + highlight.length))); } else code.textContent = m.code;
+        method.append(code, el('p', 'bg-result', '→ ' + (q?.result || m.result)));
+        if (q?.note) method.append(el('p', 'bg-reading-note', q.note));
+        if (q?.rows.length) {
+          const table = el('table', 'bg-reading-table'); const caption = el('caption', '', '対応表');
+          const head = el('tr'); head.append(el('th', '', 'タグの表示'), el('th', '', '年代・季節'));
+          const thead = el('thead'); thead.append(head); const tbody = el('tbody');
+          for (const row of q.rows) { const tr = el('tr'); tr.append(el('td', '', row[0]), el('td', '', row[1])); tbody.append(tr); }
+          table.append(caption, thead, tbody); method.append(table);
+        }
+        const explanation = el('details', 'bg-refs bg-method-details');
+        explanation.append(el('summary', '', '詳しい説明・商品例'), el('p', 'bg-how', m.how), el('p', 'bg-caution', m.caution));
+        method.append(explanation);
         const refs = el('details', 'bg-refs'); refs.append(el('summary', '', '型番の参考ページ'));
         for (const s of b.sources) refs.append(link(s.title, s.url));
         if (!b.sources.length) refs.append(el('p', '', '以前集めた商品ページをもとにした説明です。'));
@@ -341,6 +391,6 @@ const BrandGuide = (() => {
     }, 15 * 60 * 1000);
     await sync(Boolean(options.forceSync));
   }
-  return { tagPeriod, tagTimeline, render, validate, parsePackage, normalize, matches, importFile, load, save, DB_NAME, MAX_BYTES };
+  return { isBackSwipe, tagPeriod, tagTimeline, render, validate, parsePackage, normalize, matches, importFile, load, save, DB_NAME, MAX_BYTES };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = BrandGuide;
