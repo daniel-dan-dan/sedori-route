@@ -7,7 +7,7 @@ const BrandGuideSync = (() => {
   let credentialProvider = null;
   function configureCredential(provider) { credentialProvider = provider; }
   let lastAttempt = 0;
-  function fail(message) { throw new Error(message); }
+  function fail(message, code = '') { const error = new Error(message); error.code = code; throw error; }
   async function credential() {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open('sedori-route-credentials', 1);
@@ -63,7 +63,9 @@ const BrandGuideSync = (() => {
       const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       const parsed = JSON.parse(raw);
       if (parsed.success === false) {
-        if (String(parsed.error).startsWith('UNAUTHORIZED')) fail(credentialProvider ? '図鑑の接続設定を確認してください。' : '店舗アプリの接続設定を確認してください。');
+        if (String(parsed.error).startsWith('UNAUTHORIZED')) fail(credentialProvider ? '図鑑の接続が切れています。接続設定を行ってください。' : '店舗アプリの接続設定を確認してください。', 'AUTH_REQUIRED');
+        if (parsed.error === 'BRAND_GUIDE_REFRESH_REQUIRED') fail('資料が更新されました。もう一度更新を確認してください。', 'RELEASE_CHANGED');
+        if (parsed.error === 'BRAND_GUIDE_UNAVAILABLE') fail('図鑑の配信元で資料を取得できませんでした。接続情報は保存されています。', 'RELEASE_UNAVAILABLE');
         fail('最新版を取得できませんでした。次回もう一度確認します。');
       }
       if (action === 'getBrandGuideManifest' && parsed.success !== true) fail('図鑑の更新情報を確認できませんでした。');
@@ -85,19 +87,22 @@ const BrandGuideSync = (() => {
       try {
         onStatus('最新版を確認しています…');
         const token = await (credentialProvider ? credentialProvider() : credential());
-        if (!/^[A-Za-z0-9._~-]{32,256}$/.test(token)) fail(credentialProvider ? '図鑑の接続設定を行うと、自動で資料を保存できます。' : '店舗アプリの接続設定を一度行うと、自動で図鑑を保存できます。');
+        if (!/^[A-Za-z0-9._~-]{32,256}$/.test(token)) fail(credentialProvider ? 'この図鑑はまだ接続されていません。「今すぐ更新を確認」から初回接続を行ってください。' : '店舗アプリの接続設定を一度行うと、自動で図鑑を保存できます。', 'AUTH_REQUIRED');
         const manifest = validateManifest(await request('getBrandGuideManifest', token));
         const old = await guide.load();
-        if (old?.sha === manifest.sha256) { onStatus('最新版を保存済みです。ファイル選択は不要です。'); return; }
+        if (old?.sha === manifest.sha256) { onStatus('最新版を保存済みです。ファイル選択は不要です。'); return { status: 'current' }; }
         if (old && (old.data.updatedAt > manifest.updatedAt || (old.remoteRevision || 0) > manifest.revision)) fail('配信中の資料が古いため、保存済みの図鑑を使います。');
         onStatus('図鑑を保存しています…');
         const raw = await request('getBrandGuidePackage', token, { sha256: manifest.sha256 }, guide.MAX_BYTES);
         if (new TextEncoder().encode(raw).length !== manifest.bytes) fail('資料を最後まで受け取れませんでした。');
         const record = await guide.importFile({ size: manifest.bytes, text: async () => raw }, manifest);
         onSaved(record); onStatus('自動保存が完了しました。通信なしでも見られます。');
+        return { status: 'saved' };
       } catch (error) {
         const message = error?.name === 'AbortError' ? '通信が遅いため更新を中断しました。' : (error?.message || '更新を確認できませんでした。');
         onStatus(message + ' 保存済みの資料は変更していません。');
+        if (error?.code === 'AUTH_REQUIRED') lastAttempt = 0;
+        return { status: error?.code === 'AUTH_REQUIRED' ? 'auth-required' : 'failed', code: error?.code || '' };
       } finally { pending = null; }
     })();
     return pending;

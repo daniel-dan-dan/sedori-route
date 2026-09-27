@@ -208,7 +208,7 @@ const BrandGuide = (() => {
       if (!isLive() || typeof BrandGuideSync === 'undefined') return;
       retry.disabled = true; input.disabled = true;
       try {
-        await BrandGuideSync.run({ guide: { load, importFile, MAX_BYTES }, force,
+        const result = await BrandGuideSync.run({ guide: { load, importFile, MAX_BYTES }, force,
           onStatus: message => { if (isLive()) syncStatus.textContent = message; },
           onSaved: record => {
             if (!isLive()) return;
@@ -219,6 +219,10 @@ const BrandGuide = (() => {
             } else showLibrary(record);
           },
         });
+        if (result?.status === 'auth-required' && isLive()) {
+          controls.open = true;
+          if (force && options.standalone && options.onConnection) options.onConnection();
+        }
       } finally { if (isLive()) { retry.disabled = false; if (!importing) input.disabled = false; } }
     }
     function showLibrary(record) {
@@ -307,7 +311,7 @@ const BrandGuide = (() => {
       if (!isLive()) { clearInterval(tick); window.removeEventListener('online', online); document.removeEventListener('visibilitychange', foreground); return; }
       foreground();
     }, 15 * 60 * 1000);
-    await sync();
+    await sync(Boolean(options.forceSync));
   }
   return { render, validate, parsePackage, normalize, matches, importFile, load, save, DB_NAME, MAX_BYTES };
 })();

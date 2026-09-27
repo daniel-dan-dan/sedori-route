@@ -7,10 +7,14 @@ const GuideWorker = (() => {
   if(!('serviceWorker' in navigator)) return {ready:Promise.resolve(null)};
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type==='UPDATE_WAITING') notice();
-    if(event.data?.type==='SW_VERSION' && event.data.cacheName !== 'brand-guide-v3' && String(event.data.cacheName).startsWith('brand-guide-')) notice();
+    if(event.data?.type==='SW_VERSION' && event.data.cacheName !== 'brand-guide-v4' && String(event.data.cacheName).startsWith('brand-guide-')) notice();
   });
   navigator.serviceWorker.addEventListener('controllerchange',()=>navigator.serviceWorker.controller?.postMessage({type:'GET_VERSION'}));
-  const ready=navigator.serviceWorker.register('sw.js?v=3',{scope:'./',updateViaCache:'none'}).then(registration=>{
+  const canonical = new URL('sw.js', document.baseURI);
+  const previous = navigator.serviceWorker.controller?.scriptURL;
+  // Preserve an installed app's worker URL so upgrading does not install the same release twice.
+  const workerURL = previous && new URL(previous).origin === canonical.origin && new URL(previous).pathname === canonical.pathname ? previous : canonical.href;
+  const ready=navigator.serviceWorker.register(workerURL,{scope:'./',updateViaCache:'none'}).then(registration=>{
     if(registration.waiting) notice();
     registration.addEventListener('updatefound',()=>{
       const worker=registration.installing;

@@ -47,7 +47,32 @@ test('duplicate connect clicks share one registration; malformed code never regi
 });
 test('every standalone asset exists and version/scope stay consistent',()=>{
  const sw=read('brand-guide/sw.js'),html=read('brand-guide/index.html');
- assert.match(sw,/brand-guide-v3/);assert.match(html,/data-version="v3"/);assert.match(read('brand-guide/bootstrap.js'),/scope:'\.\/'/);
+ assert.match(sw,/brand-guide-v4/);assert.match(html,/data-version="v4"/);assert.match(read('brand-guide/bootstrap.js'),/scope:'\.\/'/);
  const assets=vm.runInNewContext(sw.slice(sw.indexOf('const ASSETS =')+15,sw.indexOf(';',sw.indexOf('const ASSETS ='))));
  for(const asset of assets){if(asset==='./')continue;const path=new URL(asset.split('?')[0],new URL('brand-guide/',import.meta.url));assert.ok(readFileSync(path).length);}
+});
+
+function appHarness({failConnect=false}={}) {
+ const renders=[],listeners={},nodes=[];const container={replaceChildren(node){this.child=node;}};
+ function node(tag){const n={tag,textContent:'',children:[],listeners:{},append(...children){this.children.push(...children);},setAttribute(){},addEventListener(type,fn){this.listeners[type]=fn;}};nodes.push(n);return n;}
+ const context={document:{getElementById(){return container;},createElement:node,addEventListener(type,fn){listeners[type]=fn;}},
+ BrandGuideSync:{configureCredential(){}},GuideCredentials:{get:async()=>'',connect:async()=>{if(failConnect)throw new Error('接続できませんでした');}},GuideWorker:{ready:Promise.resolve(null)},
+ BrandGuide:{render:async(c,options)=>{renders.push(options);}}};
+ vm.runInNewContext(read('brand-guide/app.js'),context);
+ return {renders,nodes,async start(){await listeners.DOMContentLoaded();},settings(){renders.at(-1).onConnection();}};
+}
+test('standalone connection success returns directly to the library with a forced download',async()=>{
+ const h=appHarness();await h.start();h.settings();const input=h.nodes.find(n=>n.tag==='input');input.value='p'.repeat(40);
+ await h.nodes.find(n=>n.textContent==='この図鑑を接続する').listeners.click();assert.equal(input.value,'');assert.equal(h.renders.length,2);assert.equal(h.renders.at(-1).forceSync,true);
+});
+test('failed connection stays on settings and never starts a download',async()=>{
+ const h=appHarness({failConnect:true});await h.start();h.settings();h.nodes.find(n=>n.tag==='input').value='p'.repeat(40);
+ const connect=h.nodes.find(n=>n.textContent==='この図鑑を接続する');await connect.listeners.click();assert.equal(h.renders.length,1);assert.equal(connect.disabled,false);assert.ok(h.nodes.some(n=>n.textContent.includes('接続できませんでした')));
+});
+
+test('worker upgrades reuse the existing guide URL and never register the store worker',async()=>{
+ for(const [previous,expected] of [[null,'https://example.org/brand-guide/sw.js'],['https://example.org/brand-guide/sw.js?v=3','https://example.org/brand-guide/sw.js?v=3'],['https://example.org/sw.js?v=213','https://example.org/brand-guide/sw.js']]) {
+   let registered;const context={URL,document:{baseURI:'https://example.org/brand-guide/',getElementById(){return null;}},navigator:{serviceWorker:{controller:previous?{scriptURL:previous}:null,addEventListener(){},register:async(url,options)=>{registered=url;assert.equal(options.updateViaCache,'none');assert.equal(options.scope,'./');return {active:{},addEventListener(){}};}}}};
+   vm.runInNewContext(read('brand-guide/bootstrap.js')+'\nthis.worker=GuideWorker;',context);await context.worker.ready;assert.equal(registered,expected);
+ }
 });
