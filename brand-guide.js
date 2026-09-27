@@ -167,11 +167,16 @@ const BrandGuide = (() => {
   async function render(container, options = {}) {
     const root = el('section', 'brand-guide'); container.replaceChildren(root);
     const isLive = () => root.isConnected && container.contains(root);
-    const top = el('div', 'bg-top');
-    top.append(button(options.standalone ? '使い方・ホーム画面に追加' : '‹ 店舗アプリ', options.standalone ? options.onHelp : () => Router.navigate('home'), 'bg-text-button'), el('span', 'bg-eyebrow', 'PRIVATE LIBRARY'));
-    root.append(top, el('h1', 'bg-title', options.standalone ? 'ブランド図鑑' : '古着図鑑'), el('p', 'bg-subtitle', 'タグと型番で、何年ごろの服かを調べる'));
-    const status = el('p', 'bg-status', '保存済みの資料を確認中…'); status.setAttribute('role', 'status'); root.append(status);
-    const offlineStatus = el('p', 'bg-muted bg-offline-status', '通信なしで開くための画面を準備しています。'); root.append(offlineStatus);
+    if (options.standalone) root.classList.add('bg-compact');
+    else {
+      const top = el('div', 'bg-top');
+      top.append(button('‹ 店舗アプリ', () => Router.navigate('home'), 'bg-text-button'), el('span', 'bg-eyebrow', 'PRIVATE LIBRARY'));
+      root.append(top);
+    }
+    root.append(el('h1', 'bg-title', options.standalone ? 'ブランド図鑑' : '古着図鑑'));
+    if (!options.standalone) root.append(el('p', 'bg-subtitle', 'タグと型番で、何年ごろの服かを調べる'));
+    const status = el('p', 'bg-status', '保存済みの資料を確認中…'); status.setAttribute('role', 'status'); if (!options.standalone) root.append(status);
+    const offlineStatus = el('p', 'bg-muted bg-offline-status', '通信なしで開くための画面を準備しています。'); if (!options.standalone) root.append(offlineStatus);
     if (navigator.serviceWorker) {
       (options.serviceWorkerReady || navigator.serviceWorker.ready).then(registration => {
         if (!registration) { if (isLive()) offlineStatus.textContent = '画面の保存を確認できません。通信できる場所で開き直してください。'; return; }
@@ -192,7 +197,7 @@ const BrandGuide = (() => {
         registration.active?.postMessage({ type: 'GET_VERSION' });
       }).catch(() => {});
     } else offlineStatus.textContent = 'このブラウザでは通信なしでの起動に対応していません。';
-    const syncStatus = el('p', 'bg-status', '図鑑を開くと、自動で最新版を確認します。'); syncStatus.setAttribute('role', 'status'); root.append(syncStatus);
+    const syncStatus = el('p', 'bg-status', '図鑑を開くと、自動で最新版を確認します。'); syncStatus.setAttribute('role', 'status'); if (!options.standalone) root.append(syncStatus);
     const controls = el('details', 'bg-import'); controls.append(el('summary', '', '更新・接続設定'));
     controls.append(el('p', '', options.standalone ? '非公開の資料をこの図鑑に保存します。開いている間は15分ごとに更新を確認します。' : '店舗アプリに接続済みなら、非公開の配信先から自動で保存します。開いている間は15分ごとに更新を確認します。'));
     const retry = button('今すぐ更新を確認', () => sync(true));
@@ -201,6 +206,7 @@ const BrandGuide = (() => {
     const input = el('input'); input.type = 'file'; input.accept = '.json,application/json'; input.setAttribute('aria-label', '図鑑の専用ファイル');
     input.disabled = true;
     manual.append(input, el('p', 'bg-muted', '通常はファイル選択不要です。圏外での復旧用に使えます。')); controls.append(manual);
+    if (options.standalone) { status.hidden = true; offlineStatus.hidden = true; syncStatus.hidden = true; controls.append(status, offlineStatus, syncStatus); }
     root.append(controls);
     const body = el('div', 'bg-body'); root.append(body);
     let currentRecord = null;
@@ -209,7 +215,7 @@ const BrandGuide = (() => {
       retry.disabled = true; input.disabled = true;
       try {
         const result = await BrandGuideSync.run({ guide: { load, importFile, MAX_BYTES }, force,
-          onStatus: message => { if (isLive()) syncStatus.textContent = message; },
+          onStatus: message => { if (isLive()) { syncStatus.textContent = message; syncStatus.hidden = false; } },
           onSaved: record => {
             if (!isLive()) return;
             // Keep an open photo/article intact; switch contents after returning to list.
@@ -219,6 +225,7 @@ const BrandGuide = (() => {
             } else showLibrary(record);
           },
         });
+        if (options.standalone && ['saved', 'current'].includes(result?.status)) syncStatus.hidden = true;
         if (result?.status === 'auth-required' && isLive()) {
           controls.open = true;
           if (force && options.standalone && options.onConnection) options.onConnection();
@@ -229,6 +236,7 @@ const BrandGuide = (() => {
       currentRecord = record;
       root.classList.remove('bg-viewing');
       const data = record.data; const counts = validate(data);
+      status.hidden = Boolean(options.standalone);
       status.textContent = `保存済み · ${counts.brands}ブランド / 写真${counts.photos}枚 · 資料更新 ${data.updatedAt}`;
       body.replaceChildren();
       const label = el('label', 'bg-search-label', 'ブランドを探す');
@@ -290,7 +298,7 @@ const BrandGuide = (() => {
     }
     input.addEventListener('change', async () => {
       const file = input.files[0]; if (!file) return;
-      input.disabled = true; status.textContent = '内容と写真を確認して保存中… この画面を開いたままお待ちください。';
+      input.disabled = true; status.hidden = false; status.textContent = '内容と写真を確認して保存中… この画面を開いたままお待ちください。';
       try {
         const record = await importFile(file);
         if (isLive()) { controls.open = false; showLibrary(record); }
@@ -301,7 +309,7 @@ const BrandGuide = (() => {
       const record = await load(); if (!isLive()) return;
       if (record) showLibrary(record);
       else { status.textContent = 'この端末に図鑑を自動で保存します。'; }
-    } catch { if (isLive()) { status.textContent = '保存済みの図鑑を読めませんでした。画面を開き直してください。'; controls.open = true; } }
+    } catch { if (isLive()) { status.hidden = false; status.textContent = '保存済みの図鑑を読めませんでした。画面を開き直してください。'; controls.open = true; } }
     finally { if (!importing) input.disabled = false; }
     const foreground = () => { if (document.visibilityState !== 'hidden') sync(); };
     const online = () => sync(true);

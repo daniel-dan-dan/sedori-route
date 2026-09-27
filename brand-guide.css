@@ -46,3 +46,7 @@
 .brand-guide :focus-visible { outline:3px solid #b74931; outline-offset:3px; }
 .brand-guide-entry { background:#faf7ed; color:#123f33; }
 @media (min-width:650px) { .brand-guide { max-width:820px; margin:0 auto; } .bg-brand-list { grid-template-columns:1fr 1fr; } .bg-tag-photo { max-height:360px; } }
+
+/* Compact standalone library: list starts immediately below the title and controls. */
+.bg-compact .bg-title { margin:8px 0; padding-bottom:14px; border-bottom:double 3px #123f33; }
+.bg-compact .bg-import { margin:0 0 14px; }
