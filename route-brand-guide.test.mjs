@@ -219,3 +219,25 @@ test('optional quick guide rejects misplaced highlights and oversized tables; ol
   q.start = 1; q.rows = Array(41).fill(['24','2024年']); await assert.rejects(guide.parsePackage(envelope(data)));
   delete data.brands[0].method.quickGuide; await guide.parsePackage(envelope(data));
 });
+
+test('dated listings and search instructions do not become dating rules', () => {
+  const { guide } = harness(); const b = fixture().brands[0];
+  b.method.quickGuide = { siteText: '公式の2026年ページにあります', inferenceText: '型番をネットで検索します', result: '2026年', rows: [] };
+  let view = guide.modelExplanation(b);
+  assert.equal(view.siteText, ''); assert.equal(view.result, '');
+  assert.equal(view.inferenceText, '分かりません');
+  b.method.quickGuide.canInferYear = false;
+  assert.equal(guide.modelExplanation(b).inferenceText, '分かりません');
+});
+
+test('an identified analytical source and supported year rule remain distinct', () => {
+  const { guide } = harness(); const b = fixture().brands[0];
+  b.method.quickGuide = { siteSource: 'https://example.org', siteText: '先頭2桁を発売年として読む解説', canInferYear: true, inferenceText: '24から2024年が候補です', result: '2024年', rows: [['24','2024年']] };
+  let view = guide.modelExplanation(b);
+  assert.equal(view.siteText, '先頭2桁を発売年として読む解説');
+  assert.equal(view.inferenceText, '24から2024年が候補です');
+  b.method.quickGuide.siteSource = 'https://unmatched.example.org';
+  assert.equal(guide.modelExplanation(b).siteText, '');
+  assert.match(source, /'AI推測'/);
+  assert.doesNotMatch(source, /'この図鑑での推測'/);
+});

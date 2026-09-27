@@ -40,6 +40,18 @@ const BrandGuide = (() => {
       .filter(group => Number.isFinite(group.displayPeriod.year))
       .sort((a, b) => a.displayPeriod.year - b.displayPeriod.year);
   }
+  function modelExplanation(brand) {
+    const m = brand.method, q = m.quickGuide;
+    // A product's dated listing is not an explanation of a dating rule.
+    const siteSource = q?.siteSource;
+    const siteText = siteSource && brand.sources.some(s => s.url === siteSource)
+      ? (q.siteText || '') : '';
+    const canInfer = q?.canInferYear === true && Boolean(q.inferenceText?.trim());
+    return { siteText, siteSource, canInfer,
+      inferenceText: canInfer ? q.inferenceText : '分かりません',
+      result: canInfer ? (q.result || m.result) : '',
+      rows: canInfer ? q.rows : [] };
+  }
   function isBackSwipe(start, end) {
     if (!start || !end || end.time < start.time || end.time - start.time > 10000) return false;
     const dx = end.x - start.x, dy = Math.abs(end.y - start.y);
@@ -71,6 +83,8 @@ const BrandGuide = (() => {
         const q = b.method.quickGuide;
         check(q && ['target', 'reading', 'result', 'note', 'highlight'].every(k => text(q[k], 180)));
         check(['siteText', 'inferenceText'].every(k => q[k] === undefined || text(q[k], 800)));
+        check(q.canInferYear === undefined || typeof q.canInferYear === 'boolean');
+        check(q.siteSource === undefined || (sourceOK(q.siteSource) && b.sources.some(s => s.url === q.siteSource)));
         check(Number.isSafeInteger(q.start) && q.start >= -1 && q.start <= b.method.code.length);
         check(!q.highlight || (q.start >= 0 && b.method.code.slice(q.start, q.start + q.highlight.length) === q.highlight));
         check(Array.isArray(q.rows) && q.rows.length <= 40 && q.rows.every(r => Array.isArray(r) && r.length === 2 && r.every(v => text(v, 100))));
@@ -385,30 +399,30 @@ const BrandGuide = (() => {
           detail.append(card);
         }
         const m = b.method; const method = el('section', 'bg-method'); method.append(el('h3', 'bg-section-title', '02  型番の読み方'));
-        const q = m.quickGuide;
+        const q = m.quickGuide; const explanationView = modelExplanation(b);
         method.append(el('p', 'bg-example-label', '型番の例'));
         const code = el('div', 'bg-code');
-        const highlight = q ? q.highlight : m.highlight;
+        const highlight = explanationView.canInfer ? (q ? q.highlight : m.highlight) : '';
         let start = q ? q.start : (highlight ? m.code.indexOf(highlight) : -1);
         if (!q && b.name === 'TOMORROWLAND' && highlight) start = 6;
         if (highlight && start >= 0) { code.append(document.createTextNode(m.code.slice(0, start)), el('mark', '', highlight), document.createTextNode(m.code.slice(start + highlight.length))); } else code.textContent = m.code;
-        method.append(code, el('p', 'bg-result', '→ ' + (q?.result || m.result)));
-        const siteText = q?.siteText ?? m.result;
-        const inferenceText = q?.inferenceText ?? q?.reading ?? m.how.split('\n')[0];
+        method.append(code);
+        if (explanationView.result) method.append(el('p', 'bg-result', '→ ' + explanationView.result));
+        const { siteText, inferenceText } = explanationView;
         if (siteText) {
           const site = el('section', 'bg-method-origin');
           site.append(el('h4', '', '参考サイトの説明'), el('p', '', siteText)); method.append(site);
         }
-        if (q?.rows.length) {
+        if (explanationView.rows.length) {
           const table = el('table', 'bg-reading-table'); const caption = el('caption', '', '対応表');
           const head = el('tr'); head.append(el('th', '', 'タグの表示'), el('th', '', '年代・季節'));
           const thead = el('thead'); thead.append(head); const tbody = el('tbody');
-          for (const row of q.rows) { const tr = el('tr'); tr.append(el('td', '', row[0]), el('td', '', row[1])); tbody.append(tr); }
+          for (const row of explanationView.rows) { const tr = el('tr'); tr.append(el('td', '', row[0]), el('td', '', row[1])); tbody.append(tr); }
           table.append(caption, thead, tbody); method.append(table);
         }
         if (inferenceText) {
           const inference = el('section', 'bg-method-inference');
-          inference.append(el('h4', '', 'この図鑑での推測'), el('p', '', inferenceText)); method.append(inference);
+          inference.append(el('h4', '', 'AI推測'), el('p', '', inferenceText)); method.append(inference);
         }
         const explanation = el('details', 'bg-refs bg-method-details');
         const extra = m.how.replace(/【(?:出典付き参考|参考解説)／[^】]*】\s*/g, '');
@@ -455,6 +469,6 @@ const BrandGuide = (() => {
     }, 15 * 60 * 1000);
     await sync(Boolean(options.forceSync));
   }
-  return { isBackSwipe, tagPeriod, tagTimeline, render, validate, parsePackage, normalize, matches, importFile, load, save, DB_NAME, MAX_BYTES };
+  return { modelExplanation, isBackSwipe, tagPeriod, tagTimeline, render, validate, parsePackage, normalize, matches, importFile, load, save, DB_NAME, MAX_BYTES };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = BrandGuide;
