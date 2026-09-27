@@ -1,15 +1,15 @@
 const CACHE_PREFIX = 'brand-guide-';
-const CACHE_NAME = 'brand-guide-v8';
+const CACHE_NAME = 'brand-guide-v9';
 const ASSETS = ['./',
   './index.html',
-  './manifest.json?v=8',
-  './app.css?v=8',
-  './app.js?v=8',
-  './credentials.js?v=8',
-  './bootstrap.js?v=8',
-  '../brand-guide.js?v=217',
-  '../brand-guide-sync.js?v=217',
-  '../brand-guide.css?v=217',
+  './manifest.json?v=9',
+  './app.css?v=9',
+  './app.js?v=9',
+  './credentials.js?v=9',
+  './bootstrap.js?v=9',
+  '../brand-guide.js?v=218',
+  '../brand-guide-sync.js?v=218',
+  '../brand-guide.css?v=218',
   './icons/icon-192-v3.png',
   './icons/icon-512-v3.png',
   './icons/icon-maskable-512-v3.png'];

@@ -238,8 +238,8 @@ const BrandGuide = (() => {
       status.hidden = Boolean(options.standalone);
       status.textContent = `保存済み · ${counts.brands}ブランド / 写真${counts.photos}枚 · 資料更新 ${data.updatedAt}`;
       body.replaceChildren();
-      const label = el('label', 'bg-search-label', 'ブランドを探す');
-      const search = el('input', 'bg-search'); search.type = 'search'; search.placeholder = '例：バトナー / BATONER'; search.value = query; label.append(search);
+      const label = el('label', 'bg-search-label', options.standalone ? '' : 'ブランドを探す');
+      const search = el('input', 'bg-search'); search.type = 'search'; search.setAttribute('aria-label', 'ブランド検索'); search.placeholder = '例：バトナー / BATONER'; search.value = query; label.append(search);
       const list = el('div', 'bg-brand-list'); const detail = el('div');
       const count = el('p', 'bg-muted'); count.setAttribute('role', 'status');
       body.append(label, count, list, detail);
