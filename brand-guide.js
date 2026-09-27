@@ -281,7 +281,7 @@ const BrandGuide = (() => {
       }
       function showBrand(b) {
         startDetail(b.name);
-        detail.append(el('h3', 'bg-section-title', '01  タグの年表'), el('p', 'bg-muted', '年は写真や記事で確認できた時期です。服が作られた年とは限りません。'));
+        detail.append(el('h3', 'bg-section-title', '01  タグの年表'));
         if (!b.groups.length) detail.append(el('p', 'bg-muted', 'タグ写真は未収集です。型番・年代の参考情報を先に掲載しています。'));
         for (const g of tagTimeline(b.groups)) {
           const card = el('section', 'bg-tag-card'); card.append(el('h4', 'bg-period', g.displayPeriod.label));
@@ -289,17 +289,18 @@ const BrandGuide = (() => {
             const photoButton = button('', () => showPhoto(p, b.name, root, photoButton), 'bg-photo-button');
             photoButton.setAttribute('aria-label', `${b.name} ${g.displayPeriod.label}のタグ写真を拡大`);
             const img = el('img', 'bg-tag-photo'); img.src = p.image; img.alt = b.name + ' ブランドタグ'; img.loading = 'lazy';
-            photoButton.append(img, el('span', 'bg-zoom-hint', 'タップで拡大')); card.append(photoButton);
-            const refs = el('details', 'bg-refs'); refs.append(el('summary', '', '出典を見る（通信が必要）'), el('p', '', p.basis), link('写真を確認したページ', p.source)); card.append(refs);
+            photoButton.append(img); card.append(photoButton);
+            const refs = el('details', 'bg-refs'); refs.append(el('summary', '', '出典を見る'), el('p', '', p.basis), link('写真を確認したページ', p.source)); card.append(refs);
           }
           detail.append(card);
         }
-        const m = b.method; const method = el('section', 'bg-method'); method.append(el('h3', 'bg-section-title', '02  型番の読み方'), el('p', 'bg-muted', b.groups.length ? '上のタグ写真とは別の商品を使った説明です。' : '参考記事の品番例です。実物のタグ写真は未確認です。'));
+        const m = b.method; const method = el('section', 'bg-method'); method.append(el('h3', 'bg-section-title', '02  型番の読み方'));
+        if (!b.groups.length) method.append(el('p', 'bg-muted', '参考記事の品番例です。実物のタグ写真は未確認です。'));
         const code = el('div', 'bg-code'); let start = m.highlight ? m.code.indexOf(m.highlight) : -1;
         if (b.name === 'TOMORROWLAND' && m.highlight) start = 6;
         if (start >= 0) { code.append(document.createTextNode(m.code.slice(0, start)), el('mark', '', m.code.slice(start, start + m.highlight.length)), document.createTextNode(m.code.slice(start + m.highlight.length))); } else code.textContent = m.code;
         method.append(code, el('p', 'bg-result', m.result), el('p', 'bg-how', m.how), el('p', 'bg-caution', m.caution));
-        const refs = el('details', 'bg-refs'); refs.append(el('summary', '', '型番の参考ページ（通信が必要）'));
+        const refs = el('details', 'bg-refs'); refs.append(el('summary', '', '型番の参考ページ'));
         for (const s of b.sources) refs.append(link(s.title, s.url));
         if (!b.sources.length) refs.append(el('p', '', '以前集めた商品ページをもとにした説明です。'));
         method.append(refs); detail.append(method);
@@ -309,9 +310,9 @@ const BrandGuide = (() => {
         const a = data.baycrews; startDetail('ベイクルーズ系列');
         detail.append(el('h3', 'bg-section-title', a.title), el('p', 'bg-how', a.how));
         for (const e of a.examples) {
-          const card = el('section', 'bg-tag-card'); card.append(el('h4', '', e.brand), el('div', 'bg-code', e.code), el('p', 'bg-result', e.year), link('公式の商品ページ（通信が必要）', e.url)); detail.append(card);
+          const card = el('section', 'bg-tag-card'); card.append(el('h4', '', e.brand), el('div', 'bg-code', e.code), el('p', 'bg-result', e.year), link('公式の商品ページ', e.url)); detail.append(card);
         }
-        detail.append(el('h3', 'bg-section-title', `当てはまる商品が見つかった${a.confirmed.length}ブランド`), el('p', '', a.confirmed.join(' / ')), el('p', 'bg-caution', '掲載ブランドも、全商品・すべての年に使えるとは確認できていません。'), el('h3', 'bg-section-title', `読み方をまだ確認していない${a.unconfirmed.length}ブランド`), el('p', '', a.unconfirmed.join(' / ')), el('p', 'bg-caution', a.caution), link('系列一覧の出典（通信が必要）', a.source));
+        detail.append(el('h3', 'bg-section-title', `当てはまる商品が見つかった${a.confirmed.length}ブランド`), el('p', '', a.confirmed.join(' / ')), el('p', 'bg-caution', '掲載ブランドも、全商品・すべての年に使えるとは確認できていません。'), el('h3', 'bg-section-title', `読み方をまだ確認していない${a.unconfirmed.length}ブランド`), el('p', '', a.unconfirmed.join(' / ')), el('p', 'bg-caution', a.caution), link('系列一覧の出典', a.source));
       }
       search.addEventListener('input', () => { query = search.value; drawList(); }); drawList();
     }
