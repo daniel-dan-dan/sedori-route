@@ -1,18 +1,18 @@
 const CACHE_PREFIX = 'brand-guide-';
-const CACHE_NAME = 'brand-guide-v2';
+const CACHE_NAME = 'brand-guide-v3';
 const ASSETS = ['./',
   './index.html',
-  './manifest.json?v=2',
-  './app.css?v=2',
-  './app.js?v=2',
-  './credentials.js?v=2',
-  './bootstrap.js?v=2',
+  './manifest.json?v=3',
+  './app.css?v=3',
+  './app.js?v=3',
+  './credentials.js?v=3',
+  './bootstrap.js?v=3',
   '../brand-guide.js?v=212',
   '../brand-guide-sync.js?v=212',
   '../brand-guide.css?v=212',
-  './icons/icon-192-v2.png',
-  './icons/icon-512-v2.png',
-  './icons/icon-maskable-512-v2.png'];
+  './icons/icon-192-v3.png',
+  './icons/icon-512-v3.png',
+  './icons/icon-maskable-512-v3.png'];
 
 function validAssetResponse_(asset, response) {
   if (!response || !response.ok || response.type === 'opaque') return false;
