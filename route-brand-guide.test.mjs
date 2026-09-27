@@ -170,3 +170,29 @@ test('source-backed research-only brands require explicit missing-photo status',
   data.brands[0].sources = [];
   await assert.rejects(guide.parsePackage(envelope(data)));
 });
+
+
+test('tag timeline displays years and observed ranges without seasons or provenance labels', () => {
+  const { guide } = harness();
+  for (const [input, expected] of [
+    ['2026年秋・公式掲載例', '2026年'],
+    ['2011年3月の記事で確認（同品番）', '2011年'],
+    ['2026年・2023年の掲載例', '2023〜2026年'],
+    ['2023〜2026年', '2023〜2026年'],
+    ['17AW出品者表記・2024年中古記事・2026年公式掲載例', '2017〜2026年'],
+    ['1990年代の公式掲載例', '1990年代'],
+    ['1970年代後半〜1980年代初めの目安：青タグ', '1970〜1980年代'],
+    ['年代未確認｜白いタグ', '年代不明'],
+  ]) assert.equal(guide.tagPeriod(input).label, expected);
+});
+
+test('tag timeline is oldest first, stable within a year, unknown last, without altering evidence', () => {
+  const { guide } = harness();
+  const groups = ['2026年秋', '年代未確認', '2023年春夏', '2023年秋冬', '2011〜2014年']
+    .map((period, id) => ({ period, id, photos: [{ basis: 'original source' }] }));
+  const before = JSON.stringify(groups);
+  const ordered = guide.tagTimeline(groups);
+  assert.equal(ordered.map(g => g.id).join(','), '4,2,3,0,1');
+  assert.equal(JSON.stringify(groups), before);
+  assert.equal(ordered[0].photos, groups[4].photos);
+});

@@ -18,6 +18,27 @@ const BrandGuide = (() => {
   function matches(brand, value) {
     return normalize([brand.name, ...brand.aliases].join(' ')).includes(normalize(value));
   }
+  // Keep source descriptions intact; the timeline only shows their year span.
+  function tagPeriod(period) {
+    const value = period.normalize('NFKC');
+    const years = [...value.matchAll(/(?:18|19|20)\d{2}(?:年代)?/g)]
+      .map(match => ({ year: Number(match[0].slice(0, 4)), decade: match[0].endsWith('年代') }));
+    // Older packages sometimes start with a seller's abbreviated season.
+    for (const match of value.matchAll(/(?<!\d)(\d{2})(?:SS|AW|FW)(?![A-Z])/gi)) {
+      years.push({ year: 2000 + Number(match[1]), decade: false });
+    }
+    if (!years.length) return { label: '年代不明', year: Infinity };
+    years.sort((a, b) => a.year - b.year);
+    const first = years[0], last = years[years.length - 1];
+    const decade = years.some(item => item.decade);
+    return { label: first.year === last.year
+      ? `${first.year}${decade ? '年代' : '年'}`
+      : `${first.year}〜${last.year}${decade ? '年代' : '年'}`, year: first.year };
+  }
+  function tagTimeline(groups) {
+    return groups.map(group => ({ ...group, displayPeriod: tagPeriod(group.period) }))
+      .sort((a, b) => a.displayPeriod.year - b.displayPeriod.year);
+  }
   function validate(data) {
     check(data && data.version === 1 && text(data.updatedAt, 10) && /^\d{4}-\d{2}-\d{2}$/.test(data.updatedAt) && Number.isFinite(Date.parse(data.updatedAt)));
     check(new Date(data.updatedAt).toISOString().slice(0, 10) === data.updatedAt);
@@ -262,12 +283,11 @@ const BrandGuide = (() => {
         startDetail(b.name);
         detail.append(el('h3', 'bg-section-title', '01  タグの年表'), el('p', 'bg-muted', '年は写真や記事で確認できた時期です。服が作られた年とは限りません。'));
         if (!b.groups.length) detail.append(el('p', 'bg-muted', 'タグ写真は未収集です。型番・年代の参考情報を先に掲載しています。'));
-        for (const g of b.groups) {
-          const card = el('section', 'bg-tag-card'); card.append(el('h4', 'bg-period', g.period));
+        for (const g of tagTimeline(b.groups)) {
+          const card = el('section', 'bg-tag-card'); card.append(el('h4', 'bg-period', g.displayPeriod.label));
           for (const p of g.photos) {
-            if (p.currentOfficial) card.append(el('span', 'bg-official', '2026年の公式写真'));
             const photoButton = button('', () => showPhoto(p, b.name, root, photoButton), 'bg-photo-button');
-            photoButton.setAttribute('aria-label', `${b.name} ${g.period}のタグ写真を拡大`);
+            photoButton.setAttribute('aria-label', `${b.name} ${g.displayPeriod.label}のタグ写真を拡大`);
             const img = el('img', 'bg-tag-photo'); img.src = p.image; img.alt = b.name + ' ブランドタグ'; img.loading = 'lazy';
             photoButton.append(img, el('span', 'bg-zoom-hint', 'タップで拡大')); card.append(photoButton);
             const refs = el('details', 'bg-refs'); refs.append(el('summary', '', '出典を見る（通信が必要）'), el('p', '', p.basis), link('写真を確認したページ', p.source)); card.append(refs);
@@ -320,6 +340,6 @@ const BrandGuide = (() => {
     }, 15 * 60 * 1000);
     await sync(Boolean(options.forceSync));
   }
-  return { render, validate, parsePackage, normalize, matches, importFile, load, save, DB_NAME, MAX_BYTES };
+  return { tagPeriod, tagTimeline, render, validate, parsePackage, normalize, matches, importFile, load, save, DB_NAME, MAX_BYTES };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = BrandGuide;
