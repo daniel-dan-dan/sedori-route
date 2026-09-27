@@ -54,10 +54,12 @@ const BrandGuide = (() => {
       check(b && /^[a-z0-9-]{1,60}$/.test(b.id) && !ids.has(b.id)); ids.add(b.id);
       check(text(b.name, 100) && b.name && !names.has(b.name)); names.add(b.name);
       check(Array.isArray(b.aliases) && b.aliases.length < 20 && b.aliases.every(a => text(a, 100)));
+      check(b.tagNote === undefined || text(b.tagNote, 500));
       check(Array.isArray(b.groups) && b.groups.length <= 20);
       check(b.groups.length > 0 || (b.photoStatus === 'uncollected' && Array.isArray(b.sources) && b.sources.length > 0));
       for (const g of b.groups) {
         check(text(g.period, 150) && Array.isArray(g.photos) && g.photos.length > 0 && g.photos.length <= 20);
+        check(g.variant === undefined || text(g.variant, 100));
         for (const p of g.photos) {
           check(p && text(p.image, 2800000) && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(p.image));
           check(sourceOK(p.source) && text(p.basis, 3000) && typeof p.currentOfficial === 'boolean');
@@ -68,6 +70,7 @@ const BrandGuide = (() => {
       if (b.method.quickGuide !== undefined) {
         const q = b.method.quickGuide;
         check(q && ['target', 'reading', 'result', 'note', 'highlight'].every(k => text(q[k], 180)));
+        check(['siteText', 'inferenceText'].every(k => q[k] === undefined || text(q[k], 800)));
         check(Number.isSafeInteger(q.start) && q.start >= -1 && q.start <= b.method.code.length);
         check(!q.highlight || (q.start >= 0 && b.method.code.slice(q.start, q.start + q.highlight.length) === q.highlight));
         check(Array.isArray(q.rows) && q.rows.length <= 40 && q.rows.every(r => Array.isArray(r) && r.length === 2 && r.every(v => text(v, 100))));
@@ -367,9 +370,11 @@ const BrandGuide = (() => {
       function showBrand(b) {
         startDetail(b.name);
         detail.append(el('h3', 'bg-section-title', '01  タグの年表'));
+        if (b.tagNote) detail.append(el('p', 'bg-tag-note', b.tagNote));
         if (!tagTimeline(b.groups).length) detail.append(el('p', 'bg-muted', '年代の分かるタグ写真はまだありません。'));
         for (const g of tagTimeline(b.groups)) {
           const card = el('section', 'bg-tag-card'); card.append(el('h4', 'bg-period', g.displayPeriod.label));
+          if (g.variant) card.append(el('p', 'bg-tag-variant', g.variant));
           for (const p of g.photos) {
             const photoButton = button('', () => showPhoto(p, b.name, root, photoButton), 'bg-photo-button');
             photoButton.setAttribute('aria-label', `${b.name} ${g.displayPeriod.label}のタグ写真を拡大`);
@@ -381,17 +386,19 @@ const BrandGuide = (() => {
         }
         const m = b.method; const method = el('section', 'bg-method'); method.append(el('h3', 'bg-section-title', '02  型番の読み方'));
         const q = m.quickGuide;
-        const steps = el('dl', 'bg-reading-steps');
-        steps.append(el('dt', '', '見る場所'), el('dd', '', q?.target || '品質表示タグの品番・NO.欄'));
-        steps.append(el('dt', '', '読み方'), el('dd', '', q?.reading || m.how.split('\n')[0]));
-        method.append(steps, el('p', 'bg-example-label', '型番の例'));
+        method.append(el('p', 'bg-example-label', '型番の例'));
         const code = el('div', 'bg-code');
         const highlight = q ? q.highlight : m.highlight;
         let start = q ? q.start : (highlight ? m.code.indexOf(highlight) : -1);
         if (!q && b.name === 'TOMORROWLAND' && highlight) start = 6;
         if (highlight && start >= 0) { code.append(document.createTextNode(m.code.slice(0, start)), el('mark', '', highlight), document.createTextNode(m.code.slice(start + highlight.length))); } else code.textContent = m.code;
         method.append(code, el('p', 'bg-result', '→ ' + (q?.result || m.result)));
-        if (q?.note) method.append(el('p', 'bg-reading-note', q.note));
+        const siteText = q?.siteText ?? m.result;
+        const inferenceText = q?.inferenceText ?? q?.reading ?? m.how.split('\n')[0];
+        if (siteText) {
+          const site = el('section', 'bg-method-origin');
+          site.append(el('h4', '', '参考サイトの説明'), el('p', '', siteText)); method.append(site);
+        }
         if (q?.rows.length) {
           const table = el('table', 'bg-reading-table'); const caption = el('caption', '', '対応表');
           const head = el('tr'); head.append(el('th', '', 'タグの表示'), el('th', '', '年代・季節'));
@@ -399,8 +406,13 @@ const BrandGuide = (() => {
           for (const row of q.rows) { const tr = el('tr'); tr.append(el('td', '', row[0]), el('td', '', row[1])); tbody.append(tr); }
           table.append(caption, thead, tbody); method.append(table);
         }
+        if (inferenceText) {
+          const inference = el('section', 'bg-method-inference');
+          inference.append(el('h4', '', 'この図鑑での推測'), el('p', '', inferenceText)); method.append(inference);
+        }
         const explanation = el('details', 'bg-refs bg-method-details');
-        explanation.append(el('summary', '', '詳しい説明・商品例'), el('p', 'bg-how', m.how), el('p', 'bg-caution', m.caution));
+        const extra = m.how.replace(/【(?:出典付き参考|参考解説)／[^】]*】\s*/g, '');
+        explanation.append(el('summary', '', '詳しい説明・商品例'), el('p', 'bg-how', extra), el('p', 'bg-caution', m.caution));
         method.append(explanation);
         const refs = el('details', 'bg-refs'); refs.append(el('summary', '', '型番の参考ページ'));
         for (const s of b.sources) refs.append(link(s.title, s.url));

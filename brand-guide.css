@@ -23,6 +23,8 @@
 .bg-muted { font-size:12px; color:#58695e; line-height:1.7; }
 .bg-tag-card { border:1px solid #d8d7c5; border-radius:5px; padding:15px; margin:16px 0; background:#fffdf6; }
 .bg-period { margin:0 0 12px; font-size:21px; color:#123f33; }
+.bg-tag-variant { margin:-6px 0 10px; font-size:14px; font-weight:600; }
+.bg-tag-note { font-size:14px; color:#58695e; }
 .bg-official { display:inline-block; font-size:11px; padding:2px 8px; border:1px solid #b74931; color:#b74931; border-radius:4px; }
 .bg-photo-button { display:block; width:100%; border:0; padding:14px 0 8px; background:transparent; cursor:zoom-in; color:#58695e; }
 .bg-tag-photo { display:block; width:100%; max-height:240px; object-fit:contain; margin:auto; }
@@ -39,6 +41,10 @@
 .bg-reading-steps dt { font-weight:700; color:#58695e; }
 .bg-reading-steps dd { margin:0; }
 .bg-example-label { font-size:12px; color:#58695e; margin:0 0 6px; }
+.bg-method-origin,.bg-method-inference { margin:20px 0; font-size:15px; }
+.bg-method-origin h4,.bg-method-inference h4 { font-size:13px; margin:0 0 6px; }
+.bg-method-origin p,.bg-method-inference p { margin:0; }
+.bg-method-inference { padding:14px; background:#e9ede2; border-radius:6px; }
 .bg-reading-note { font-size:13px; margin:0 0 18px; color:#58695e; }
 .bg-reading-table { width:100%; border-collapse:collapse; font-size:14px; margin:20px 0; background:#fffdf6; }
 .bg-reading-table caption { text-align:left; font-weight:700; padding-bottom:8px; }
