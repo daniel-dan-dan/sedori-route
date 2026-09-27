@@ -255,7 +255,7 @@ const BrandGuide = (() => {
       function startDetail(title) {
         root.classList.add('bg-viewing');
         label.hidden = count.hidden = list.hidden = true; detail.replaceChildren();
-        detail.append(button('‹ ブランド一覧', () => { root.classList.remove('bg-viewing'); detail.replaceChildren(); label.hidden = count.hidden = list.hidden = false; }, 'bg-text-button'));
+        detail.append(button('‹ 戻る', () => { root.classList.remove('bg-viewing'); detail.replaceChildren(); label.hidden = count.hidden = list.hidden = false; }, 'bg-text-button'));
         const heading = el('h2', 'bg-brand-heading', title); heading.tabIndex = -1; detail.append(heading); heading.focus(); window.scrollTo(0, 0);
       }
       function showBrand(b) {
