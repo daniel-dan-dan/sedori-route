@@ -207,8 +207,7 @@ const BrandGuide = (() => {
     input.disabled = true;
     manual.append(input, el('p', 'bg-muted', '通常はファイル選択不要です。圏外での復旧用に使えます。')); controls.append(manual);
     if (options.standalone) { status.hidden = true; offlineStatus.hidden = true; syncStatus.hidden = true; controls.append(status, offlineStatus, syncStatus); }
-    root.append(controls);
-    const body = el('div', 'bg-body'); root.append(body);
+    const body = el('div', 'bg-body'); root.append(body, controls);
     let currentRecord = null;
     async function sync(force = false) {
       if (!isLive() || typeof BrandGuideSync === 'undefined') return;
@@ -256,7 +255,7 @@ const BrandGuide = (() => {
       function startDetail(title) {
         root.classList.add('bg-viewing');
         label.hidden = count.hidden = list.hidden = true; detail.replaceChildren();
-        detail.append(button('‹ ブランド一覧', () => { root.classList.remove('bg-viewing'); detail.replaceChildren(); label.hidden = count.hidden = list.hidden = false; search.focus(); }, 'bg-text-button'));
+        detail.append(button('‹ ブランド一覧', () => { root.classList.remove('bg-viewing'); detail.replaceChildren(); label.hidden = count.hidden = list.hidden = false; }, 'bg-text-button'));
         const heading = el('h2', 'bg-brand-heading', title); heading.tabIndex = -1; detail.append(heading); heading.focus(); window.scrollTo(0, 0);
       }
       function showBrand(b) {

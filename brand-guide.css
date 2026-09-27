@@ -49,4 +49,4 @@
 
 /* Compact standalone library: list starts immediately below the title and controls. */
 .bg-compact .bg-title { margin:8px 0; padding-bottom:14px; border-bottom:double 3px #123f33; }
-.bg-compact .bg-import { margin:0 0 14px; }
+.bg-compact .bg-import { margin:20px 0 0; }
