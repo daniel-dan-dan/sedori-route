@@ -185,6 +185,22 @@ test('family overview accepts a source-only page and keeps line links within the
   await assert.rejects(guide.parsePackage(envelope(data)));
 });
 
+test('family line pages link to their parent and do not inflate the top-level brand count', async () => {
+  const { guide } = harness(); const data = fixture();
+  const family = data.brands[0], child = data.brands[1];
+  family.overview = { intro: '系列案内', note: '製造年ではありません',
+    lines: [{ name: child.name, detail: 'タグを見る', targetBrand: child.name }],
+    milestones: [], steps: ['タグを確認'] };
+  child.parentBrand = family.name;
+  assert.equal(guide.validate(data).brands, 29);
+  assert.equal(guide.validate(data).photos, 30);
+  family.overview.lines[0].targetBrand = '別ブランド';
+  await assert.rejects(guide.parsePackage(envelope(data)));
+  family.overview.lines[0].targetBrand = child.name;
+  child.parentBrand = 'Missing parent';
+  await assert.rejects(guide.parsePackage(envelope(data)));
+});
+
 
 test('tag timeline displays years and observed ranges without seasons or provenance labels', () => {
   const { guide } = harness();

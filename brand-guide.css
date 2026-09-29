@@ -27,8 +27,11 @@
 .bg-tag-note { font-size:14px; color:#58695e; }
 .bg-family-intro { font-size:15px; margin:0 0 22px; }
 .bg-family-card { border:1px solid #d8d7c5; border-left:4px solid #123f33; border-radius:4px; padding:13px 15px; margin:10px 0; background:#fffdf6; }
-.bg-family-card h4 { font-size:16px; margin:0 0 4px; }
-.bg-family-card p { font-size:14px; margin:0; }
+.bg-family-name { display:block; font-size:16px; font-weight:700; margin:0 0 4px; }
+.bg-family-detail { display:block; font-size:14px; }
+.bg-family-link { position:relative; display:block; width:100%; padding-right:34px; text-align:left; color:var(--bg-ink); font-family:inherit; line-height:inherit; cursor:pointer; }
+.bg-family-link:active { background:#e9ede2; }
+.bg-family-arrow { position:absolute; right:13px; top:calc(50% - 17px); font-size:24px; }
 .bg-family-timeline,.bg-family-steps { padding-left:24px; font-size:14px; }
 .bg-family-timeline li,.bg-family-steps li { padding:5px 0; }
 .bg-family-timeline strong { display:inline-block; min-width:62px; }

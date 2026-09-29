@@ -67,11 +67,15 @@ const BrandGuide = (() => {
       check(text(b.name, 100) && b.name && !names.has(b.name)); names.add(b.name);
       check(Array.isArray(b.aliases) && b.aliases.length < 20 && b.aliases.every(a => text(a, 100)));
       check(b.tagNote === undefined || text(b.tagNote, 500));
+      check(b.parentBrand === undefined || (text(b.parentBrand, 100) && data.brands.some(other => other.name === b.parentBrand && other.overview && other.id !== b.id)));
       if (b.overview !== undefined) {
         const o = b.overview;
         check(o && text(o.intro, 500) && text(o.note, 500));
         check(Array.isArray(o.lines) && o.lines.length > 0 && o.lines.length <= 15 &&
-          o.lines.every(line => line && text(line.name, 100) && text(line.detail, 400)));
+          o.lines.every(line => line && text(line.name, 100) && text(line.detail, 400) &&
+            (line.targetBrand === undefined || (text(line.targetBrand, 100) &&
+              data.brands.some(other => other.name === line.targetBrand && other.id !== b.id &&
+                (other.name === o.relatedBrand || other.parentBrand === b.name))))));
         check(Array.isArray(o.milestones) && o.milestones.length <= 20 &&
           o.milestones.every(item => item && /^\d{4}$/.test(item.year) && text(item.detail, 300)));
         check(Array.isArray(o.steps) && o.steps.length > 0 && o.steps.length <= 6 && o.steps.every(step => text(step, 300)));
@@ -108,7 +112,7 @@ const BrandGuide = (() => {
     check(Array.isArray(a.unconfirmed) && a.unconfirmed.length <= 200 && a.unconfirmed.every(s => text(s, 100)));
     check(Array.isArray(a.examples) && a.examples.length <= 200 && a.examples.every(e => text(e.brand) && text(e.code) && text(e.year) && sourceOK(e.url)));
     check(sourceOK(a.source));
-    return { brands: data.brands.length, photos };
+    return { brands: data.brands.filter(b => !b.parentBrand).length, photos };
   }
   async function parsePackage(raw) {
     check(typeof raw === 'string' && new TextEncoder().encode(raw).length <= MAX_BYTES, 'ファイルが大きすぎます（上限40MB）。');
@@ -377,7 +381,7 @@ const BrandGuide = (() => {
         settleSwipe(Boolean(back));
       }, { passive: true });
       function drawList() {
-        list.replaceChildren(); const found = data.brands.filter(b => matches(b, query)); count.textContent = `${found.length}ブランド`;
+        list.replaceChildren(); const found = data.brands.filter(b => !b.parentBrand && matches(b, query)); count.textContent = `${found.length}ブランド`;
         for (const b of found) {
           const btn = button('', () => showBrand(b), 'bg-brand-card');
           btn.append(el('span', 'bg-brand-name', b.name), el('span', 'bg-brand-kana', b.aliases[0] || ''), el('span', 'bg-card-arrow', '›')); list.append(btn);
@@ -385,25 +389,29 @@ const BrandGuide = (() => {
         if (!found.length) list.append(el('p', '', '見つかりません。日本語または英語のブランド名を短く入力してください。'));
         list.append(button('ベイクルーズ系列の共通する読み方', showBaycrews, 'bg-appendix-entry'));
       }
-      function startDetail(title) {
+      function startDetail(title, back = returnToList) {
         root.classList.add('bg-viewing');
         label.hidden = count.hidden = list.hidden = true; detail.replaceChildren();
-        detail.append(button('‹ 戻る', returnToList, 'bg-text-button'));
+        detail.append(button('‹ 戻る', back, 'bg-text-button'));
         const heading = el('h2', 'bg-brand-heading', title); heading.tabIndex = -1; detail.append(heading); heading.focus(); window.scrollTo(0, 0);
       }
-      function showBrand(b) {
-        startDetail(b.name);
+      function showBrand(b, openedFrom = null) {
+        const parent = openedFrom || (b.parentBrand && data.brands.find(other => other.name === b.parentBrand));
+        startDetail(b.name, parent ? () => showBrand(parent) : returnToList);
         if (b.overview) {
           const o = b.overview;
           detail.append(el('p', 'bg-family-intro', o.intro));
           detail.append(el('h3', 'bg-section-title', '01  系列ブランドを見分ける'));
           for (const line of o.lines) {
-            const card = el('section', 'bg-family-card');
-            card.append(el('h4', '', line.name), el('p', '', line.detail)); detail.append(card);
+            const target = line.targetBrand && data.brands.find(other => other.name === line.targetBrand);
+            const card = target ? button('', () => showBrand(target, b), 'bg-family-card bg-family-link') : el('section', 'bg-family-card');
+            card.append(el('span', 'bg-family-name', line.name), el('span', 'bg-family-detail', line.detail));
+            if (target) card.append(el('span', 'bg-family-arrow', '›'));
+            detail.append(card);
           }
-          if (o.relatedBrand) {
+          if (o.relatedBrand && !o.lines.some(line => line.targetBrand === o.relatedBrand)) {
             const related = data.brands.find(other => other.name === o.relatedBrand);
-            detail.append(button(`${o.relatedBrand}のタグ写真を見る`, () => showBrand(related), 'bg-button'));
+            detail.append(button(`${o.relatedBrand}のタグ写真を見る`, () => showBrand(related, b), 'bg-button'));
           }
           detail.append(el('h3', 'bg-section-title', '02  系列の年表'));
           const timeline = el('ol', 'bg-family-timeline');
@@ -434,7 +442,9 @@ const BrandGuide = (() => {
           }
           detail.append(card);
         }
-        const m = b.method; const method = el('section', 'bg-method'); method.append(el('h3', 'bg-section-title', '02  型番の読み方'));
+        const m = b.method;
+        if (b.parentBrand && !m.code) return;
+        const method = el('section', 'bg-method'); method.append(el('h3', 'bg-section-title', '02  型番の読み方'));
         const q = m.quickGuide; const explanationView = modelExplanation(b);
         method.append(el('p', 'bg-example-label', '型番の例'));
         const code = el('div', 'bg-code');
