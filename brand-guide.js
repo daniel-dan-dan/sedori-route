@@ -67,6 +67,16 @@ const BrandGuide = (() => {
       check(text(b.name, 100) && b.name && !names.has(b.name)); names.add(b.name);
       check(Array.isArray(b.aliases) && b.aliases.length < 20 && b.aliases.every(a => text(a, 100)));
       check(b.tagNote === undefined || text(b.tagNote, 500));
+      if (b.overview !== undefined) {
+        const o = b.overview;
+        check(o && text(o.intro, 500) && text(o.note, 500));
+        check(Array.isArray(o.lines) && o.lines.length > 0 && o.lines.length <= 15 &&
+          o.lines.every(line => line && text(line.name, 100) && text(line.detail, 400)));
+        check(Array.isArray(o.milestones) && o.milestones.length <= 20 &&
+          o.milestones.every(item => item && /^\d{4}$/.test(item.year) && text(item.detail, 300)));
+        check(Array.isArray(o.steps) && o.steps.length > 0 && o.steps.length <= 6 && o.steps.every(step => text(step, 300)));
+        check(o.relatedBrand === undefined || (text(o.relatedBrand, 100) && data.brands.some(other => other.name === o.relatedBrand && other.id !== b.id)));
+      }
       check(Array.isArray(b.groups) && b.groups.length <= 20);
       check(b.groups.length > 0 || (b.photoStatus === 'uncollected' && Array.isArray(b.sources) && b.sources.length > 0));
       for (const g of b.groups) {
@@ -383,6 +393,32 @@ const BrandGuide = (() => {
       }
       function showBrand(b) {
         startDetail(b.name);
+        if (b.overview) {
+          const o = b.overview;
+          detail.append(el('p', 'bg-family-intro', o.intro));
+          detail.append(el('h3', 'bg-section-title', '01  系列ブランドを見分ける'));
+          for (const line of o.lines) {
+            const card = el('section', 'bg-family-card');
+            card.append(el('h4', '', line.name), el('p', '', line.detail)); detail.append(card);
+          }
+          if (o.relatedBrand) {
+            const related = data.brands.find(other => other.name === o.relatedBrand);
+            detail.append(button(`${o.relatedBrand}のタグ写真を見る`, () => showBrand(related), 'bg-button'));
+          }
+          detail.append(el('h3', 'bg-section-title', '02  系列の年表'));
+          const timeline = el('ol', 'bg-family-timeline');
+          for (const item of o.milestones) {
+            const row = el('li', ''); row.append(el('strong', '', `${item.year}年`), el('span', '', item.detail)); timeline.append(row);
+          }
+          detail.append(timeline);
+          detail.append(el('h3', 'bg-section-title', '03  服の年代を調べる順番'));
+          const steps = el('ol', 'bg-family-steps');
+          for (const step of o.steps) steps.append(el('li', '', step));
+          detail.append(steps, el('p', 'bg-caution', o.note));
+          detail.append(el('h3', 'bg-section-title', '出典'));
+          for (const source of b.sources) detail.append(link(source.title, source.url));
+          return;
+        }
         detail.append(el('h3', 'bg-section-title', '01  タグの年表'));
         if (b.tagNote) detail.append(el('p', 'bg-tag-note', b.tagNote));
         if (!tagTimeline(b.groups).length) detail.append(el('p', 'bg-muted', '年代の分かるタグ写真はまだありません。'));

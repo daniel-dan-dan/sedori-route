@@ -25,6 +25,14 @@
 .bg-period { margin:0 0 12px; font-size:21px; color:#123f33; }
 .bg-tag-variant { margin:-6px 0 10px; font-size:14px; font-weight:600; }
 .bg-tag-note { font-size:14px; color:#58695e; }
+.bg-family-intro { font-size:15px; margin:0 0 22px; }
+.bg-family-card { border:1px solid #d8d7c5; border-left:4px solid #123f33; border-radius:4px; padding:13px 15px; margin:10px 0; background:#fffdf6; }
+.bg-family-card h4 { font-size:16px; margin:0 0 4px; }
+.bg-family-card p { font-size:14px; margin:0; }
+.bg-family-timeline,.bg-family-steps { padding-left:24px; font-size:14px; }
+.bg-family-timeline li,.bg-family-steps li { padding:5px 0; }
+.bg-family-timeline strong { display:inline-block; min-width:62px; }
+.bg-family-timeline span { display:inline; }
 .bg-official { display:inline-block; font-size:11px; padding:2px 8px; border:1px solid #b74931; color:#b74931; border-radius:4px; }
 .bg-photo-button { display:block; width:100%; border:0; padding:14px 0 8px; background:transparent; cursor:zoom-in; color:#58695e; }
 .bg-tag-photo { display:block; width:100%; max-height:240px; object-fit:contain; margin:auto; }

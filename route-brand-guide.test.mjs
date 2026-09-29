@@ -171,6 +171,20 @@ test('source-backed research-only brands require explicit missing-photo status',
   await assert.rejects(guide.parsePackage(envelope(data)));
 });
 
+test('family overview accepts a source-only page and keeps line links within the guide', async () => {
+  const { guide } = harness(); const data = fixture(); const brand = data.brands[0];
+  brand.groups = []; brand.photoStatus = 'uncollected';
+  brand.overview = { intro: '系列の案内', note: '開始年は製造年ではありません',
+    lines: [{ name: 'Polo Ralph Lauren', detail: '別ページでタグを見る' }],
+    milestones: [{ year: '1993', detail: 'Double RL開始' }],
+    steps: ['首元のライン名を読む'], relatedBrand: 'Brand 1' };
+  assert.equal(guide.validate((await guide.parsePackage(envelope(data))).data).photos, 29);
+  brand.overview.relatedBrand = 'Missing brand';
+  await assert.rejects(guide.parsePackage(envelope(data)));
+  brand.overview.relatedBrand = 'Brand 1'; brand.overview.milestones[0].year = '19xx';
+  await assert.rejects(guide.parsePackage(envelope(data)));
+});
+
 
 test('tag timeline displays years and observed ranges without seasons or provenance labels', () => {
   const { guide } = harness();

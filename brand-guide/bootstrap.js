@@ -7,7 +7,7 @@ const GuideWorker = (() => {
   if(!('serviceWorker' in navigator)) return {ready:Promise.resolve(null)};
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type==='UPDATE_WAITING') notice();
-    if(event.data?.type==='SW_VERSION' && event.data.cacheName !== 'brand-guide-v15' && String(event.data.cacheName).startsWith('brand-guide-')) notice();
+    if(event.data?.type==='SW_VERSION' && event.data.cacheName !== 'brand-guide-v16' && String(event.data.cacheName).startsWith('brand-guide-')) notice();
   });
   navigator.serviceWorker.addEventListener('controllerchange',()=>navigator.serviceWorker.controller?.postMessage({type:'GET_VERSION'}));
   const canonical = new URL('sw.js', document.baseURI);

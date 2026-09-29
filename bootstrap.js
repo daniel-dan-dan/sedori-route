@@ -51,7 +51,7 @@
       if (event.data && event.data.type === 'UPDATE_WAITING') showUpdateWaiting();
     });
 
-    navigator.serviceWorker.register('sw.js?v=224', { updateViaCache: 'none' }).then(registration => {
+    navigator.serviceWorker.register('sw.js?v=225', { updateViaCache: 'none' }).then(registration => {
       if (!registration) return;
       if (registration.waiting) showUpdateWaiting();
       registration.addEventListener('updatefound', () => {
