@@ -52,6 +52,7 @@
 .bg-reading-steps dt { font-weight:700; color:#58695e; }
 .bg-reading-steps dd { margin:0; }
 .bg-example-label { font-size:12px; color:#58695e; margin:0 0 6px; }
+.bg-code + .bg-example-label { margin-top:14px; }
 .bg-method-origin,.bg-method-inference { margin:20px 0; font-size:15px; }
 .bg-method-origin h4,.bg-method-inference h4 { font-size:13px; margin:0 0 6px; }
 .bg-method-origin p,.bg-method-inference p { margin:0; }

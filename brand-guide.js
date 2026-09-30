@@ -97,6 +97,8 @@ const BrandGuide = (() => {
         const q = b.method.quickGuide;
         check(q && ['target', 'reading', 'result', 'note', 'highlight'].every(k => text(q[k], 180)));
         check(['siteText', 'inferenceText'].every(k => q[k] === undefined || text(q[k], 800)));
+        check(q.reverseCode === undefined || (text(q.reverseCode, 180) && q.reverseCode &&
+          sourceOK(q.reverseSource) && b.sources.some(s => s.url === q.reverseSource)));
         check(q.canInferYear === undefined || typeof q.canInferYear === 'boolean');
         check(q.siteSource === undefined || (sourceOK(q.siteSource) && b.sources.some(s => s.url === q.siteSource)));
         check(Number.isSafeInteger(q.start) && q.start >= -1 && q.start <= b.method.code.length);
@@ -309,6 +311,7 @@ const BrandGuide = (() => {
       const count = el('p', 'bg-muted'); count.setAttribute('role', 'status');
       body.append(label, count, list, detail);
       let swipeStart = null, swipeHome = null, swipeMoving = false, swipeSettling = false, swipeTimer = null;
+      let listScrollY = 0;
       let swipeWidth = 0, swipeOffset = 0;
       function clearSwipe() {
         clearTimeout(swipeTimer); swipeTimer = null;
@@ -321,7 +324,7 @@ const BrandGuide = (() => {
         clearSwipe();
         root.classList.remove('bg-viewing'); detail.replaceChildren();
         label.hidden = count.hidden = list.hidden = false;
-        window.scrollTo(0, 0);
+        window.scrollTo(0, listScrollY);
       }
       function beginSwipe() {
         swipeWidth = detail.getBoundingClientRect().width;
@@ -331,7 +334,10 @@ const BrandGuide = (() => {
         swipeHome.style.left = `${bounds.left}px`; swipeHome.style.width = `${bounds.width}px`;
         const title = el('h1', 'bg-title', options.standalone ? 'ブランド図鑑' : '古着図鑑');
         const copies = [label, count, list].map(node => { const copy = node.cloneNode(true); copy.hidden = false; return copy; });
-        swipeHome.append(title, ...copies); root.append(swipeHome);
+        const preview = el('div', 'bg-swipe-preview');
+        preview.style.transform = `translateY(-${listScrollY}px)`;
+        preview.append(title, ...copies);
+        swipeHome.append(preview); root.append(swipeHome);
         root.classList.add('bg-swipe-moving'); swipeMoving = true;
       }
       function moveSwipe(offset) {
@@ -390,6 +396,7 @@ const BrandGuide = (() => {
         list.append(button('ベイクルーズ系列の共通する読み方', showBaycrews, 'bg-appendix-entry'));
       }
       function startDetail(title, back = returnToList) {
+        if (!root.classList.contains('bg-viewing')) listScrollY = window.scrollY;
         root.classList.add('bg-viewing');
         label.hidden = count.hidden = list.hidden = true; detail.replaceChildren();
         detail.append(button('‹ 戻る', back, 'bg-text-button'));
@@ -446,13 +453,16 @@ const BrandGuide = (() => {
         if (b.parentBrand && !m.code) return;
         const method = el('section', 'bg-method'); method.append(el('h3', 'bg-section-title', '02  型番の読み方'));
         const q = m.quickGuide; const explanationView = modelExplanation(b);
-        method.append(el('p', 'bg-example-label', '型番の例'));
+        method.append(el('p', 'bg-example-label', q?.reverseCode ? '同じ商品の品質表示タグ・表面の型番' : '型番の例'));
         const code = el('div', 'bg-code');
         const highlight = explanationView.canInfer ? (q ? q.highlight : m.highlight) : '';
         let start = q ? q.start : (highlight ? m.code.indexOf(highlight) : -1);
         if (!q && b.name === 'TOMORROWLAND' && highlight) start = 6;
         if (highlight && start >= 0) { code.append(document.createTextNode(m.code.slice(0, start)), el('mark', '', highlight), document.createTextNode(m.code.slice(start + highlight.length))); } else code.textContent = m.code;
         method.append(code);
+        if (q?.reverseCode) method.append(
+          el('p', 'bg-example-label', 'そのタグを裏返すと'),
+          el('div', 'bg-code', q.reverseCode));
         if (explanationView.result) method.append(el('p', 'bg-result', '→ ' + explanationView.result));
         const { siteText, inferenceText } = explanationView;
         if (siteText) {

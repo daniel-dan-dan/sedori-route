@@ -250,6 +250,16 @@ test('optional quick guide rejects misplaced highlights and oversized tables; ol
   delete data.brands[0].method.quickGuide; await guide.parsePackage(envelope(data));
 });
 
+test('a reverse-side example must point to a recorded source for that brand', async () => {
+  const { guide } = harness(); const data = fixture();
+  const q = { target: '品質表示タグ', reading: '表と裏を比べる', result: '', note: '',
+    highlight: '', start: -1, rows: [], reverseCode: '22-08', reverseSource: 'https://example.org' };
+  data.brands[0].method.quickGuide = q;
+  await guide.parsePackage(envelope(data));
+  q.reverseSource = 'https://unrelated.example.org';
+  await assert.rejects(guide.parsePackage(envelope(data)));
+});
+
 test('dated listings and search instructions do not become dating rules', () => {
   const { guide } = harness(); const b = fixture().brands[0];
   b.method.quickGuide = { siteText: '公式の2026年ページにあります', inferenceText: '型番をネットで検索します', result: '2026年', rows: [] };
