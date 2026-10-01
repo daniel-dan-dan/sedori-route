@@ -44,7 +44,7 @@ if (!/CACHE_PREFIX\s*=\s*['"]sedori-route-['"]/.test(sw)) {
 if (!/\.filter\(k\s*=>\s*k\.startsWith\(CACHE_PREFIX\)\s*&&\s*k\s*!==\s*CACHE_NAME\)/.test(sw)) {
   errors.push('旧cache削除がsedori-route専用prefixへ限定されていません。');
 }
-if (cacheBustVersions.length !== 12 || cacheBustVersions.some((version) => version !== badgeVersion)) {
+if (cacheBustVersions.length !== 10 || cacheBustVersions.some((version) => version !== badgeVersion)) {
   errors.push(`CSS/JSのcache bustが画面版数(${badgeVersion})と一致していません。`);
 }
 if (`v${pairStyleVersion}` !== badgeVersion) errors.push('pair.html のcache bustが画面版数と一致していません。');
@@ -55,11 +55,12 @@ if (!requiredCsp.test(html) || !requiredCsp.test(pair)) errors.push('index/pair�
 if (/<script(?![^>]*\bsrc=)[^>]*>/i.test(html) || /<script(?![^>]*\bsrc=)[^>]*>/i.test(pair)) {
   errors.push('inline scriptが残っています。');
 }
-['bootstrap.js?v=', 'pair.js?v=', 'brand-guide.js?v=', 'brand-guide-sync.js?v=', 'brand-guide.css?v='].forEach(asset => {
+['bootstrap.js?v=', 'pair.js?v='].forEach(asset => {
   if (!sw.includes(`./${asset}${badgeVersion.slice(1)}`)) errors.push(`Service Worker未登録: ${asset}`);
 });
-if (!guideHtml.includes(`data-version="${badgeVersion}"`) || [...guideHtml.matchAll(/\?v=(\d+)/g)].some(m => `v${m[1]}` !== badgeVersion)) errors.push('図鑑専用ページの版数が一致していません。');
-if (!sw.includes('./brand-guide.html') || !sw.includes(`./brand-guide-entry.js?v=${badgeVersion.slice(1)}`)) errors.push('図鑑専用ページがオフライン対象に含まれていません。');
+if (!guideHtml.includes(`brand-guide-entry.js?v=${badgeVersion.slice(1)}`) || /(?:brand-guide-sync|brand-guide)\.js\?/.test(guideHtml) || guideHtml.includes('bootstrap.js')) errors.push('旧図鑑URLは独立アプリへの転送のみとしてください。');
+if (/brand-guide/.test(sw)) errors.push('店舗キャッシュに図鑑ファイルが含まれています。');
+if (/brand-guide\.(?:js|css)/.test(html)) errors.push('店舗画面が図鑑を読み込んでいます。');
 
 const chainIcons = readdirSync(join(here, 'icons', 'chains')).filter(name => name.endsWith('.png'));
 const missingChainIcons = chainIcons.filter(name => !sw.includes(`./icons/chains/${name}`));

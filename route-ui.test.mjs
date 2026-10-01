@@ -96,8 +96,8 @@ test('store search normalizes width and combines words across name and address',
   assert.equal(app.storeMatchesSearch_(store,'abc 泉区'),true);
   assert.equal(app.storeMatchesSearch_(store,'abc 山形'),false);
 });
-test('map fallback, five-menu navigation and waiting updates preserve safe controls',()=>{
-  assert.equal([...index.matchAll(/class="nav-item(?: active)?"/g)].length,5);
+test('map fallback, four-menu navigation and waiting updates preserve safe controls',()=>{
+  assert.equal([...index.matchAll(/class="nav-item(?: active)?"/g)].length,4);
   assert.match(index,/data-view="more"/);
   assert.match(source,/basemaps\.cartocdn\.com\/rastertiles\/voyager/);
   assert.doesNotMatch(source,/cyberjapandata\.gsi\.go\.jp\/xyz\/pale/);

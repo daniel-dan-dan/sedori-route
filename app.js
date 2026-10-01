@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v229';
+  const ASSET_VER = 'v230';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -502,9 +502,9 @@ const App = (() => {
   // ---------- 初期化 ----------
 
   async function init() {
-    // 旧hashリンクも、在庫APIを読み込まない図鑑専用ページへ案内する。
+    // 旧hashのブックマークだけ独立した図鑑へ転送する。
     if (window.location.hash === '#brand-guide') {
-      window.location.replace('brand-guide.html');
+      window.location.replace('brand-guide/');
       return;
     }
     setupNav();
@@ -544,10 +544,8 @@ const App = (() => {
     } catch (error) {
       stores = normalizeStores(await Storage.getCachedStores());
       config = await Storage.getCachedConfig();
-      if (Router.getCurrentView() !== 'brand-guide') {
-        Router.navigate('settings');
-        toast(error.message, 7000);
-      }
+      Router.navigate('settings');
+      toast(error.message, 7000);
       return;
     }
 
@@ -563,10 +561,8 @@ const App = (() => {
     if (!API.hasToken()) {
       stores = normalizeStores(await Storage.getCachedStores());
       config = await Storage.getCachedConfig();
-      if (Router.getCurrentView() !== 'brand-guide') {
-        Router.navigate('settings');
-        toast('端末接続コードを設定してください', 5000);
-      }
+      Router.navigate('settings');
+      toast('端末接続コードを設定してください', 5000);
       return;
     }
 
@@ -602,7 +598,6 @@ const App = (() => {
     }
 
     const navigateInitial = () => {
-      if (Router.getCurrentView() === 'brand-guide') return;
       if (patrolState) {
         Router.navigate('patrol');
       } else if (pendingStartState && optimizedRoute) {
@@ -661,8 +656,6 @@ const App = (() => {
   }
 
   async function handleApiAuthError_() {
-    // 図鑑は端末内の資料だけを読む。接続エラーで閲覧を中断させない。
-    if (Router.getCurrentView() === 'brand-guide') return;
     if (authFailureHandling) return;
     authFailureHandling = true;
     try {
@@ -698,9 +691,6 @@ const App = (() => {
 
   function registerViews() {
     Router.register('home', renderHome);
-    Router.register('brand-guide', container => {
-      window.location.assign('brand-guide.html');
-    });
     Router.register('route-select', renderRouteSelect);
     Router.register('history', renderHistory);
     Router.register('history-detail', renderHistoryDetail);
@@ -5004,7 +4994,6 @@ const App = (() => {
     setTitle('設定');
     const url = API.getUrl();
     let html = `
-      <a class="amazon-pricing-entry brand-guide-entry" href="brand-guide.html"><span><strong>ブランド図鑑</strong><span>独立したブランド図鑑アプリを開きます</span></span><span aria-hidden="true">›</span></a>
       <div class="settings-section-title">基本設定</div>
       <div class="card settings-card">
         <div class="card-title">店舗スコアの集計状況</div>

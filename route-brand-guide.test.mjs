@@ -119,12 +119,13 @@ test('public viewer has no network/upload, inventory DB, HTML injection or bundl
   assert.doesNotMatch(source, /\bfetch\s*\(|XMLHttpRequest|sendBeacon|innerHTML|Storage\.|API\.|data:image\/jpeg;base64,\/9/);
   assert.match(source, /textContent/); assert.match(source, /referrerPolicy = 'no-referrer'/);
   for (const file of ['brand-guide.js', 'brand-guide.css']) {
-    assert.ok(read('sw.js').includes(`./${file}?v=`)); assert.ok(read('index.html').includes(`${file}?v=`));
+    assert.ok(read('brand-guide/index.html').includes(`${file}?v=`));
+    assert.ok(read('brand-guide/sw.js').includes(`${file}?v=`));
+    assert.ok(!read('sw.js').includes(file)); assert.ok(!read('index.html').includes(file));
   }
-  assert.doesNotMatch(read('app.js'), /btn-brand-guide/);
-  assert.match(read('index.html'), /data-view="brand-guide"/);
-  assert.match(read('app.js'), /if \(Router.getCurrentView\(\) === 'brand-guide'\) return/);
-  assert.match(read('router.js'), /'brand-guide': 'brand-guide'/);
+  assert.doesNotMatch(read('index.html'), /data-view="brand-guide"/);
+  assert.doesNotMatch(read('app.js'), /Router\.register\('brand-guide'|brand-guide-entry|href="brand-guide/);
+  assert.doesNotMatch(read('router.js'), /'brand-guide':/);
 });
 test('direct guide startup never opens inventory API or synchronizes pending writes', async () => {
   const app = read('app.js');
@@ -141,15 +142,14 @@ test('direct guide startup never opens inventory API or synchronizes pending wri
     Storage: new Proxy({}, { get() { assert.fail('inventory storage must not be accessed'); } }),
   };
   vm.runInNewContext(app.slice(start, end) + '\nthis.run = init;', context);
-  await context.run(); assert.equal(redirected, 'brand-guide.html');
+  await context.run(); assert.equal(redirected, 'brand-guide/');
 });
-test('standalone guide excludes inventory scripts and prohibits remote connections', () => {
+test('legacy guide page only redirects without loading viewer or store business scripts', () => {
   const html = read('brand-guide.html');
-  assert.doesNotMatch(html, /src="(?:storage|api|app|quiz|amazon-pricing)\.js/);
-  assert.match(html, /connect-src 'self' https:\/\/script.google.com/);
-  assert.match(html, /img-src 'self' data: blob:;/);
+  assert.doesNotMatch(html, /src="(?:storage|api|app|quiz|amazon-pricing|bootstrap|brand-guide-sync|brand-guide)\.js/);
+  assert.doesNotMatch(html, /rel="manifest"/);
   assert.match(html, /brand-guide-entry\.js/);
-  assert.match(html, /brand-guide-sync\.js/);
+  assert.match(read('brand-guide-entry.js'), /location\.replace\('brand-guide\//);
 });
 
 test('future additions accept 31 brands and expanded appendix', async () => {

@@ -7,7 +7,6 @@ const Router = (() => {
   let currentView = null;
   const navViewByRoute = {
     home: 'home',
-    'brand-guide': 'brand-guide',
     'route-select': 'home',
     patrol: 'home',
     summary: 'home',
