@@ -356,3 +356,102 @@ test('late route-stop detail load cannot replace another route header',async()=>
   resolveA([{store_id:'store-A'}]);await first;
   assert.deepEqual(ctx.events,['route-B']);
 });
+
+test('11店舗の事前取得後は店舗ごとの読込を挟まず保存できる', async () => {
+  const calls=[];
+  const stops=Array.from({length:11},(_,i)=>({route_id:'route-fast',store_id:'store-'+i,stop_revision:createHash('sha256').update('before-'+i).digest('hex')}));
+  const {API}=harness(memoryIndexedDb(),async(_url,options)=>{
+    const body=JSON.parse(options.body);calls.push(body);
+    if(body.action==='getRouteStops')return response(stops);
+    assert.equal(body.expected_stop_revision,stops.find(s=>s.store_id===body.store_id).stop_revision);
+    return response({updated:true,stop_revision:createHash('sha256').update('after-'+body.store_id).digest('hex')});
+  });
+  await API.prepareStopUpdate({route_id:'route-fast',store_id:'store-0'});
+  for(const stop of stops) {
+    await API.prepareStopUpdate({route_id:stop.route_id,store_id:stop.store_id});
+    await API.updateStop({route_id:stop.route_id,store_id:stop.store_id,status:'visited'},{queueOnFailure:false});
+  }
+  assert.equal(calls.filter(c=>c.action==='getRouteStops').length,1);
+  assert.equal(calls.filter(c=>c.action==='updateStop').length,11);
+  assert.match(appSource,/API\.prepareStopUpdate\(\{ route_id: patrolState.routeId, store_id: current.store_id \}\)/);
+});
+
+test('事前取得中に完了を押しても同じ読込を共有し、保存は読込後の1回だけ', async () => {
+  const server=stopServer(),calls=[];let finish,started;
+  const began=new Promise(resolve=>{started=resolve});
+  const {API}=harness(memoryIndexedDb(),async(_url,options)=>{
+    const body=JSON.parse(options.body);calls.push(body);
+    if(body.action==='getRouteStops')return new Promise(resolve=>{finish=()=>resolve(response(server.read()));started()});
+    const result=server.update(body);return response(result.data,result.error);
+  });
+  const preparing=API.prepareStopUpdate(stopBody);await began;
+  const writing=API.updateStop(stopBody,{queueOnFailure:false});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(calls.length,1);
+  finish();await Promise.all([preparing,writing]);
+  assert.deepEqual(calls.map(c=>c.action),['getRouteStops','updateStop']);
+});
+
+test('事前取得の失敗は書込を送らず、後の操作で読込から再確認できる', async () => {
+  const server=stopServer(),calls=[];
+  const {API,Storage}=harness(memoryIndexedDb(),async(_url,options)=>{
+    const body=JSON.parse(options.body);calls.push(body);
+    if(calls.length===1)throw new TypeError('read failed');
+    if(body.action==='getRouteStops')return response(server.read());
+    const result=server.update(body);return response(result.data,result.error);
+  });
+  await assert.rejects(API.prepareStopUpdate(stopBody));
+  assert.equal((await Storage.getPendingActions()).length,0);
+  await API.updateStop(stopBody,{queueOnFailure:false});
+  assert.deepEqual(calls.map(c=>c.action),['getRouteStops','getRouteStops','updateStop']);
+});
+
+test('保存前から遅れて届いた店舗一覧は保存後の確認値を上書きしない', async () => {
+  const server=stopServer(),calls=[];let finish,started;
+  const began=new Promise(resolve=>{started=resolve});let reads=0;
+  const {API}=harness(memoryIndexedDb(),async(_url,options)=>{
+    const body=JSON.parse(options.body);calls.push(body);
+    if(body.action==='getRouteStops') {
+      reads++;
+      if(reads===1)return response(server.read());
+      const old=server.read();return new Promise(resolve=>{finish=()=>resolve(response(old));started()});
+    }
+    const result=server.update(body);return response(result.data,result.error);
+  });
+  await API.prepareStopUpdate(stopBody);
+  const refreshing=API.getRouteStops({route_id:stopBody.route_id});await began;
+  await API.updateStop(stopBody,{queueOnFailure:false});
+  finish();await refreshing;
+  await API.updateStop({...stopBody,status:'visited'},{queueOnFailure:false});
+  const writes=calls.filter(c=>c.action==='updateStop');
+  assert.notEqual(writes[0].expected_stop_revision,writes[1].expected_stop_revision);
+  assert.equal(server.state(),'visited');
+});
+
+test('事前取得後に他端末で変わった店舗は上書きせず、拒否後に新しい確認値を取得する', async () => {
+  const server=stopServer(),calls=[];
+  const {API,Storage}=harness(memoryIndexedDb(),async(_url,options)=>{
+    const body=JSON.parse(options.body);calls.push(body);
+    if(body.action==='getRouteStops')return response(server.read());
+    const result=server.update(body);return response(result.data,result.error);
+  });
+  await API.prepareStopUpdate(stopBody);
+  server.update({...stopBody,status:'visited',expected_stop_revision:server.read()[0].stop_revision});
+  const writes=server.writes();
+  await assert.rejects(API.updateStop(stopBody,{queueOnFailure:false}),{code:'STOP_REFRESH_REQUIRED'});
+  assert.equal(server.writes(),writes);assert.equal(server.state(),'visited');
+  assert.equal((await Storage.getPendingActions()).length,0);
+  await API.updateStop(stopBody,{queueOnFailure:false});
+  assert.equal(calls.filter(c=>c.action==='getRouteStops').length,2);
+});
+
+test('別巡回の同じ店舗IDや壊れた確認値を事前取得に流用しない', async () => {
+  const calls=[];
+  const {API,Storage}=harness(memoryIndexedDb(),async(_url,options)=>{
+    const body=JSON.parse(options.body);calls.push(body.action);
+    return response([{route_id:'different-route',store_id:'store-a',stop_revision:'a'.repeat(64)},
+      {route_id:'route-a',store_id:'store-a',stop_revision:'invalid'}]);
+  });
+  await assert.rejects(API.updateStop(stopBody),{code:'STOP_UPDATE_REQUIRED'});
+  assert.deepEqual(calls,['getRouteStops']);assert.equal((await Storage.getPendingActions()).length,0);
+});

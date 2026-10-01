@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v227';
+  const ASSET_VER = 'v228';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -2526,6 +2526,10 @@ const App = (() => {
 
     // タイマー開始
     startPatrolTimer();
+    // Prepare while the shop is being visited; completion still awaits the
+    // confirmed server write. Failure is read-only and retried on deliberate save.
+    API.prepareStopUpdate({ route_id: patrolState.routeId, store_id: current.store_id })
+      .catch(error => console.warn('stop save preparation failed:', error));
     loadPatrolStoreContext(current);
     refreshInventoryStatus_();
 

@@ -31,6 +31,14 @@ const API = (() => {
   let credentialDbPromise = null;
   let credentialReadyPromise = initializeCredentials_();
   const stopRevisions = new Map();
+  const stopReadsInFlight = new Map();
+  let stopRevisionGeneration = 0;
+
+  function clearStopRevisions_() {
+    stopRevisionGeneration += 1;
+    stopRevisions.clear();
+    stopReadsInFlight.clear();
+  }
   // Startup may fail before the view awaits ready(). Keep that rejection
   // handled, and allow a later explicit attempt to reopen storage safely.
   credentialReadyPromise.catch(() => {});
@@ -151,6 +159,7 @@ const API = (() => {
     if (!isValidUrl(normalized)) {
       throw apiError_('Google Apps Scriptの正しいURLを入力してください', 'INVALID_URL');
     }
+    clearStopRevisions_();
     baseUrl = normalized;
     localStorage.setItem('gas_api_url', baseUrl);
   }
@@ -165,6 +174,7 @@ const API = (() => {
   async function setToken(value) {
     await ready();
     const token = String(value || '').trim();
+    clearStopRevisions_();
     await writeCredential_(PAIRING_CODE_KEY, token);
   }
 
@@ -270,6 +280,7 @@ const API = (() => {
 
   async function clearDeviceCredential() {
     await ready();
+    clearStopRevisions_();
     await Promise.all([
       writeCredential_(DEVICE_TOKEN_KEY, ''),
       writeCredential_(PENDING_DEVICE_TOKEN_KEY, ''),
@@ -360,6 +371,8 @@ const API = (() => {
         ...(action === 'updateAmazonPricingPreference' ? { last_error_code: 'OPERATION_OUTCOME_UNKNOWN' } : {}) });
       if (reservation.conflictId) throw apiError_(`同じ内容を確認中です。再入力せず受付ID ${reservation.conflictId} の送信待ちを確認してください`, 'PENDING_OPERATION_EXISTS');
     }
+    // A read begun before/during a write must not replace its newer revision.
+    if (action === 'updateStop') stopRevisionGeneration += 1;
     const controller = new AbortController();
     const timeoutMs = Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -377,6 +390,7 @@ const API = (() => {
         if (result?.updated !== true || !/^[a-f0-9]{64}$/.test(result.stop_revision || '')) {
           throw apiError_('店舗の保存結果を確認できません。受付を残して再確認します', 'OPERATION_OUTCOME_UNKNOWN');
         }
+        stopRevisionGeneration += 1;
         stopRevisions.set(JSON.stringify([body.route_id, body.store_id]), result.stop_revision);
       }
       if (typeof options.validateResult === 'function' && !options.validateResult(result)) {
@@ -395,7 +409,10 @@ const API = (() => {
         || /load failed|failed to fetch|networkerror/i.test(String(error.message || error));
       if (!isRead) {
         const stopDefinitelyRejected = action === 'updateStop' && ['STOP_REFRESH_REQUIRED', 'STOP_UPDATE_REQUIRED'].includes(error.code);
-        if (action === 'updateStop') stopRevisions.delete(JSON.stringify([body.route_id, body.store_id]));
+        if (action === 'updateStop') {
+          stopRevisionGeneration += 1;
+          stopRevisions.delete(JSON.stringify([body.route_id, body.store_id]));
+        }
         const pricingDefinitelyRejected = action === 'updateAmazonPricingPreference' &&
           ['INVALID_INPUT','PRICING_REFRESH_REQUIRED','PRICING_REVISION_CONFLICT','BUSY','UNAUTHORIZED'].includes(error.code);
         await Storage.settlePendingAction(operationId, (pricingDefinitelyRejected || stopDefinitelyRejected) ? { remove: true } : action === 'updateAmazonPricingPreference' ? {
@@ -429,18 +446,45 @@ const API = (() => {
     return request_(action, body, options);
   }
 
-  async function updateStop(body, options = {}) {
-    const key = JSON.stringify([body.route_id, body.store_id]);
-    let revision = stopRevisions.get(key);
-    if (!revision) {
-      const stops = await get('getRouteStops', { route_id: body.route_id });
-      const stop = Array.isArray(stops) ? stops.find(item => String(item.store_id) === String(body.store_id)) : null;
-      revision = stop?.stop_revision;
-      if (!/^[a-f0-9]{64}$/.test(revision || '')) {
-        throw apiError_('店舗の変更前の状態を確認できません。アプリを更新して履歴を再読み込みしてください', 'STOP_UPDATE_REQUIRED');
+  function getRouteStops(params = {}) {
+    const readKey = JSON.stringify(params);
+    if (stopReadsInFlight.has(readKey)) return stopReadsInFlight.get(readKey);
+    const generation = stopRevisionGeneration;
+    const task = get('getRouteStops', params).then(stops => {
+      if (Array.isArray(stops) && generation === stopRevisionGeneration) {
+        // Keep every stop from this one read; do not refetch the whole route
+        // whenever the user completes another shop. Server comparisons remain.
+        const routeId = String(params.route_id || '');
+        for (const key of stopRevisions.keys()) {
+          if (JSON.parse(key)[0] === routeId) stopRevisions.delete(key);
+        }
+        for (const stop of stops) {
+          if (String(stop.route_id) === routeId && stop.store_id
+              && /^[a-f0-9]{64}$/.test(stop.stop_revision || '')) {
+            stopRevisions.set(JSON.stringify([routeId, String(stop.store_id)]), stop.stop_revision);
+          }
+        }
       }
-      stopRevisions.set(key, revision);
+      return stops;
+    });
+    const shared = task.finally(() => {
+      if (stopReadsInFlight.get(readKey) === shared) stopReadsInFlight.delete(readKey);
+    });
+    stopReadsInFlight.set(readKey, shared);
+    return shared;
+  }
+
+  async function prepareStopUpdate(body) {
+    const key = JSON.stringify([String(body.route_id), String(body.store_id)]);
+    if (!stopRevisions.has(key)) await getRouteStops({ route_id: String(body.route_id) });
+    if (!/^[a-f0-9]{64}$/.test(stopRevisions.get(key) || '')) {
+      throw apiError_('店舗の変更前の状態を確認できません。アプリを更新して履歴を再読み込みしてください', 'STOP_UPDATE_REQUIRED');
     }
+  }
+
+  async function updateStop(body, options = {}) {
+    await prepareStopUpdate(body);
+    const revision = stopRevisions.get(JSON.stringify([String(body.route_id), String(body.store_id)]));
     return post('updateStop', { ...body, expected_stop_revision: revision }, options);
   }
 
@@ -452,7 +496,7 @@ const API = (() => {
     getStores:        ()          => get('getStores'),
     getConfig:        ()          => get('getConfig'),
     getRouteHistory:  (p = {})    => get('getRouteHistory', p),
-    getRouteStops:    (p = {})    => get('getRouteStops', p),
+    getRouteStops, prepareStopUpdate,
     getRouteAreaVisits:(p = {})   => get('getRouteAreaVisits', p),
     getRouteCorrectionSuggestions:(p = {}) => get('getRouteCorrectionSuggestions', p),
     getPurchases:     (p = {})    => get('getPurchases', p),
