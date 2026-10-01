@@ -102,7 +102,7 @@ function createApiHarness({ initial = {}, initialCredentials = {}, fetchImpl } =
   return { API: context.__api, values, credentials: credentialDb.values };
 }
 
-function createAppConcurrencyHarness({ startRoute, updateStop, endRoute } = {}) {
+function createAppConcurrencyHarness({ startRoute, updateStop, endRoute, pending = [], saveCurrentRoute, clearCurrentRoute } = {}) {
   const calls = { startRoute: [], updateStop: [], endRoute: [] };
   const buttons = new Map();
   ['btn-start-patrol', 'btn-confirm-route', 'btn-planned-start', 'btn-depart', 'btn-skip', 'btn-end']
@@ -123,7 +123,7 @@ function createAppConcurrencyHarness({ startRoute, updateStop, endRoute } = {}) 
   let operationSequence = 0;
   const storageMock = {
     async getCurrentRoute() { return savedCurrentRoute; },
-    async saveCurrentRoute(value) { savedCurrentRoute = value; return value; },
+    async saveCurrentRoute(value) { if (saveCurrentRoute) await saveCurrentRoute(value); savedCurrentRoute = structuredClone(value); return value; },
     async reserveRouteStart(value) {
       if (!savedCurrentRoute) savedCurrentRoute = value;
       return savedCurrentRoute;
@@ -136,7 +136,8 @@ function createAppConcurrencyHarness({ startRoute, updateStop, endRoute } = {}) 
     async clearRejectedRouteStart(operationId) {
       if (savedCurrentRoute?.routeId === 'pending' && savedCurrentRoute.startOperationId === operationId) savedCurrentRoute = null;
     },
-    async clearCurrentRoute() { savedCurrentRoute = null; },
+    async clearCurrentRoute() { if (clearCurrentRoute) await clearCurrentRoute(); savedCurrentRoute = null; },
+    async getPendingActions() { return pending; },
     async getPlannedRoute() { return savedPlannedRoute; },
     async savePlannedRoute(value) { savedPlannedRoute = value; return value; },
     async cacheConfig() {},
@@ -151,13 +152,16 @@ function createAppConcurrencyHarness({ startRoute, updateStop, endRoute } = {}) 
       calls.startRoute.push(payload);
       return startRoute ? startRoute(payload) : { route_id: 'route-1', start_time: '2026-08-01 06:00:00' };
     },
+    async createStopUpdateRequest(payload) {
+      return { ...payload, operation_id: `stop-test-${++operationSequence}`, expected_stop_revision: "a".repeat(64) };
+    },
     async updateStop(payload) {
       calls.updateStop.push(payload);
       return updateStop ? updateStop(payload) : { updated: true };
     },
     async endRoute(payload) {
       calls.endRoute.push(payload);
-      return endRoute ? endRoute(payload) : { route_id: payload.route_id };
+      return endRoute ? endRoute(payload) : { route_id: payload.route_id, total_purchase:0, total_items:0 };
     },
     async updateConfig() { return { updated: true }; },
     async getStores() { return []; },
@@ -201,6 +205,7 @@ function createAppConcurrencyHarness({ startRoute, updateStop, endRoute } = {}) 
     Promise,
     Map,
     Set,
+    structuredClone,
     setTimeout() { return 1; },
     clearTimeout() {},
     setInterval() { return 1; },
@@ -241,13 +246,13 @@ test('Google Mapsルートを4店舗以下の区間へ分割する', () => {
   });
 });
 
-test('店舗完了はGAS保存を待ち、時刻を送り、失敗時に位置を戻す', () => {
+test('店舗完了は固定した受付と時刻を保存してからGASへ送り、確認後だけ次へ進む', () => {
   const source = functionSource(app, 'completeCurrentStop_', 'startPatrolTimer');
-  assert.match(source, /await API\.updateStop\([\s\S]*arrival_time:[\s\S]*departure_time:/);
+  assert.match(source, /API\.createStopUpdateRequest\([\s\S]*arrival_time:[\s\S]*departure_time:/);
   assert.match(source, /queueOnFailure:\s*false/);
-  assert.ok(source.indexOf('await API.updateStop') < source.indexOf('patrolState.currentIdx += 1'));
-  assert.match(source, /patrolState\.currentIdx = previous\.currentIdx/);
-  assert.ok(source.indexOf('await API.updateStop') < source.indexOf('await endPatrol'));
+  assert.ok(source.indexOf('await Storage.saveCurrentRoute(patrolState)') < source.indexOf('await API.updateStop'));
+  assert.ok(source.indexOf('await API.updateStop') < source.indexOf('patrolState.currentIdx = previousIdx + 1'));
+  assert.match(source, /current.completionConfirmed = true/);
 });
 
 test('巡回開始operationIdを送信前に永続化し、同じIDで再確認する', () => {
@@ -410,7 +415,7 @@ test('店舗保存中のスキップと手動終了はAPIを追加で呼ばな�
   const completing = harness.app.completeCurrentStop_('visited');
   const skipped = harness.app.completeCurrentStop_('skipped');
   const ended = harness.app.endPatrol();
-  await Promise.resolve();
+  await new Promise(resolve => setImmediate(resolve));
 
   assert.equal(harness.calls.updateStop.length, 1);
   assert.equal(harness.calls.endRoute.length, 0);
@@ -587,4 +592,102 @@ test('全チェーン画像をService Workerへ登録する', () => {
   const icons = readdirSync(join(here, 'icons', 'chains')).filter(name => name.endsWith('.png'));
   assert.ok(icons.length > 0);
   icons.forEach(name => assert.ok(sw.includes(`./icons/chains/${name}`), `${name} が未登録です`));
+});
+
+function recoveryRoute(overrides = {}) {
+  return { routeId:'route-1',startTime:Date.now(),currentIdx:0,
+    stops:[{store_id:'s1',name:'復旧テスト店舗',status:'visiting',arrivalTime:'2026-10-01T11:00:00Z',purchaseAmount:0,purchaseItems:0}],...overrides };
+}
+
+test('最終店舗保存後に終了が失敗しても店舗と位置を戻さず、再操作は同じ終了受付だけ確認', async () => {
+  let attempt=0;
+  const harness=createAppConcurrencyHarness({endRoute:async payload=>{
+    if(++attempt===1)throw new TypeError('response lost');
+    return {route_id:payload.route_id,total_purchase:0,total_items:0};
+  }});
+  harness.app.setPatrolState(recoveryRoute());
+  await harness.app.completeCurrentStop_('visited');
+  const saved=harness.getSavedCurrentRoute();
+  assert.equal(saved.currentIdx,1);assert.equal(saved.stops[0].status,'visited');
+  assert.equal(saved.stops[0].completionConfirmed,true);
+  assert.equal(harness.buttons.get('btn-depart').textContent,'終了結果を確認');
+  assert.equal(harness.buttons.get('btn-skip').disabled,true);
+  await harness.app.completeCurrentStop_('visited');
+  assert.equal(harness.calls.updateStop.length,1);
+  assert.equal(harness.calls.endRoute.length,2);
+  assert.equal(harness.calls.endRoute[0].operation_id,harness.calls.endRoute[1].operation_id);
+  assert.equal(harness.app.getPatrolState(),null);
+});
+
+test('画像の旧版状態は店舗を保存し直さず、保存済みendOperationIdで終了を確認', async () => {
+  const harness=createAppConcurrencyHarness();
+  const state=recoveryRoute({endOperationId:'endRoute-existing'});state.stops[0].status='visited';
+  harness.app.setPatrolState(state);
+  await harness.app.completeCurrentStop_('visited');
+  assert.equal(harness.calls.updateStop.length,0);
+  assert.equal(harness.calls.endRoute[0].operation_id,'endRoute-existing');
+  assert.equal(harness.app.getPatrolState(),null);
+});
+
+test('旧版の終了受付だけ残った端末も新しい受付を作らず復旧する', async () => {
+  const harness=createAppConcurrencyHarness({pending:[{action:'endRoute',operation_id:'old-end',body:{route_id:'route-1',operation_id:'old-end'}}]});
+  harness.app.setPatrolState(recoveryRoute());await harness.app.completeCurrentStop_('visited');
+  assert.equal(harness.calls.updateStop.length,0);assert.equal(harness.calls.endRoute[0].operation_id,'old-end');
+});
+
+test('途中店舗の応答が消えても再操作でID・時刻・変更前状態を変えない', async () => {
+  let attempt=0;
+  const harness=createAppConcurrencyHarness({updateStop:async()=>{if(++attempt===1)throw new TypeError('lost');return {updated:true}}});
+  harness.app.setPatrolState(recoveryRoute({stops:[...recoveryRoute().stops,{store_id:'s2',status:'planned'}]}));
+  await harness.app.completeCurrentStop_('visited');
+  assert.equal(harness.app.getPatrolState().currentIdx,0);
+  const saved=harness.getSavedCurrentRoute();
+  harness.app.setPatrolState(saved); // Reload before deliberate retry.
+  await harness.app.completeCurrentStop_('visited');
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.calls.updateStop[0])),JSON.parse(JSON.stringify(harness.calls.updateStop[1])));
+  assert.equal(harness.app.getPatrolState().currentIdx,1);
+});
+
+test('旧版の店舗受付を保存結果の確認に使い、新しい操作IDを作らない', async () => {
+  const body={route_id:'route-1',store_id:'s1',operation_id:'existing-stop',status:'visited',arrival_time:'old-arrival',departure_time:'old-departure',expected_stop_revision:'a'.repeat(64)};
+  const harness=createAppConcurrencyHarness({pending:[{action:'updateStop',operation_id:'existing-stop',body}]});
+  harness.app.setPatrolState(recoveryRoute());await harness.app.completeCurrentStop_('visited');
+  assert.equal(harness.calls.updateStop[0],body);
+});
+
+test('端末保存失敗はネット送信を止め、確認済み店舗は端末復旧後も再送しない', async () => {
+  let failBefore=true;
+  const before=createAppConcurrencyHarness({saveCurrentRoute:async()=>{if(failBefore)throw Error('disk full')}});
+  before.app.setPatrolState(recoveryRoute());await before.app.completeCurrentStop_('visited');
+  assert.equal(before.calls.updateStop.length,0);failBefore=false;
+  await before.app.completeCurrentStop_('visited');assert.equal(before.calls.updateStop.length,1);
+  let failAfter=true;
+  const after=createAppConcurrencyHarness({saveCurrentRoute:async state=>{if(state.currentIdx===1 && failAfter)throw Error('disk full')}});
+  after.app.setPatrolState(recoveryRoute());await after.app.completeCurrentStop_('visited');
+  assert.equal(after.app.getPatrolState().stops[0].completionConfirmed,true);
+  failAfter=false;await after.app.completeCurrentStop_('visited');
+  assert.equal(after.calls.updateStop.length,1);assert.equal(after.app.getPatrolState(),null);
+});
+
+test('終了の端末整理だけ失敗した場合は成功応答を保持してネット再送せず整理を再試行', async () => {
+  let blocked=true;
+  const harness=createAppConcurrencyHarness({clearCurrentRoute:async()=>{if(blocked)throw Error('cleanup failed')}});
+  harness.app.setPatrolState(recoveryRoute());await harness.app.completeCurrentStop_('visited');
+  assert.ok(harness.app.getPatrolState().endResult);blocked=false;
+  await harness.app.completeCurrentStop_('visited');
+  assert.equal(harness.calls.endRoute.length,1);assert.equal(harness.calls.updateStop.length,1);
+  assert.equal(harness.app.getPatrolState(),null);
+});
+
+test('仕入れ集計の確認待ちを店舗完了と取り違えず、確認してから別受付で完了を送る', async () => {
+  const pending=[{action:'updateStop',operation_id:'aggregate',body:{route_id:'route-1',store_id:'s1',status:'visiting',operation_id:'aggregate',expected_stop_revision:'a'.repeat(64)}}];
+  const harness=createAppConcurrencyHarness({pending,updateStop:async body=>{
+    if(body.operation_id==='aggregate')pending.splice(0);
+    return {updated:true};
+  }});
+  harness.app.setPatrolState(recoveryRoute());await harness.app.completeCurrentStop_('visited');
+  assert.equal(harness.calls.updateStop.length,2);
+  assert.equal(harness.calls.updateStop[0].operation_id,'aggregate');
+  assert.notEqual(harness.calls.updateStop[1].operation_id,'aggregate');
+  assert.equal(harness.calls.updateStop[1].status,'visited');
 });

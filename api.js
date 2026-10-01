@@ -482,10 +482,20 @@ const API = (() => {
     }
   }
 
-  async function updateStop(body, options = {}) {
+  async function createStopUpdateRequest(body) {
     await prepareStopUpdate(body);
-    const revision = stopRevisions.get(JSON.stringify([String(body.route_id), String(body.store_id)]));
-    return post('updateStop', { ...body, expected_stop_revision: revision }, options);
+    return { ...body,
+      operation_id: body.operation_id || createOperationId('updateStop'),
+      expected_stop_revision: stopRevisions.get(JSON.stringify([String(body.route_id), String(body.store_id)])),
+    };
+  }
+
+  async function updateStop(body, options = {}) {
+    // A saved request is checked using its original ID, times and revision.
+    // Changing the revision on recovery would change the server receipt hash.
+    const request = body.operation_id && /^[a-f0-9]{64}$/.test(body.expected_stop_revision || '')
+      ? body : await createStopUpdateRequest(body);
+    return post('updateStop', request, options);
   }
 
   return {
@@ -496,7 +506,7 @@ const API = (() => {
     getStores:        ()          => get('getStores'),
     getConfig:        ()          => get('getConfig'),
     getRouteHistory:  (p = {})    => get('getRouteHistory', p),
-    getRouteStops, prepareStopUpdate,
+    getRouteStops, prepareStopUpdate, createStopUpdateRequest,
     getRouteAreaVisits:(p = {})   => get('getRouteAreaVisits', p),
     getRouteCorrectionSuggestions:(p = {}) => get('getRouteCorrectionSuggestions', p),
     getPurchases:     (p = {})    => get('getPurchases', p),
@@ -507,7 +517,9 @@ const API = (() => {
     deleteStore:      (b)         => post('deleteStore', b),
     startRoute:       (b)         => post('startRoute', b, { queueOnFailure: false }),
     updateStop,
-    endRoute:         (b)         => post('endRoute', b, { queueOnFailure: false }),
+    endRoute:         (b)         => post('endRoute', b, { queueOnFailure: false,
+      validateResult: result => result?.route_id === b.route_id
+        && Number.isFinite(result.total_purchase) && Number.isFinite(result.total_items) }),
     addStopToRoute:   (b)         => post('addStopToRoute', b),
     addPurchase:      (b)         => post('addPurchase', b),
     addMemo:          (b)         => post('addMemo', b),

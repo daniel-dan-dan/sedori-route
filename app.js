@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v228';
+  const ASSET_VER = 'v229';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -2428,14 +2428,14 @@ const App = (() => {
   function updatePatrolStopControls_() {
     const disabled = patrolStopSaving || patrolEnding;
     const labels = {
-      'btn-depart': '完了して次へ',
+      'btn-depart': patrolState?.endOperationId ? '終了結果を確認' : '完了して次へ',
       'btn-skip': 'スキップ',
       'btn-end': '巡回終了',
     };
     Object.entries(labels).forEach(([id, defaultLabel]) => {
       const button = document.getElementById(id);
       if (!button) return;
-      button.disabled = disabled;
+      button.disabled = disabled || (Boolean(patrolState?.endOperationId) && id === 'btn-skip');
       button.setAttribute('aria-busy', disabled ? 'true' : 'false');
       if (patrolStopSaving && id === (patrolStopSavingStatus === 'visited' ? 'btn-depart' : 'btn-skip')) {
         button.textContent = '保存中...';
@@ -2451,9 +2451,12 @@ const App = (() => {
     if (!patrolState) { Router.navigate('home'); return; }
     setTitle('巡回中');
 
-    const { stops, currentIdx } = patrolState;
+    const { stops } = patrolState;
+    // A terminal route with an unresolved end receipt remains visible. Opening
+    // the screen must not silently send another end request.
+    const currentIdx = Math.min(patrolState.currentIdx, stops.length - 1);
     const current = stops[currentIdx];
-    if (!current) { endPatrol(); return; }
+    if (!current) { toast('巡回の保存状態を確認できません', 4000); return; }
     if (current.status === 'planned') {
       current.status = 'visiting';
       current.arrivalTime = current.arrivalTime || new Date().toISOString();
@@ -2528,8 +2531,10 @@ const App = (() => {
     startPatrolTimer();
     // Prepare while the shop is being visited; completion still awaits the
     // confirmed server write. Failure is read-only and retried on deliberate save.
-    API.prepareStopUpdate({ route_id: patrolState.routeId, store_id: current.store_id })
-      .catch(error => console.warn('stop save preparation failed:', error));
+    if (!patrolState.endOperationId && !current.completionConfirmed) {
+      API.prepareStopUpdate({ route_id: patrolState.routeId, store_id: current.store_id })
+        .catch(error => console.warn('stop save preparation failed:', error));
+    }
     loadPatrolStoreContext(current);
     refreshInventoryStatus_();
 
@@ -2538,8 +2543,15 @@ const App = (() => {
 
     document.getElementById('btn-end')?.addEventListener('click', () => endPatrol());
     updatePatrolStopControls_();
+    if (patrolState.endOperationId) {
+      ['btn-add-inventory-current', 'btn-add-stop'].forEach(id => {
+        const button = document.getElementById(id);
+        if (button) button.disabled = true;
+      });
+    }
 
     document.getElementById('btn-add-inventory-current')?.addEventListener('click', () => {
+      if (patrolState.endOperationId || patrolStopSaving || patrolEnding) return;
       showInventoryPurchaseModal(current, {
         routeId: patrolState.routeId,
         date: today_(),
@@ -2561,6 +2573,7 @@ const App = (() => {
     });
 
     document.getElementById('btn-add-stop')?.addEventListener('click', () => {
+      if (patrolState.endOperationId || patrolStopSaving || patrolEnding) return;
       const existingIds = new Set(patrolState.stops.map(s => s.store_id));
       showAddStopModal(existingIds, (store) => {
         // ローカルのpatrolStateに追加
@@ -2589,47 +2602,76 @@ const App = (() => {
 
   async function completeCurrentStop_(status) {
     if (!patrolState || patrolEnding || patrolStopSaving) return;
-    const current = patrolState.stops[patrolState.currentIdx];
+    const current = patrolState.stops[Math.min(patrolState.currentIdx, patrolState.stops.length - 1)];
     if (!current) return;
-    const previous = {
-      status: current.status,
-      arrivalTime: current.arrivalTime,
-      departureTime: current.departureTime,
-      currentIdx: patrolState.currentIdx,
-    };
     patrolStopSaving = true;
     patrolStopSavingStatus = status;
     updatePatrolStopControls_();
-
-    const nowIso = new Date().toISOString();
-    current.status = status;
-    current.arrivalTime = current.arrivalTime || nowIso;
-    current.departureTime = nowIso;
     try {
-      // 最終店舗も含め、GASへの保存完了を確認してから次へ進む。
-      await API.updateStop({
-        route_id: patrolState.routeId,
-        store_id: current.store_id,
-        status,
-        arrival_time: current.arrivalTime,
-        departure_time: current.departureTime,
-        purchase_amount: current.purchaseAmount,
-        purchase_items: current.purchaseItems,
-      }, { queueOnFailure: false });
-      patrolState.currentIdx += 1;
-      await Storage.saveCurrentRoute(patrolState);
+      const pending = (await Storage.getPendingActions()).filter(item =>
+        String(item.body?.route_id || '') === String(patrolState.routeId));
+      const pendingEnds = pending.filter(item => item.action === 'endRoute');
+      if (pendingEnds.length > 1) throw new Error('終了受付が複数あります。受付を残して確認してください');
+      if (patrolState.endOperationId || pendingEnds.length) {
+        // Recover old versions that returned to the final shop after end failed.
+        if (!patrolState.endOperationId) {
+          patrolState.endOperationId = pendingEnds[0].operation_id || pendingEnds[0].body.operation_id;
+          await Storage.saveCurrentRoute(patrolState);
+        }
+        return await endPatrol({ allowWhileStopSaving: true });
+      }
+      if (!current.completionConfirmed) {
+        const oldStops = pending.filter(item => item.action === 'updateStop'
+          && String(item.body?.store_id) === String(current.store_id));
+        if (oldStops.length > 1) throw new Error('店舗の受付が複数あります。受付を残して確認してください');
+        if (!current.completionRequest) {
+          const nowIso = new Date().toISOString();
+          const oldRequest = oldStops[0]?.body;
+          if (oldRequest && !/^[a-f0-9]{64}$/.test(oldRequest.expected_stop_revision || '')) {
+            throw new Error('旧版の店舗受付は変更前状態を確認できません。自動で送り直しません');
+          }
+          // A pending purchase aggregate is not a completed visit. Confirm
+          // that receipt first, then create a separate completion request.
+          if (oldRequest && !['visited', 'skipped'].includes(oldRequest.status)) {
+            await API.updateStop(oldRequest, { queueOnFailure: false });
+          }
+          current.completionRequest = oldRequest && ['visited', 'skipped'].includes(oldRequest.status)
+            ? oldRequest : await API.createStopUpdateRequest({
+            route_id: patrolState.routeId,
+            store_id: current.store_id,
+            status,
+            arrival_time: current.arrivalTime || nowIso,
+            departure_time: nowIso,
+            purchase_amount: current.purchaseAmount,
+            purchase_items: current.purchaseItems,
+          });
+        }
+        // Before network dispatch, persist the complete immutable wire request.
+        await Storage.saveCurrentRoute(patrolState);
+        await API.updateStop(current.completionRequest, { queueOnFailure: false });
+        const saved = current.completionRequest;
+        current.status = saved.status;
+        current.arrivalTime = saved.arrival_time || current.arrivalTime;
+        current.departureTime = saved.departure_time || current.departureTime;
+        current.completionConfirmed = true;
+      }
+      // Failure to save local progress cannot undo a confirmed server save.
+      const previousIdx = patrolState.currentIdx;
+      patrolState.currentIdx = previousIdx + 1;
+      try { await Storage.saveCurrentRoute(patrolState); }
+      catch (error) { patrolState.currentIdx = previousIdx; throw error; }
       if (patrolState.currentIdx >= patrolState.stops.length) {
         await endPatrol({ allowWhileStopSaving: true });
       } else {
         Router.navigate('patrol');
       }
     } catch (error) {
-      current.status = previous.status;
-      current.arrivalTime = previous.arrivalTime;
-      current.departureTime = previous.departureTime;
-      patrolState.currentIdx = previous.currentIdx;
-      await Storage.saveCurrentRoute(patrolState).catch(() => {});
-      toast(`店舗の保存に失敗したため次へ進みません: ${error.message}`, 5000);
+      // Only explicit pre-write rejections release the immutable request.
+      if (['STOP_REFRESH_REQUIRED', 'STOP_UPDATE_REQUIRED'].includes(error.code)) {
+        delete current.completionRequest;
+        await Storage.saveCurrentRoute(patrolState).catch(() => {});
+      }
+      toast(`店舗の保存結果を確認できませんでした。もう一度押すと同じ受付で確認します: ${error.message}`, 5000);
     } finally {
       patrolStopSaving = false;
       patrolStopSavingStatus = null;
@@ -2659,28 +2701,40 @@ const App = (() => {
     updatePatrolStopControls_();
     if (patrolTimerInterval) { clearInterval(patrolTimerInterval); patrolTimerInterval = null; }
     try {
-      const summary = { ...patrolState };
       const routeId = patrolState.routeId;
       if (!routeId || routeId === 'pending') throw new Error('巡回IDが確定していません');
       const operationId = patrolState.endOperationId || API.createOperationId('endRoute');
       patrolState.endOperationId = operationId;
       await Storage.saveCurrentRoute(patrolState);
-      toast('巡回終了を保存しています...', 1500);
-      await API.endRoute({ route_id: routeId, operation_id: operationId });
-      patrolState = null;
+      toast('巡回終了を確認しています...', 1500);
+      if (!patrolState.endResult) {
+        // Manual end may have been blocked by a pending purchase aggregate.
+        // Confirm only its original guarded receipt before ending the route.
+        const pendingStops = (await Storage.getPendingActions()).filter(item =>
+          item.action === 'updateStop' && String(item.body?.route_id) === String(routeId));
+        for (const pending of pendingStops) {
+          if (!pending.body?.operation_id || !/^[a-f0-9]{64}$/.test(pending.body.expected_stop_revision || '')) {
+            throw new Error('店舗の受付を確認できません');
+          }
+          await API.updateStop(pending.body, { queueOnFailure: false });
+        }
+        patrolState.endResult = await API.endRoute({ route_id: routeId, operation_id: operationId });
+        await Storage.saveCurrentRoute(patrolState);
+      }
+      const summary = { ...patrolState };
+      // Do not discard the in-memory receipt if IndexedDB cleanup fails.
       await Storage.clearCurrentRoute();
+      patrolState = null;
       Router.navigate('summary', { summary });
       invalidateHistoryApiCache();
-      await loadData();
+      // Unrelated data refresh must not turn a confirmed end into save failure.
+      loadData().catch(error => console.warn('after route end refresh failed:', error));
     } catch (error) {
-      if (patrolState && patrolState.currentIdx >= patrolState.stops.length) {
-        patrolState.currentIdx = Math.max(0, patrolState.stops.length - 1);
-        await Storage.saveCurrentRoute(patrolState);
+      if (patrolState) {
+        await Storage.saveCurrentRoute(patrolState).catch(() => {});
         Router.navigate('patrol');
-      } else if (patrolState) {
-        startPatrolTimer();
       }
-      toast(`巡回終了を保存できませんでした: ${error.message}`, 5000);
+      toast('巡回終了の結果を確認できませんでした。「終了結果を確認」で再確認できます', 5000);
     } finally {
       patrolEnding = false;
       updatePatrolStopControls_();

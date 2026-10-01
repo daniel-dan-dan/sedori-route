@@ -212,7 +212,7 @@ test('successful guarded updates reuse the returned revision and server refuses 
 
 function appHarness(apiStorage, chosenStore) {
   const instrumented=appSource.replace('return { init, loadData, toggleMapSelection };',
-    'return {audit:{startPatrol,setRoute(value){optimizedRoute=value},getState(){return patrolState},getPending(){return pendingStartState}}};');
+    'return {audit:{startPatrol,completeCurrentStop_,endPatrol,setState(value){patrolState=value},setRoute(value){optimizedRoute=value},getState(){return patrolState},getPending(){return pendingStartState}}};');
   const toast={textContent:'',classList:{add(){},remove(){}}};
   const ctx={...apiStorage,Router:{navigate(){},getCurrentView(){return 'home'}},
     RouteOptimizer:{generateMapsUrl(){return ''},generateMapsSegments(){return []}},
@@ -454,4 +454,49 @@ test('別巡回の同じ店舗IDや壊れた確認値を事前取得に流用し
   });
   await assert.rejects(API.updateStop(stopBody),{code:'STOP_UPDATE_REQUIRED'});
   assert.deepEqual(calls,['getRouteStops']);assert.equal((await Storage.getPendingActions()).length,0);
+});
+
+test('real Storage/API recovery confirms the lost end receipt without sending the final stop again',async()=>{
+  const receipts=new Map(),calls=[];let endExecutions=0,stopExecutions=0,loseEnd=true;
+  const subject=harness(memoryIndexedDb(),async(_url,options)=>{
+    const body=JSON.parse(options.body);calls.push(body);
+    if(body.action==='getRouteStops')return response([{route_id:'route-1',store_id:'s1',stop_revision:'a'.repeat(64)}]);
+    if(body.action==='getStores')return response([]);
+    if(body.action==='getConfig')return response({});
+    if(receipts.has(body.operation_id))return response(receipts.get(body.operation_id));
+    if(body.action==='updateStop') {
+      stopExecutions++;const result={updated:true,stop_revision:'b'.repeat(64)};
+      receipts.set(body.operation_id,result);return response(result);
+    }
+    if(body.action==='endRoute') {
+      endExecutions++;const result={route_id:'route-1',total_purchase:0,total_items:0};receipts.set(body.operation_id,result);
+      if(loseEnd){loseEnd=false;throw new TypeError('end response lost after server committed')}
+      return response(result);
+    }
+    throw Error('unexpected fixture action '+body.action);
+  });
+  const app=appHarness(subject,'s1');
+  app.setState({routeId:'route-1',currentIdx:0,startTime:Date.now(),stops:[{store_id:'s1',name:'fixture',status:'visiting',purchaseAmount:0,purchaseItems:0}]});
+  await app.completeCurrentStop_('visited');
+  const saved=await subject.Storage.getCurrentRoute();
+  assert.equal(saved.currentIdx,1);assert.equal(saved.stops[0].completionConfirmed,true);
+  assert.equal((await subject.Storage.getPendingActions())[0].action,'endRoute');
+  const reloaded=appHarness(subject,'s1');reloaded.setState(saved);
+  await reloaded.completeCurrentStop_('visited');
+  assert.equal(reloaded.getState(),null);
+  assert.equal(await subject.Storage.getCurrentRoute(),undefined);
+  assert.equal((await subject.Storage.getPendingActions()).length,0);
+  assert.equal(stopExecutions,1);assert.equal(endExecutions,1);
+  const ends=calls.filter(c=>c.action==='endRoute');
+  assert.equal(ends.length,2);assert.equal(ends[0].operation_id,ends[1].operation_id);
+});
+
+test('a malformed end acknowledgement keeps its receipt and never counts as completed',async()=>{
+  for(const data of [{route_id:'wrong-route',total_purchase:0,total_items:0},{route_id:'route-1'}]) {
+    let calls=0;
+    const {API,Storage}=harness(memoryIndexedDb(),async()=>{calls++;return response(data)});
+    await assert.rejects(API.endRoute({route_id:'route-1',operation_id:'bad-end-response'}),{code:'OPERATION_OUTCOME_UNKNOWN'});
+    assert.equal((await Storage.getPendingActions()).length,1);
+    assert.equal(await Storage.syncPending(),0);assert.equal(calls,1);
+  }
 });
