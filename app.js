@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v230';
+  const ASSET_VER = 'v231';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -2166,118 +2166,6 @@ const App = (() => {
     return '';
   }
 
-  function renderPatrolInsightSkeleton(store) {
-    const visits = Number(store.visit_count) || 0;
-    const totalPurchase = Number(store.total_purchase) || 0;
-    const totalItems = Number(store.total_items) || 0;
-    const avgStay = Number(store.avg_stay_min ?? 30);
-    const purchaseLabel = totalPurchase >= 10000
-      ? `${(totalPurchase / 10000).toFixed(totalPurchase >= 100000 ? 0 : 1)}万`
-      : (totalPurchase ? totalPurchase.toLocaleString() : '-');
-    return `
-      <div class="patrol-insight-grid">
-        <div class="patrol-insight"><div class="value">${visits}</div><div class="label">訪問</div></div>
-        <div class="patrol-insight"><div class="value">${purchaseLabel}</div><div class="label">累計仕入</div></div>
-        <div class="patrol-insight"><div class="value">${totalItems || '-'}</div><div class="label">点数</div></div>
-        <div class="patrol-insight"><div class="value">${avgStay}</div><div class="label">目安分</div></div>
-      </div>`;
-  }
-
-  function renderStoreContextPanel(store) {
-    return `
-      <div class="patrol-store-context card">
-        <div class="flex-between mb-8">
-          <div class="card-title">店舗メモ</div>
-          <button class="btn btn-sm btn-outline" id="btn-add-memo">メモ追加</button>
-        </div>
-        ${renderPatrolInsightSkeleton(store)}
-        <div id="store-context-body" class="store-context-body">
-          <div class="text-sm text-dim">過去メモを読み込み中...</div>
-        </div>
-      </div>`;
-  }
-
-  function renderMemoList(memos, finds) {
-    const memoHtml = (memos || []).slice(0, 3).map(m => `
-      <div class="memo-row">
-        <div class="memo-type">${esc(m.type || 'メモ')}</div>
-        <div class="memo-content">${esc(m.content || '')}</div>
-        <div class="memo-date">${esc(m.date || '')}</div>
-      </div>
-    `).join('');
-
-    const findHtml = (finds || []).slice(0, 2).map(f => `
-      <div class="memo-row">
-        <div class="memo-type">${esc(f.action || '発見')}</div>
-        <div class="memo-content">${esc(f.product_name || f.note || '')}</div>
-        <div class="memo-date">${esc(f.date || '')}</div>
-      </div>
-    `).join('');
-
-    if (!memoHtml && !findHtml) {
-      return '<div class="store-context-empty">この店舗のメモはまだありません。</div>';
-    }
-    return `
-      ${memoHtml ? `<div class="memo-section-title">過去メモ</div>${memoHtml}` : ''}
-      ${findHtml ? `<div class="memo-section-title mt-8">過去の発見</div>${findHtml}` : ''}
-    `;
-  }
-
-  async function loadPatrolStoreContext(store) {
-    const el = document.getElementById('store-context-body');
-    if (!el || !store?.store_id || !API.getUrl()) return;
-    try {
-      const [memos, finds] = await Promise.all([
-        API.getMemos({ store_id: store.store_id, limit: 3 }),
-        API.getFinds({ store_id: store.store_id, limit: 2 })
-      ]);
-      const currentEl = document.getElementById('store-context-body');
-      if (currentEl) currentEl.innerHTML = renderMemoList(memos, finds);
-    } catch (e) {
-      const currentEl = document.getElementById('store-context-body');
-      if (currentEl) currentEl.innerHTML = '<div class="store-context-empty">メモを取得できませんでした。</div>';
-    }
-  }
-
-  function showStoreMemoModal(store) {
-    const body = `
-      <div class="form-group">
-        <label class="form-label">種類</label>
-        <select class="form-select" id="memo-type">
-          <option>見る棚</option>
-          <option>強いジャンル</option>
-          <option>前回メモ</option>
-          <option>注意点</option>
-          <option>その他</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">内容</label>
-        <textarea class="form-textarea" id="memo-content" placeholder="例: ワゴンと季節家電を先に見る"></textarea>
-      </div>`;
-    showModal('店舗メモを追加', body, async (el) => {
-      const type = el.querySelector('#memo-type').value;
-      const content = el.querySelector('#memo-content').value.trim();
-      if (!content) {
-        toast('メモ内容を入力してください');
-        return false;
-      }
-      const result = await API.addMemo({
-        store_id: store.store_id,
-        type,
-        content,
-        date: today_()
-      });
-      if (result?._queued) {
-        toast('メモは通信復旧後に自動保存します', 4000);
-      } else {
-        toast('メモを保存しました');
-        await loadPatrolStoreContext(store);
-      }
-      return true;
-    });
-  }
-
   async function confirmPendingRouteStart_(pending) {
     const result = await API.startRoute({
       ...pending.startRequest,
@@ -2464,7 +2352,7 @@ const App = (() => {
         <div class="patrol-topline">
           <div>
             <div class="current-label">いま回る店舗</div>
-            <div class="current-progress">${currentIdx + 1} / ${stops.length} 店舗・残り${remainingCount}店舗</div><div id="current-inventory-count" class="current-progress">登録状況を確認中</div>
+            <div class="current-progress">${currentIdx + 1} / ${stops.length} 店舗・残り${remainingCount}店舗</div>
           </div>
           <div class="patrol-timer" id="patrol-timer">00:00:00</div>
         </div>
@@ -2479,9 +2367,6 @@ const App = (() => {
         <button class="btn btn-primary btn-block" id="btn-add-inventory-current">仕入れを記録</button>
         <button class="btn btn-outline btn-block" id="btn-depart">完了して次へ</button>
       </div>`;
-
-    html += buildInventoryStatusCard_(patrolState.routeId);
-    html += renderStoreContextPanel(current);
 
     // スキップ
     html += `<div class="mt-12"><button class="btn btn-sm btn-outline btn-block" id="btn-skip">スキップ</button></div>`;
@@ -2525,8 +2410,6 @@ const App = (() => {
       API.prepareStopUpdate({ route_id: patrolState.routeId, store_id: current.store_id })
         .catch(error => console.warn('stop save preparation failed:', error));
     }
-    loadPatrolStoreContext(current);
-    refreshInventoryStatus_();
 
     document.getElementById('btn-depart')?.addEventListener('click', () => completeCurrentStop_('visited'));
     document.getElementById('btn-skip')?.addEventListener('click', () => completeCurrentStop_('skipped'));
@@ -2550,7 +2433,6 @@ const App = (() => {
           current.purchaseAmount = (Number(current.purchaseAmount) || 0) + amount;
           current.purchaseItems = (Number(current.purchaseItems) || 0) + 1;
           Storage.saveCurrentRoute(patrolState);
-          refreshInventoryStatus_();
           syncWrite(API.updateStop({
             route_id: patrolState.routeId,
             store_id: current.store_id,
@@ -2586,8 +2468,6 @@ const App = (() => {
         }), '追加店舗');
       });
     });
-
-    document.getElementById('btn-add-memo')?.addEventListener('click', () => showStoreMemoModal(current));
   }
 
   async function completeCurrentStop_(status) {
@@ -2874,12 +2754,6 @@ const App = (() => {
       const body = card.querySelector('#inventory-status-body');
       body.innerHTML = `<div class="inventory-status-grid">${Object.keys(groups).map(status => `<button type="button" class="inventory-status-button ${status}" data-receipt-status="${status}" aria-label="${labels[status]} ${groups[status].length}点を確認"><strong>${groups[status].length}</strong><span>${labels[status]}</span></button>`).join('')}</div><p class="inventory-status-note">この端末から登録した商品の状況です。送信待ちは在庫シートへの反映が未確認です。</p>`;
       body.querySelectorAll('[data-receipt-status]').forEach(button => button.addEventListener('click', () => showInventoryStatusList_(groups[button.dataset.receiptStatus], labels[button.dataset.receiptStatus])));
-      const currentCount = document.getElementById('current-inventory-count');
-      if (currentCount && patrolState) {
-        const sid = patrolState.stops[patrolState.currentIdx]?.store_id;
-        const current = receipts.filter(item => item.body?.store_id === sid);
-        currentCount.textContent = `この店舗：在庫登録済み ${current.filter(item => item.status === 'registered').length}点・送信待ち ${current.filter(item => item.status === 'pending').length}点・要確認 ${current.filter(item => item.status === 'review').length}点`;
-      }
     } catch (error) {
       const body = card.querySelector('#inventory-status-body');
       if (body) body.textContent = '登録状況を確認できません。未確認のまま再登録せず、通信・端末保存をご確認ください。';

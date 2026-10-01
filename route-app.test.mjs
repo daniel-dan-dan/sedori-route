@@ -430,10 +430,8 @@ test('店舗保存中のスキップと手動終了はAPIを追加で呼ばな�
   assert.equal(harness.app.getPatrolState(), null);
 });
 
-test('メモAPIと認証失敗時の保存内容維持が接続されている', () => {
+test('メモの既存APIを維持し、認証失敗時にも保存内容を保持する', () => {
   assert.match(api, /addMemo:\s*\(b\)\s*=>\s*post\('addMemo'/);
-  assert.match(app, /const result = await API\.addMemo/);
-  assert.ok(app.indexOf('const result = await API.addMemo') < app.indexOf("toast('メモを保存しました')"));
   assert.match(api, /api-auth-error/);
   const authFailure = functionSource(app, 'handleApiAuthError_', 'setupNav');
   assert.doesNotMatch(authFailure, /clearRemoteCaches|clearDeviceCredential|setToken\(['"]{2}\)/);
