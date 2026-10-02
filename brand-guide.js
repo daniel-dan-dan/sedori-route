@@ -27,18 +27,20 @@ const BrandGuide = (() => {
     for (const match of value.matchAll(/(?<!\d)(\d{2})(?:SS|AW|FW)(?![A-Z])/gi)) {
       years.push({ year: 2000 + Number(match[1]), decade: false });
     }
-    if (!years.length) return { label: '年代不明', year: Infinity };
+    if (!years.length) return { label: '年代不明', year: Infinity, endYear: Infinity };
     years.sort((a, b) => a.year - b.year);
     const first = years[0], last = years[years.length - 1];
     const decade = years.some(item => item.decade);
     return { label: first.year === last.year
       ? `${first.year}${decade ? '年代' : '年'}`
-      : `${first.year}〜${last.year}${decade ? '年代' : '年'}`, year: first.year };
+      : `${first.year}〜${last.year}${decade ? '年代' : '年'}`, year: first.year, endYear: last.year };
   }
   function tagTimeline(groups) {
     return groups.map(group => ({ ...group, displayPeriod: tagPeriod(group.period) }))
       .filter(group => Number.isFinite(group.displayPeriod.year))
-      .sort((a, b) => a.displayPeriod.year - b.displayPeriod.year);
+      // Equal starting years are ordered by their latest observed year.
+      .sort((a, b) => a.displayPeriod.year - b.displayPeriod.year ||
+        a.displayPeriod.endYear - b.displayPeriod.endYear);
   }
   function modelExplanation(brand) {
     const m = brand.method, q = m.quickGuide;

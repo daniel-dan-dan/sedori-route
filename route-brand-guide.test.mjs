@@ -227,6 +227,17 @@ test('tag timeline is oldest first, stable within a year, unknown photos exclude
   assert.equal(ordered[0].photos, groups[4].photos);
 });
 
+test('overlapping tag periods with the same start put the latest end last without changing evidence', () => {
+  const { guide } = harness();
+  const groups = ['2024〜2026年', '2024年', '2024〜2025年', '2024年・2026年の掲載例', '2023〜2026年']
+    .map((period, id) => ({ period, id, photos: [{ basis: 'unchanged source' }] }));
+  const before = JSON.stringify(groups);
+  assert.equal(guide.tagTimeline(groups).map(g => g.id).join(','), '4,1,2,0,3');
+  assert.equal(guide.tagTimeline([groups[1], groups[0]]).map(g => g.id).join(','), '1,0');
+  assert.equal(JSON.stringify(groups), before);
+  assert.equal(guide.tagTimeline(groups)[1].photos, groups[1].photos);
+});
+
 test('right swipe returns only for a deliberate horizontal single gesture', () => {
   const { guide } = harness(); const start = { x: 20, y: 100, time: 100 };
   assert.equal(guide.isBackSwipe(start, { x: 140, y: 115, time: 500 }), true);
