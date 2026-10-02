@@ -451,6 +451,8 @@ const BrandGuide = (() => {
           }
           detail.append(card);
         }
+        // Common care-label reference is not a brand/model-number guide.
+        if (b.id === 'care-label-guide') return;
         const m = b.method;
         if (b.parentBrand && !m.code) return;
         const method = el('section', 'bg-method'); method.append(el('h3', 'bg-section-title', '02  型番の読み方'));

@@ -47,7 +47,7 @@ test('duplicate connect clicks share one registration; malformed code never regi
 });
 test('every standalone asset exists and version/scope stay consistent',()=>{
  const sw=read('brand-guide/sw.js'),html=read('brand-guide/index.html');
- assert.match(sw,/brand-guide-v25/);assert.match(html,/data-version="v25"/);assert.match(read('brand-guide/bootstrap.js'),/scope:'\.\/'/);
+ assert.match(sw,/brand-guide-v26/);assert.match(html,/data-version="v26"/);assert.match(read('brand-guide/bootstrap.js'),/scope:'\.\/'/);
  const assets=vm.runInNewContext(sw.slice(sw.indexOf('const ASSETS =')+15,sw.indexOf(';',sw.indexOf('const ASSETS ='))));
  for(const asset of assets){if(asset==='./')continue;const path=new URL(asset.split('?')[0],new URL('brand-guide/',import.meta.url));assert.ok(readFileSync(path).length);}
 });
@@ -78,7 +78,7 @@ test('worker upgrades reuse the existing guide URL and never register the store 
 });
 
 test('worker confirmation uses the displayed version rather than permanently comparing with v18',async()=>{
- for(const [pageVersion,workerVersion,expectedNotice] of [['v25','v25',false],['v99','v99',false],['v25','v22',true]]) {
+ for(const [pageVersion,workerVersion,expectedNotice] of [['v26','v26',false],['v99','v99',false],['v26','v22',true]]) {
   const listeners={},notices=[];
   const context={URL,document:{baseURI:'https://example.org/brand-guide/',getElementById(id){return id==='app-version-badge'?{dataset:{version:pageVersion}}:null;},createElement(){return {setAttribute(){}};},body:{prepend(node){notices.push(node);}}},navigator:{serviceWorker:{addEventListener(event,listener){listeners[event]=listener;},register:async()=>({active:{},addEventListener(){}})}}};
   vm.runInNewContext(read('brand-guide/bootstrap.js'),context);
