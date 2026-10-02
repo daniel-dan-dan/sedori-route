@@ -46,7 +46,10 @@ const BrandGuideSync = (() => {
         credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
         redirect: 'follow', signal: controller.signal,
       });
-      if (!response.ok) fail('図鑑の配信先に接続できませんでした。');
+      if (!response.ok) {
+        console.warn('[brand-guide] HTTP failure', action, response.status);
+        fail('図鑑の配信先に接続できませんでした。');
+      }
       const mime = response.headers.get('content-type') || '';
       if (!mime.includes('application/json')) fail('図鑑の配信を確認できませんでした。');
       if (Number(response.headers.get('content-length')) > maxBytes) fail('資料が容量上限を超えています。');
@@ -76,14 +79,41 @@ const BrandGuideSync = (() => {
         fail('最新版を取得できませんでした。次回もう一度確認します。');
       }
       if (action === 'getBrandGuideManifest' && parsed.success !== true) fail('図鑑の更新情報を確認できませんでした。');
-      return action === 'getBrandGuidePackage' ? raw : parsed.data;
+      return action === 'getBrandGuidePackage' && body.transport !== 'chunks-v1' ? raw : parsed.data;
     } finally { clearTimeout(timer); }
   }
   function validateManifest(m) {
     if (!m || m.schemaVersion !== 1 || !Number.isSafeInteger(m.revision) || m.revision < 1
       || !/^[a-f0-9]{64}$/.test(m.sha256) || !/^\d{4}-\d{2}-\d{2}$/.test(m.updatedAt) || !Number.isFinite(Date.parse(m.updatedAt)) || new Date(m.updatedAt).toISOString().slice(0, 10) !== m.updatedAt
       || !Number.isSafeInteger(m.bytes) || m.bytes < 1 || m.bytes > 40 * 1024 * 1024) fail('図鑑の更新情報が正しくありません。');
+    if (m.transport !== undefined && (m.transport !== 'chunks-v1' || !Number.isSafeInteger(m.characters)
+      || m.characters < 1 || m.characters > m.bytes || m.chunkCharacters !== 4 * 1024 * 1024)) fail('図鑑の分割情報が正しくありません。');
     return m;
+  }
+  async function receivePackage(manifest, token, guide, onStatus) {
+    if (manifest.transport !== 'chunks-v1') return request('getBrandGuidePackage', token, { sha256: manifest.sha256 }, guide.MAX_BYTES);
+    const count = Math.ceil(manifest.characters / manifest.chunkCharacters), parts = new Array(count);
+    let received = 0;
+    const receive = async index => {
+      const offset = index * manifest.chunkCharacters, length = Math.min(manifest.chunkCharacters, manifest.characters - offset);
+      const part = await request('getBrandGuidePackage', token, { sha256: manifest.sha256, revision: manifest.revision, transport: 'chunks-v1', offset }, manifest.chunkCharacters * 6 + 65536);
+      if (!part || part.format !== 'private-brand-guide-chunk' || part.schemaVersion !== 1 || part.sha256 !== manifest.sha256
+        || part.revision !== manifest.revision || part.bytes !== manifest.bytes || part.characters !== manifest.characters
+        || part.offset !== offset || part.nextOffset !== offset + length || typeof part.content !== 'string' || part.content.length !== length) {
+        fail('資料の一部を確認できませんでした。');
+      }
+      parts[index] = part.content; received++;
+      onStatus(`図鑑を受け取っています… ${received}/${count}`);
+    };
+    // Start after the first part validates; continue at most three read-only requests;
+    // end after every part matches one revision, or stop and retain the saved library.
+    await receive(0);
+    for (let index = 1; index < count; index += 3) {
+      const settled = await Promise.allSettled(Array.from({ length: Math.min(3, count - index) }, (_, n) => receive(index + n)));
+      const failed = settled.find(result => result.status === 'rejected');
+      if (failed) throw failed.reason;
+    }
+    return parts.join('');
   }
   function run({ guide, onStatus = () => {}, onSaved = () => {}, force = false }) {
     if (pending) return pending;
@@ -99,9 +129,10 @@ const BrandGuideSync = (() => {
         const old = await guide.load();
         if (old?.sha === manifest.sha256) { onStatus('最新版を保存済みです。ファイル選択は不要です。'); return { status: 'current' }; }
         if (old && (old.data.updatedAt > manifest.updatedAt || (old.remoteRevision || 0) > manifest.revision)) fail('配信中の資料が古いため、保存済みの図鑑を使います。');
-        onStatus('図鑑を保存しています…');
-        const raw = await request('getBrandGuidePackage', token, { sha256: manifest.sha256 }, guide.MAX_BYTES);
+        onStatus('図鑑を受け取っています…');
+        const raw = await receivePackage(manifest, token, guide, onStatus);
         if (new TextEncoder().encode(raw).length !== manifest.bytes) fail('資料を最後まで受け取れませんでした。');
+        onStatus('図鑑を保存しています…');
         const record = await guide.importFile({ size: manifest.bytes, text: async () => raw }, manifest);
         onSaved(record); onStatus('自動保存が完了しました。通信なしでも見られます。');
         return { status: 'saved' };
