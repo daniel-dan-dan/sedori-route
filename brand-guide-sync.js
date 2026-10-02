@@ -40,12 +40,22 @@ const BrandGuideSync = (() => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), action === 'getBrandGuidePackage' ? 90000 : 60000);
     try {
-      const response = await fetch(ENDPOINT, {
-        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ ...body, action, auth_token: token }),
-        credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
-        redirect: 'follow', signal: controller.signal,
-      });
+      let response;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        // Public cache discriminator only. Authentication stays in the POST body.
+        const nonce = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+        response = await fetch(ENDPOINT + '?read_request=' + nonce, {
+          method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ ...body, action, auth_token: token }),
+          credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
+          redirect: 'follow', signal: controller.signal,
+        });
+        if (response.status !== 404 || attempt === 1) break;
+        if (response.body) await response.body.cancel();
+        console.warn('[brand-guide] retry read', action, 404);
+        // One retry for an observed failed read, within the original deadline.
+        // Never retries registration, writes, or a JSON authorization failure.
+      }
       if (!response.ok) {
         let title = '';
         if ((response.headers.get('content-type') || '').includes('text/html')) {
