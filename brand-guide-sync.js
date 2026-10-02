@@ -50,56 +50,62 @@ const BrandGuideSync = (() => {
           credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
           redirect: 'follow', signal: controller.signal,
         });
-        if (response.status !== 404 || attempt === 1) break;
-        if (response.body) await response.body.cancel();
-        console.warn('[brand-guide] retry read', action, 404);
-        // One retry for an observed failed read, within the original deadline.
-        // Never retries registration, writes, or a JSON authorization failure.
-      }
-      if (!response.ok) {
-        let title = '';
-        if ((response.headers.get('content-type') || '').includes('text/html')) {
-          try {
-            const diagnosticReader = response.body.getReader();
-            const first = await diagnosticReader.read(); await diagnosticReader.cancel();
-            const start = new TextDecoder().decode((first.value || new Uint8Array()).slice(0, 4096));
-            title = (start.match(/<title[^>]*>([^<]{0,160})<\/title>/i)?.[1] || '')
-              .split(token).join('[redacted]').replace(/https?:\/\/\S+/g, '[url]').replace(/[A-Za-z0-9_.~-]{28,}/g, '[redacted]');
-          } catch {}
+        if (response.status === 404 && attempt === 0) {
+          if (response.body) await response.body.cancel();
+          console.warn('[brand-guide] retry read', action, 404);
+          continue;
         }
-        console.warn('[brand-guide] HTTP failure', action, response.status, title);
-        fail('図鑑の配信先に接続できませんでした。');
+        if (!response.ok) {
+          let title = '';
+          if ((response.headers.get('content-type') || '').includes('text/html')) {
+            try {
+              const diagnosticReader = response.body.getReader();
+              const first = await diagnosticReader.read(); await diagnosticReader.cancel();
+              const start = new TextDecoder().decode((first.value || new Uint8Array()).slice(0, 4096));
+              title = (start.match(/<title[^>]*>([^<]{0,160})<\/title>/i)?.[1] || '')
+                .split(token).join('[redacted]').replace(/https?:\/\/\S+/g, '[url]').replace(/[A-Za-z0-9_.~-]{28,}/g, '[redacted]');
+            } catch {}
+          }
+          console.warn('[brand-guide] HTTP failure', action, response.status, title);
+          fail('図鑑の配信先に接続できませんでした。');
+        }
+        const mime = response.headers.get('content-type') || '';
+        if (!mime.includes('application/json')) fail('図鑑の配信を確認できませんでした。');
+        if (Number(response.headers.get('content-length')) > maxBytes) fail('資料が容量上限を超えています。');
+        const reader = response.body.getReader(); const chunks = []; let size = 0;
+        // Begin after authentication request; continue within byte limit; end only at EOF.
+        while (true) {
+          const { value, done } = await reader.read(); if (done) break;
+          size += value.byteLength;
+          if (size > maxBytes) { await reader.cancel(); fail('資料が容量上限を超えています。'); }
+          chunks.push(value);
+        }
+        const bytes = new Uint8Array(size); let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+        const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        const parsed = JSON.parse(raw);
+        if (parsed.success === false && /^GET_DISABLED(?:[:]|$)/.test(String(parsed.error)) && attempt === 0) {
+          // Observed redirect rejection: repeat the authenticated POST, never enable GET.
+          // Shares the same two-attempt budget and original deadline as HTTP 404.
+          console.warn('[brand-guide] retry read', action, 'GET_DISABLED');
+          continue;
+        }
+        if (parsed.success === false) {
+          // Keep a useful transport diagnosis without logging the request or credentials.
+          const detail = String(parsed.error || 'UNKNOWN')
+            .split(token).join('[redacted]')
+            .replace(/https?:\/\/\S+/g, '[url]')
+            .replace(/[A-Za-z0-9_.~-]{28,}/g, '[redacted]')
+            .slice(0, 240);
+          console.warn('[brand-guide] response rejected', action, detail);
+          if (String(parsed.error).startsWith('UNAUTHORIZED')) fail(credentialProvider ? '図鑑の接続が切れています。接続設定を行ってください。' : '店舗アプリの接続設定を確認してください。', 'AUTH_REQUIRED');
+          if (parsed.error === 'BRAND_GUIDE_REFRESH_REQUIRED') fail('資料が更新されました。もう一度更新を確認してください。', 'RELEASE_CHANGED');
+          if (parsed.error === 'BRAND_GUIDE_UNAVAILABLE') fail('図鑑の配信元で資料を取得できませんでした。接続情報は保存されています。', 'RELEASE_UNAVAILABLE');
+          fail('最新版を取得できませんでした。次回もう一度確認します。');
+        }
+        if (action === 'getBrandGuideManifest' && parsed.success !== true) fail('図鑑の更新情報を確認できませんでした。');
+        return action === 'getBrandGuidePackage' && body.transport !== 'chunks-v1' ? raw : parsed.data;
       }
-      const mime = response.headers.get('content-type') || '';
-      if (!mime.includes('application/json')) fail('図鑑の配信を確認できませんでした。');
-      if (Number(response.headers.get('content-length')) > maxBytes) fail('資料が容量上限を超えています。');
-      const reader = response.body.getReader(); const chunks = []; let size = 0;
-      // Begin after authentication request; continue within byte limit; end only at EOF.
-      while (true) {
-        const { value, done } = await reader.read(); if (done) break;
-        size += value.byteLength;
-        if (size > maxBytes) { await reader.cancel(); fail('資料が容量上限を超えています。'); }
-        chunks.push(value);
-      }
-      const bytes = new Uint8Array(size); let offset = 0;
-      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-      const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-      const parsed = JSON.parse(raw);
-      if (parsed.success === false) {
-        // Keep a useful transport diagnosis without logging the request or credentials.
-        const detail = String(parsed.error || 'UNKNOWN')
-          .split(token).join('[redacted]')
-          .replace(/https?:\/\/\S+/g, '[url]')
-          .replace(/[A-Za-z0-9_.~-]{28,}/g, '[redacted]')
-          .slice(0, 240);
-        console.warn('[brand-guide] response rejected', action, detail);
-        if (String(parsed.error).startsWith('UNAUTHORIZED')) fail(credentialProvider ? '図鑑の接続が切れています。接続設定を行ってください。' : '店舗アプリの接続設定を確認してください。', 'AUTH_REQUIRED');
-        if (parsed.error === 'BRAND_GUIDE_REFRESH_REQUIRED') fail('資料が更新されました。もう一度更新を確認してください。', 'RELEASE_CHANGED');
-        if (parsed.error === 'BRAND_GUIDE_UNAVAILABLE') fail('図鑑の配信元で資料を取得できませんでした。接続情報は保存されています。', 'RELEASE_UNAVAILABLE');
-        fail('最新版を取得できませんでした。次回もう一度確認します。');
-      }
-      if (action === 'getBrandGuideManifest' && parsed.success !== true) fail('図鑑の更新情報を確認できませんでした。');
-      return action === 'getBrandGuidePackage' && body.transport !== 'chunks-v1' ? raw : parsed.data;
     } finally { clearTimeout(timer); }
   }
   function validateManifest(m) {

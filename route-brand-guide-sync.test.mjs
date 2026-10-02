@@ -5,11 +5,11 @@ import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 const src=readFileSync(new URL('brand-guide-sync.js',import.meta.url),'utf8');
 const manifest={schemaVersion:1,revision:10,sha256:'a'.repeat(64),updatedAt:'2026-09-13',bytes:2};
-function client({old=null,online=true,token='t'.repeat(40),bad=false,m=manifest,error=null}={}) {
+function client({old=null,online=true,token='t'.repeat(40),bad=false,m=manifest,error=null,transientError=null}={}) {
  const calls=[],statuses=[],logs=[];let imports=0;
  const context={navigator:{onLine:online},TextEncoder,TextDecoder,Uint8Array,AbortController,setTimeout,clearTimeout,Date,console:{warn(...args){logs.push(args);}},
  indexedDB:{open(){const r={};queueMicrotask(()=>{const tx={objectStore:()=>({get(){const v={result:{value:token}};setTimeout(()=>tx.oncomplete(),0);return v;}})};r.result={close(){},transaction:()=>tx};r.onsuccess();});return r;}},
- fetch:async(url,opt)=>{const body=JSON.parse(opt.body);calls.push(body.action);assert.equal(opt.cache,'no-store');assert.equal(opt.credentials,'omit');if(bad)throw new Error('offline');if(error)return new Response(JSON.stringify({success:false,error}),{headers:{'content-type':'application/json'}});return new Response(JSON.stringify(body.action==='getBrandGuideManifest'?{success:true,data:m}:{}),{headers:{'content-type':'application/json'}});}};
+ fetch:async(url,opt)=>{const body=JSON.parse(opt.body);calls.push(body.action);assert.equal(opt.cache,'no-store');assert.equal(opt.credentials,'omit');if(bad)throw new Error('offline');if(transientError && calls.length===1)return new Response(JSON.stringify({success:false,error:transientError}),{headers:{'content-type':'application/json'}});if(error)return new Response(JSON.stringify({success:false,error}),{headers:{'content-type':'application/json'}});return new Response(JSON.stringify(body.action==='getBrandGuideManifest'?{success:true,data:m}:{}),{headers:{'content-type':'application/json'}});}};
  vm.createContext(context);vm.runInContext(src+'\nthis.sync=BrandGuideSync;',context);
  const run=(options={})=>context.sync.run({guide:{MAX_BYTES:10000,load:async()=>old,importFile:async(f,expected)=>{imports++;assert.equal(expected.sha256,m.sha256);return {}; }},onStatus:x=>statuses.push(x),...options});
  return {run,calls,statuses,logs,get imports(){return imports;},sync:context.sync};
@@ -46,4 +46,14 @@ test('transport diagnostics identify failures without exposing credentials or UR
  assert.match(output,/getBrandGuideManifest/);assert.match(output,/Service failure/);
  assert.ok(!output.includes(token));assert.ok(!output.includes('https://'));assert.ok(!output.includes('s'.repeat(64)));
  assert.equal(h.imports,0);
+});
+
+test('redirect GET rejection retries authenticated read once and succeeds',async()=>{
+ const h=client({transientError:'GET_DISABLED: POST required'});assert.equal((await h.run()).status,'saved');assert.equal(h.imports,1);assert.deepEqual(h.calls,['getBrandGuideManifest','getBrandGuideManifest','getBrandGuidePackage']);assert.deepEqual(h.logs,[['[brand-guide] retry read','getBrandGuideManifest','GET_DISABLED']]);
+});
+test('persistent redirect rejection stops at two attempts and preserves saved data',async()=>{
+ const h=client({error:'GET_DISABLED: POST required'});assert.equal((await h.run()).status,'failed');assert.equal(h.imports,0);assert.deepEqual(h.calls,['getBrandGuideManifest','getBrandGuideManifest']);
+});
+test('authentication rejection is not retried',async()=>{
+ const h=client({error:'UNAUTHORIZED: rejected'});assert.equal((await h.run()).status,'auth-required');assert.deepEqual(h.calls,['getBrandGuideManifest']);
 });
