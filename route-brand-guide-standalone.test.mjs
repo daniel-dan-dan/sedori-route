@@ -47,7 +47,7 @@ test('duplicate connect clicks share one registration; malformed code never regi
 });
 test('every standalone asset exists and version/scope stay consistent',()=>{
  const sw=read('brand-guide/sw.js'),html=read('brand-guide/index.html');
- assert.match(sw,/brand-guide-v22/);assert.match(html,/data-version="v22"/);assert.match(read('brand-guide/bootstrap.js'),/scope:'\.\/'/);
+ assert.match(sw,/brand-guide-v23/);assert.match(html,/data-version="v23"/);assert.match(read('brand-guide/bootstrap.js'),/scope:'\.\/'/);
  const assets=vm.runInNewContext(sw.slice(sw.indexOf('const ASSETS =')+15,sw.indexOf(';',sw.indexOf('const ASSETS ='))));
  for(const asset of assets){if(asset==='./')continue;const path=new URL(asset.split('?')[0],new URL('brand-guide/',import.meta.url));assert.ok(readFileSync(path).length);}
 });
@@ -71,8 +71,18 @@ test('failed connection stays on settings and never starts a download',async()=>
 });
 
 test('worker upgrades reuse the existing guide URL and never register the store worker',async()=>{
- for(const [previous,expected] of [[null,'https://example.org/brand-guide/sw.js'],['https://example.org/brand-guide/sw.js?v=3','https://example.org/brand-guide/sw.js?v=3'],['https://example.org/sw.js?v=223','https://example.org/brand-guide/sw.js']]) {
+ for(const [previous,expected] of [[null,'https://example.org/brand-guide/sw.js'],['https://example.org/brand-guide/sw.js?v=3','https://example.org/brand-guide/sw.js?v=3'],['https://example.org/sw.js?v=233','https://example.org/brand-guide/sw.js']]) {
    let registered;const context={URL,document:{baseURI:'https://example.org/brand-guide/',getElementById(){return null;}},navigator:{serviceWorker:{controller:previous?{scriptURL:previous}:null,addEventListener(){},register:async(url,options)=>{registered=url;assert.equal(options.updateViaCache,'none');assert.equal(options.scope,'./');return {active:{},addEventListener(){}};}}}};
    vm.runInNewContext(read('brand-guide/bootstrap.js')+'\nthis.worker=GuideWorker;',context);await context.worker.ready;assert.equal(registered,expected);
+ }
+});
+
+test('worker confirmation uses the displayed version rather than permanently comparing with v18',async()=>{
+ for(const [pageVersion,workerVersion,expectedNotice] of [['v23','v23',false],['v99','v99',false],['v23','v22',true]]) {
+  const listeners={},notices=[];
+  const context={URL,document:{baseURI:'https://example.org/brand-guide/',getElementById(id){return id==='app-version-badge'?{dataset:{version:pageVersion}}:null;},createElement(){return {setAttribute(){}};},body:{prepend(node){notices.push(node);}}},navigator:{serviceWorker:{addEventListener(event,listener){listeners[event]=listener;},register:async()=>({active:{},addEventListener(){}})}}};
+  vm.runInNewContext(read('brand-guide/bootstrap.js'),context);
+  listeners.message({data:{type:'SW_VERSION',cacheName:'brand-guide-'+workerVersion}});
+  assert.equal(notices.length,expectedNotice?1:0);
  }
 });

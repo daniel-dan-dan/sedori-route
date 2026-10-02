@@ -1,5 +1,7 @@
 const GuideWorker = (() => {
   'use strict';
+  const pageVersion = document.getElementById('app-version-badge')?.dataset?.version;
+  const expectedCache = pageVersion ? 'brand-guide-' + pageVersion : null;
   function notice() {
     if(document.getElementById('pwa-update-notice')) return;
     const node=document.createElement('p');node.id='pwa-update-notice';node.className='pwa-update-notice';node.setAttribute('role','status');node.textContent='更新版を準備しました。ブランド図鑑のタブを閉じ、開き直すと適用されます。';document.body.prepend(node);
@@ -7,7 +9,7 @@ const GuideWorker = (() => {
   if(!('serviceWorker' in navigator)) return {ready:Promise.resolve(null)};
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type==='UPDATE_WAITING') notice();
-    if(event.data?.type==='SW_VERSION' && event.data.cacheName !== 'brand-guide-v18' && String(event.data.cacheName).startsWith('brand-guide-')) notice();
+    if(event.data?.type==='SW_VERSION' && expectedCache && event.data.cacheName !== expectedCache && String(event.data.cacheName).startsWith('brand-guide-')) notice();
   });
   navigator.serviceWorker.addEventListener('controllerchange',()=>navigator.serviceWorker.controller?.postMessage({type:'GET_VERSION'}));
   const canonical = new URL('sw.js', document.baseURI);
