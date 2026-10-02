@@ -47,7 +47,17 @@ const BrandGuideSync = (() => {
         redirect: 'follow', signal: controller.signal,
       });
       if (!response.ok) {
-        console.warn('[brand-guide] HTTP failure', action, response.status);
+        let title = '';
+        if ((response.headers.get('content-type') || '').includes('text/html')) {
+          try {
+            const diagnosticReader = response.body.getReader();
+            const first = await diagnosticReader.read(); await diagnosticReader.cancel();
+            const start = new TextDecoder().decode((first.value || new Uint8Array()).slice(0, 4096));
+            title = (start.match(/<title[^>]*>([^<]{0,160})<\/title>/i)?.[1] || '')
+              .split(token).join('[redacted]').replace(/https?:\/\/\S+/g, '[url]').replace(/[A-Za-z0-9_.~-]{28,}/g, '[redacted]');
+          } catch {}
+        }
+        console.warn('[brand-guide] HTTP failure', action, response.status, title);
         fail('図鑑の配信先に接続できませんでした。');
       }
       const mime = response.headers.get('content-type') || '';

@@ -43,5 +43,5 @@ test('wrong offset, truncated part and mismatched identity are rejected before t
  }
 });
 test('legacy large response failure is diagnosed without sensitive content',async()=>{
- const h=harness({legacy:true});assert.equal((await h.run()).status,'failed');assert.equal(h.saved,0);assert.deepEqual(h.logs,[['[brand-guide] HTTP failure','getBrandGuidePackage',500]]);
+ const h=harness({legacy:true});assert.equal((await h.run()).status,'failed');assert.equal(h.saved,0);assert.deepEqual(h.logs,[['[brand-guide] HTTP failure','getBrandGuidePackage',500,'']]);
 });
