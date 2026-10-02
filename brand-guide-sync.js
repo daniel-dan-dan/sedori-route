@@ -63,6 +63,13 @@ const BrandGuideSync = (() => {
       const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       const parsed = JSON.parse(raw);
       if (parsed.success === false) {
+        // Keep a useful transport diagnosis without logging the request or credentials.
+        const detail = String(parsed.error || 'UNKNOWN')
+          .split(token).join('[redacted]')
+          .replace(/https?:\/\/\S+/g, '[url]')
+          .replace(/[A-Za-z0-9_.~-]{28,}/g, '[redacted]')
+          .slice(0, 240);
+        console.warn('[brand-guide] response rejected', action, detail);
         if (String(parsed.error).startsWith('UNAUTHORIZED')) fail(credentialProvider ? '図鑑の接続が切れています。接続設定を行ってください。' : '店舗アプリの接続設定を確認してください。', 'AUTH_REQUIRED');
         if (parsed.error === 'BRAND_GUIDE_REFRESH_REQUIRED') fail('資料が更新されました。もう一度更新を確認してください。', 'RELEASE_CHANGED');
         if (parsed.error === 'BRAND_GUIDE_UNAVAILABLE') fail('図鑑の配信元で資料を取得できませんでした。接続情報は保存されています。', 'RELEASE_UNAVAILABLE');
