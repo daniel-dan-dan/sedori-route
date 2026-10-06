@@ -45,7 +45,7 @@ function harness(options = {}) {
       return req;
     },
   };
-  const context = { module: { exports: {} }, URL, TextEncoder, Uint8Array, crypto: webcrypto, indexedDB: fake, setTimeout, clearTimeout };
+  const context = { module: { exports: {} }, URL, TextEncoder, Uint8Array, crypto: webcrypto, indexedDB: fake, setTimeout, clearTimeout, ...options.context };
   vm.runInNewContext(source, context);
   return { guide: context.module.exports, durable: () => durable, closes: () => closes };
 }
@@ -291,4 +291,76 @@ test('an identified analytical source and supported year rule remain distinct', 
   assert.equal(guide.modelExplanation(b).siteText, '');
   assert.match(source, /'AI推測'/);
   assert.doesNotMatch(source, /'この図鑑での推測'/);
+});
+
+test('one representative photo per form is stable across reordering without deleting dating evidence', async () => {
+  const { guide } = harness(); const data = fixture(); const group = data.brands[0].groups[0];
+  const first = group.photos[0]; first.reviewedImageSha256 = 'a'.repeat(64);
+  const selected = { ...first, reviewedImageSha256: 'b'.repeat(64), basis: '2026年の照合', source: 'https://example.org/current' };
+  group.photos.push(selected); group.period = '2024〜2026年';
+  assert.equal(guide.representativePhoto(group), first); // old packages also show one
+  group.representativePhotoSha256 = selected.reviewedImageSha256;
+  const before = JSON.stringify(data);
+  assert.equal(guide.representativePhoto(group), selected);
+  group.photos.reverse(); assert.equal(guide.representativePhoto(group), selected);
+  group.photos.reverse();
+  const parsed = await guide.parsePackage(envelope(data));
+  assert.equal(guide.validate(parsed.data).photos, 31);
+  assert.equal(guide.tagTimeline([group])[0].displayPeriod.label, '2024〜2026年');
+  assert.equal(JSON.stringify(data), before);
+  assert.equal(parsed.data.brands[0].groups[0].photos.length, 2);
+});
+
+test('dangling or malformed representative references and invalid visibility cannot replace the package', async () => {
+  const { guide } = harness(); const data = fixture(); const g = data.brands[0].groups[0];
+  g.photos[0].reviewedImageSha256 = 'a'.repeat(64);
+  for (const marker of ['b'.repeat(64), 'a'.repeat(63), 42, null]) {
+    g.representativePhotoSha256 = marker; await assert.rejects(guide.parsePackage(envelope(data)), /代表写真/);
+  }
+  delete g.representativePhotoSha256;
+  g.timelineHidden = 'true'; await assert.rejects(guide.parsePackage(envelope(data)));
+});
+
+test('special-line observations stay in the package but do not replace the regular timeline', async () => {
+  const { guide } = harness(); const data = fixture(); const groups = data.brands[0].groups;
+  groups.push({ ...structuredClone(groups[0]), period: '2026年', variant: 'THE HEAVY', timelineHidden: true });
+  const before = JSON.stringify(groups);
+  assert.equal(guide.tagTimeline(groups).length, 1);
+  assert.equal(guide.validate((await guide.parsePackage(envelope(data))).data).photos, 31);
+  assert.equal(JSON.stringify(groups), before);
+});
+
+test('actual brand rendering shows one chosen image, all sources, and expands the same image', async () => {
+  function node(tag) {
+    const classes = new Set();
+    return { tag, children: [], listeners: {}, attrs: {}, textContent: '', isConnected: true,
+      get className() { return [...classes].join(' '); }, set className(v) { classes.clear(); v.split(' ').forEach(c => classes.add(c)); },
+      classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c) },
+      style: { removeProperty() {} }, setAttribute(k,v) { this.attrs[k]=v; },
+      append(...children) { this.children.push(...children); }, replaceChildren(...children) { this.children=children; },
+      contains(child) { return this===child || this.children.some(c => c.contains?.(child)); },
+      addEventListener(type,fn) { this.listeners[type]=fn; }, querySelector() { return null; }, focus() {}, showModal() { this.open=true; },
+    };
+  }
+  const container = node('main');
+  const context = { document: { createElement: node, createTextNode: value => ({textContent:value}), getElementById: () => null, addEventListener() {} },
+    navigator: {}, window: { scrollY: 0, scrollTo() {}, addEventListener() {} }, setInterval: () => 1 };
+  const data = fixture(); const g = data.brands[0].groups[0];
+  g.photos[0].reviewedImageSha256 = 'a'.repeat(64);
+  g.photos.push({ ...g.photos[0], image: 'data:image/jpeg;base64,/9j/3Q==', reviewedImageSha256:'b'.repeat(64), source:'https://example.org/2026', basis:'2026年の根拠' });
+  g.representativePhotoSha256 = 'b'.repeat(64); g.period='2024〜2026年';
+  data.brands[0].groups.push({ ...structuredClone(g), variant:'THE HEAVY', timelineHidden:true });
+  const h = harness({old:{data,sha:'test'},context});
+  await h.guide.render(container,{standalone:true});
+  function find(root,cls) { return [root,...root.children.flatMap(c => c.children ? find(c,cls) : [])].filter(n => n.className?.split(' ').includes(cls)); }
+  find(container,'bg-brand-card')[0].listeners.click();
+  const cards = find(container,'bg-tag-card'); assert.equal(cards.length,1);
+  assert.equal(find(cards[0],'bg-tag-photo').length,1);
+  assert.equal(find(cards[0],'bg-tag-photo')[0].src,g.photos[1].image);
+  assert.equal(find(cards[0],'bg-period')[0].textContent,'2024〜2026年');
+  assert.equal(find(cards[0],'bg-refs').length,1);
+  assert.deepEqual(find(cards[0],'bg-source').map(n=>n.href),['https://example.org/2026','https://example.org/photo']);
+  find(cards[0],'bg-photo-button')[0].listeners.click();
+  assert.equal(find(container,'bg-large-photo')[0].src,g.photos[1].image);
+  assert.equal(data.brands[0].groups.length,2);
 });

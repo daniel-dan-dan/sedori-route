@@ -35,9 +35,14 @@ const BrandGuide = (() => {
       ? `${first.year}${decade ? '年代' : '年'}`
       : `${first.year}〜${last.year}${decade ? '年代' : '年'}`, year: first.year, endYear: last.year };
   }
+  // A tag form has one displayed photo; all observations remain in its sources.
+  function representativePhoto(group) {
+    return group.photos.find(photo => group.representativePhotoSha256 &&
+      photo.reviewedImageSha256 === group.representativePhotoSha256) || group.photos[0];
+  }
   function tagTimeline(groups) {
     return groups.map(group => ({ ...group, displayPeriod: tagPeriod(group.period) }))
-      .filter(group => Number.isFinite(group.displayPeriod.year))
+      .filter(group => !group.timelineHidden && Number.isFinite(group.displayPeriod.year))
       // Equal starting years are ordered by their latest observed year.
       .sort((a, b) => a.displayPeriod.year - b.displayPeriod.year ||
         a.displayPeriod.endYear - b.displayPeriod.endYear);
@@ -88,6 +93,10 @@ const BrandGuide = (() => {
       for (const g of b.groups) {
         check(text(g.period, 150) && Array.isArray(g.photos) && g.photos.length > 0 && g.photos.length <= 20);
         check(g.variant === undefined || text(g.variant, 100));
+        check(g.timelineHidden === undefined || typeof g.timelineHidden === 'boolean');
+        check(g.representativePhotoSha256 === undefined ||
+          (typeof g.representativePhotoSha256 === 'string' && /^[a-f0-9]{64}$/.test(g.representativePhotoSha256) &&
+            g.photos.some(photo => photo?.reviewedImageSha256 === g.representativePhotoSha256)), '代表写真が資料と一致しません。');
         for (const p of g.photos) {
           check(p && text(p.image, 2800000) && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(p.image));
           check(sourceOK(p.source) && text(p.basis, 3000) && typeof p.currentOfficial === 'boolean');
@@ -442,13 +451,22 @@ const BrandGuide = (() => {
         for (const g of tagTimeline(b.groups)) {
           const card = el('section', 'bg-tag-card'); card.append(el('h4', 'bg-period', g.displayPeriod.label));
           if (g.variant) card.append(el('p', 'bg-tag-variant', g.variant));
-          for (const p of g.photos) {
-            const photoButton = button('', () => showPhoto(p, b.name, root, photoButton), 'bg-photo-button');
-            photoButton.setAttribute('aria-label', `${b.name} ${g.displayPeriod.label}のタグ写真を拡大`);
-            const img = el('img', 'bg-tag-photo'); img.src = p.image; img.alt = b.name + ' ブランドタグ'; img.loading = 'lazy';
-            photoButton.append(img); card.append(photoButton);
-            const refs = el('details', 'bg-refs'); refs.append(el('summary', '', '出典を見る'), el('p', '', p.basis), link('写真を確認したページ', p.source)); card.append(refs);
+          const p = representativePhoto(g);
+          const photoButton = button('', () => showPhoto(p, b.name, root, photoButton), 'bg-photo-button');
+          photoButton.setAttribute('aria-label', `${b.name} ${g.displayPeriod.label}のタグ写真を拡大`);
+          const img = el('img', 'bg-tag-photo'); img.src = p.image; img.alt = b.name + ' ブランドタグ'; img.loading = 'lazy';
+          photoButton.append(img); card.append(photoButton);
+          const refs = el('details', 'bg-refs'); refs.append(el('summary', '', '出典を見る'));
+          // Keep the full dating evidence even when only one photo is displayed.
+          const observations = [p, ...g.photos.filter(photo => photo !== p)];
+          const seen = new Set();
+          for (const observation of observations) {
+            const key = JSON.stringify([observation.source, observation.basis]);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            refs.append(el('p', '', observation.basis), link('写真を確認したページ', observation.source));
           }
+          card.append(refs);
           detail.append(card);
         }
         // Common care-label reference is not a brand/model-number guide.
@@ -529,6 +547,6 @@ const BrandGuide = (() => {
     }, 15 * 60 * 1000);
     await sync(Boolean(options.forceSync));
   }
-  return { modelExplanation, isBackSwipe, tagPeriod, tagTimeline, render, validate, parsePackage, normalize, matches, importFile, load, save, DB_NAME, MAX_BYTES };
+  return { representativePhoto, modelExplanation, isBackSwipe, tagPeriod, tagTimeline, render, validate, parsePackage, normalize, matches, importFile, load, save, DB_NAME, MAX_BYTES };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = BrandGuide;
