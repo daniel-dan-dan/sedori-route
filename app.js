@@ -93,7 +93,7 @@ const App = (() => {
     return CHAIN_COLORS[chain] || '#6B7280';
   }
 
-  const ASSET_VER = 'v231';
+  const ASSET_VER = 'v232';
   function withVer(url) { return url ? `${url}?${ASSET_VER}` : url; }
 
   function renderStoreIconHtml(store) {
@@ -2364,12 +2364,9 @@ const App = (() => {
 
     html += `
       <div class="patrol-actions">
-        <button class="btn btn-primary btn-block" id="btn-add-inventory-current">仕入れを記録</button>
+        <button class="btn btn-outline btn-block" id="btn-skip">スキップ</button>
         <button class="btn btn-outline btn-block" id="btn-depart">完了して次へ</button>
       </div>`;
-
-    // スキップ
-    html += `<div class="mt-12"><button class="btn btn-sm btn-outline btn-block" id="btn-skip">スキップ</button></div>`;
 
     // 残りの店舗
     if (currentIdx < stops.length - 1) {
@@ -2417,32 +2414,11 @@ const App = (() => {
     document.getElementById('btn-end')?.addEventListener('click', () => endPatrol());
     updatePatrolStopControls_();
     if (patrolState.endOperationId) {
-      ['btn-add-inventory-current', 'btn-add-stop'].forEach(id => {
+      ['btn-add-stop'].forEach(id => {
         const button = document.getElementById(id);
         if (button) button.disabled = true;
       });
     }
-
-    document.getElementById('btn-add-inventory-current')?.addEventListener('click', () => {
-      if (patrolState.endOperationId || patrolStopSaving || patrolEnding) return;
-      showInventoryPurchaseModal(current, {
-        routeId: patrolState.routeId,
-        date: today_(),
-        onSaved: (result, payload) => {
-          const amount = Number(payload.purchase_price) || 0;
-          current.purchaseAmount = (Number(current.purchaseAmount) || 0) + amount;
-          current.purchaseItems = (Number(current.purchaseItems) || 0) + 1;
-          Storage.saveCurrentRoute(patrolState);
-          syncWrite(API.updateStop({
-            route_id: patrolState.routeId,
-            store_id: current.store_id,
-            status: current.status || 'planned',
-            purchase_amount: current.purchaseAmount,
-            purchase_items: current.purchaseItems
-          }), '仕入れ集計');
-        }
-      });
-    });
 
     document.getElementById('btn-add-stop')?.addEventListener('click', () => {
       if (patrolState.endOperationId || patrolStopSaving || patrolEnding) return;

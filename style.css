@@ -3304,5 +3304,4 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
   .map-toolbar { grid-template-columns: 1fr; }
   .view-switch > .btn { flex: 1; }
   .patrol-timer { font-size: 14px; }
-  .patrol-actions { grid-template-columns: 1fr; }
 }
