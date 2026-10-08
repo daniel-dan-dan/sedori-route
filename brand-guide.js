@@ -287,22 +287,31 @@ const BrandGuide = (() => {
     if (options.standalone) { status.hidden = true; offlineStatus.hidden = true; syncStatus.hidden = true; controls.append(status, offlineStatus, syncStatus); }
     const body = el('div', 'bg-body'); root.append(body, controls);
     let currentRecord = null;
+    let pendingRecord = null, updateNotice = null;
+    function acceptRecord(record) {
+      if (!isLive() || !record || record.sha === currentRecord?.sha || record.sha === pendingRecord?.sha) return;
+      // Keep the opened page intact, then install the newest saved release on return.
+      if (currentRecord && root.classList.contains('bg-viewing')) {
+        pendingRecord = record;
+        if (!updateNotice) {
+          updateNotice = button('新しい資料を表示', () => { if (pendingRecord) showLibrary(pendingRecord); });
+          root.insertBefore(updateNotice, body);
+        }
+      } else showLibrary(record);
+    }
     async function sync(force = false) {
       if (!isLive() || typeof BrandGuideSync === 'undefined') return;
       retry.disabled = true; input.disabled = true;
       try {
         const result = await BrandGuideSync.run({ guide: { load, importFile, MAX_BYTES }, force,
           onStatus: message => { if (isLive()) { syncStatus.textContent = message; syncStatus.hidden = false; } },
-          onSaved: record => {
-            if (!isLive()) return;
-            // Keep an open photo/article intact; switch contents after returning to list.
-            if (currentRecord && root.classList.contains('bg-viewing')) {
-              const notice = button('新しい資料を表示', () => { showLibrary(record); notice.remove(); });
-              root.insertBefore(notice, body);
-            } else showLibrary(record);
-          },
+          onSaved: acceptRecord,
         });
+        // A shared in-flight update or another tab can save after this view loaded.
+        // Reconcile from the validated record even when the transport reports current.
+        if (result?.record) acceptRecord(result.record);
         if (options.standalone && ['saved', 'current'].includes(result?.status)) syncStatus.hidden = true;
+        if (options.standalone && result?.status === 'failed' && isLive()) controls.open = true;
         if (result?.status === 'auth-required' && isLive()) {
           controls.open = true;
           if (force && options.standalone && options.onConnection) options.onConnection();
@@ -310,6 +319,7 @@ const BrandGuide = (() => {
       } finally { if (isLive()) { retry.disabled = false; if (!importing) input.disabled = false; } }
     }
     function showLibrary(record) {
+      pendingRecord = null; updateNotice?.remove(); updateNotice = null;
       currentRecord = record;
       root.classList.remove('bg-viewing');
       const data = record.data; const counts = validate(data);
@@ -333,6 +343,11 @@ const BrandGuide = (() => {
       }
       function returnToList() {
         clearSwipe();
+        if (pendingRecord) {
+          showLibrary(pendingRecord);
+          window.scrollTo(0, listScrollY);
+          return;
+        }
         root.classList.remove('bg-viewing'); detail.replaceChildren();
         label.hidden = count.hidden = list.hidden = false;
         window.scrollTo(0, listScrollY);

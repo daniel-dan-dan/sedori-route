@@ -16,6 +16,14 @@ function client({old=null,online=true,token='t'.repeat(40),bad=false,m=manifest,
 }
 test('first open automatically fetches manifest and package',async()=>{const h=client();await h.run();assert.deepEqual(h.calls,['getBrandGuideManifest','getBrandGuidePackage']);assert.equal(h.imports,1);});
 test('same content is not downloaded again',async()=>{const h=client({old:{sha:manifest.sha256}});await h.run();assert.deepEqual(h.calls,['getBrandGuideManifest']);assert.equal(h.imports,0);});
+test('current result returns the saved record so a stale view can reconcile without downloading again',async()=>{
+ const old={sha:manifest.sha256,data:{updatedAt:manifest.updatedAt}};const h=client({old});const result=await h.run();
+ assert.equal(result.status,'current');assert.equal(result.record,old);assert.deepEqual(h.calls,['getBrandGuideManifest']);assert.equal(h.imports,0);
+});
+test('deduplicated update returns the new record to every waiting view',async()=>{
+ const h=client();const [first,second]=await Promise.all([h.run(),h.run()]);
+ assert.equal(first.status,'saved');assert.ok(first.record);assert.equal(first.record,second.record);assert.equal(h.imports,1);
+});
 test('offline makes no requests and preserves data',async()=>{const h=client({online:false});await h.run();assert.equal(h.calls.length,0);assert.equal(h.imports,0);});
 test('missing credential never requests private data',async()=>{const h=client({token:''});await h.run();assert.equal(h.calls.length,0);});
 test('failed network never saves',async()=>{const h=client({bad:true});await h.run();assert.equal(h.imports,0);assert.match(h.statuses.at(-1),/変更していません/);});

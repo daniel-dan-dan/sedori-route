@@ -153,7 +153,7 @@ const BrandGuideSync = (() => {
         if (!/^[A-Za-z0-9._~-]{32,256}$/.test(token)) fail(credentialProvider ? 'この図鑑はまだ接続されていません。「今すぐ更新を確認」から初回接続を行ってください。' : '店舗アプリの接続設定を一度行うと、自動で図鑑を保存できます。', 'AUTH_REQUIRED');
         const manifest = validateManifest(await request('getBrandGuideManifest', token));
         const old = await guide.load();
-        if (old?.sha === manifest.sha256) { onStatus('最新版を保存済みです。ファイル選択は不要です。'); return { status: 'current' }; }
+        if (old?.sha === manifest.sha256) { onStatus('最新版を保存済みです。ファイル選択は不要です。'); return { status: 'current', record: old }; }
         if (old && (old.data.updatedAt > manifest.updatedAt || (old.remoteRevision || 0) > manifest.revision)) fail('配信中の資料が古いため、保存済みの図鑑を使います。');
         onStatus('図鑑を受け取っています…');
         const raw = await receivePackage(manifest, token, guide, onStatus);
@@ -161,7 +161,7 @@ const BrandGuideSync = (() => {
         onStatus('図鑑を保存しています…');
         const record = await guide.importFile({ size: manifest.bytes, text: async () => raw }, manifest);
         onSaved(record); onStatus('自動保存が完了しました。通信なしでも見られます。');
-        return { status: 'saved' };
+        return { status: 'saved', record };
       } catch (error) {
         const message = error?.name === 'AbortError' ? '通信が遅いため更新を中断しました。' : (error?.message || '更新を確認できませんでした。');
         onStatus(message + ' 保存済みの資料は変更していません。');

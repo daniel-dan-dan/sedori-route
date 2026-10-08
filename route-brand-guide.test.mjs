@@ -364,3 +364,59 @@ test('actual brand rendering shows one chosen image, all sources, and expands th
   assert.equal(find(container,'bg-large-photo')[0].src,g.photos[1].image);
   assert.equal(data.brands[0].groups.length,2);
 });
+
+function updateRenderHarness() {
+  function node(tag) {
+    const classes=new Set();
+    return {tag,children:[],listeners:{},attrs:{},textContent:'',isConnected:true,
+      get className(){return [...classes].join(' ');},set className(v){classes.clear();v.split(' ').forEach(c=>classes.add(c));},
+      classList:{add:c=>classes.add(c),remove:c=>classes.delete(c),contains:c=>classes.has(c)},
+      style:{removeProperty(){}},setAttribute(k,v){this.attrs[k]=v;},
+      append(...children){for(const c of children)c.parent=this;this.children.push(...children);},
+      insertBefore(child,before){child.parent=this;this.children.splice(this.children.indexOf(before),0,child);},
+      replaceChildren(...children){this.children=[];this.append(...children);},
+      remove(){if(this.parent)this.parent.children=this.parent.children.filter(c=>c!==this);this.isConnected=false;},
+      contains(child){return this===child||this.children.some(c=>c.contains?.(child));},
+      addEventListener(type,fn){this.listeners[type]=fn;},querySelector(){return null;},focus(){},
+    };
+  }
+  const container=node('main');let synced, result={status:'current'},scroll=0;
+  const context={document:{createElement:node,createTextNode:value=>({textContent:value}),getElementById:()=>null,addEventListener(){}},navigator:{},
+    window:{get scrollY(){return scroll;},scrollTo(x,y){scroll=y;},addEventListener(){}},setInterval:()=>1,
+    BrandGuideSync:{async run(options){synced=options;return result;}}};
+  const old={data:fixture(),sha:'old'},next=structuredClone(old);next.sha='new';
+  const extra=structuredClone(next.data.brands[0]);extra.id='tomorrowland-tricot';extra.name='TOMORROWLAND tricot';extra.aliases=['トゥモローランドトリコット'];next.data.brands.push(extra);
+  const h=harness({old,context});
+  function find(root,cls){return [root,...root.children.flatMap(c=>c.children?find(c,cls):[])].filter(n=>n.className?.split(' ').includes(cls));}
+  return {guide:h.guide,container,old,next,find,context,get synced(){return synced;},set result(v){result=v;},get scroll(){return scroll;},set scroll(v){scroll=v;},
+    async start(){await h.guide.render(container,{standalone:true});},
+    async refresh(){await find(container,'bg-button').find(n=>n.textContent==='今すぐ更新を確認').listeners.click();},
+    names(){return find(container,'bg-brand-name').map(n=>n.textContent);},
+    back(){find(container,'bg-text-button').find(n=>n.textContent==='‹ 戻る').listeners.click();}};
+}
+
+test('a release received on a brand page appears in the list on returning and preserves scroll',async()=>{
+  const h=updateRenderHarness();await h.start();h.scroll=520;h.find(h.container,'bg-brand-card')[0].listeners.click();
+  await h.guide.save(h.next);h.synced.onSaved(h.next);
+  assert.equal(h.names().includes('TOMORROWLAND tricot'),false,'keep the opened brand page intact');
+  h.back();assert.equal(h.names().includes('TOMORROWLAND tricot'),true);assert.equal(h.scroll,520);
+});
+
+test('a current result reconciles a stale view after another render or tab saved the release',async()=>{
+  const h=updateRenderHarness();await h.start();await h.guide.save(h.next);
+  h.result={status:'current',record:await h.guide.load()};await h.refresh();
+  assert.equal(h.names().includes('TOMORROWLAND tricot'),true);
+});
+
+test('multiple received releases keep only the newest queued record and one update button',async()=>{
+  const h=updateRenderHarness();await h.start();h.find(h.container,'bg-brand-card')[0].listeners.click();
+  h.synced.onSaved(h.next);h.synced.onSaved(h.next);
+  const newest=structuredClone(h.next);newest.sha='newest';newest.data.brands.at(-1).name='NEWEST';h.synced.onSaved(newest);
+  assert.equal(h.find(h.container,'bg-button').filter(n=>n.textContent==='新しい資料を表示').length,1);
+  h.back();assert.equal(h.names().includes('NEWEST'),true);assert.equal(h.names().includes('TOMORROWLAND tricot'),false);
+});
+
+test('failed background updates expose the error without replacing the saved list',async()=>{
+  const h=updateRenderHarness();await h.start();h.result={status:'failed'};await h.refresh();
+  assert.equal(h.find(h.container,'bg-import')[0].open,true);assert.equal(h.names().length,30);
+});
