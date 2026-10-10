@@ -97,7 +97,7 @@ for (const [name, change] of [
   const { guide } = harness(); const data = fixture(); change(data); await assert.rejects(guide.parsePackage(envelope(data)));
 });
 test('file size limit is enforced before file reading', async () => {
-  const { guide } = harness(); await assert.rejects(guide.importFile({ size: 41*1024*1024, text() { assert.fail('must not read'); } }), /40MB/);
+  const { guide } = harness(); await assert.rejects(guide.importFile({ size: 49*1024*1024, text() { assert.fail('must not read'); } }), /48MB/);
 });
 test('successful transaction persists and closes database', async () => {
   const h = harness(); const record = { data: fixture(), sha: 'new' }; await h.guide.save(record);
@@ -419,4 +419,20 @@ test('multiple received releases keep only the newest queued record and one upda
 test('failed background updates expose the error without replacing the saved list',async()=>{
   const h=updateRenderHarness();await h.start();h.result={status:'failed'};await h.refresh();
   assert.equal(h.find(h.container,'bg-import')[0].open,true);assert.equal(h.names().length,30);
+});
+
+function productFixture() {return {id:'video/item',name:'商品',brand:'ブランド',genre:'家電',model:'',identity:'未確認',photo:{image:'data:image/jpeg;base64,/9j/2Q==',fullProduct:true,label:'動画内の商品全体',source:'https://www.youtube.com/watch?v=example'},features:[{label:'付属品',confirmed:false,note:'未確認'}],checks:['付属品'],prices:[['その他費用','未確認']],notes:[],evidence:[]};}
+test('optional all-genre records keep old apparel compatible and enforce image/provenance/limits',()=>{
+ const {guide}=harness();const data=fixture();guide.validate(data);
+ data.allGenre={version:1,revision:'test-v1',videoCount:3,products:[productFixture()],held:[]};guide.validate(data);
+ for(const change of [p=>p.photo.fullProduct=false,p=>p.photo.image='https://example.org/a.jpg',p=>p.photo.source='javascript:alert(1)',p=>p.features[0].confirmed='yes',p=>p.checks=Array(4).fill('check')]) {const copy=structuredClone(data);change(copy.allGenre.products[0]);assert.throws(()=>guide.validate(copy));}
+ data.allGenre.held.push({id:'video/item',name:'重複',reason:'画像待ち'});assert.throws(()=>guide.validate(data));
+});
+test('all-genre filters combine category, brand and normalized model search',()=>{
+ const ctx={};vm.runInNewContext(read('brand-guide/all-genre.js')+'\nthis.app=AllGenre;',ctx);
+ const products=[{...productFixture(),name:'AM09',model:'AM09',brand:'Dyson',genre:'家電'},{...productFixture(),name:'別商品',brand:'Dyson',genre:'スポーツ'}];
+ assert.equal(ctx.app.select(products,'家電','Dyson','ＡＭ０９').length,1);
+ assert.equal(ctx.app.select(products,'スポーツ','Dyson','AM09').length,0);
+ assert.equal(ctx.app.select(products,'','','').length,2);
+ assert.doesNotMatch(read('brand-guide/all-genre.js'),/innerHTML|\bfetch\s*\(|localStorage|indexedDB/);
 });

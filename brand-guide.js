@@ -2,7 +2,7 @@
 const BrandGuide = (() => {
   'use strict';
   const DB_NAME = 'sedori-private-brand-guide';
-  const MAX_BYTES = 40 * 1024 * 1024;
+  const MAX_BYTES = 48 * 1024 * 1024;
   let importing = false;
   let query = '';
   const text = (value, max = 3000) => typeof value === 'string' && value.length <= max;
@@ -125,10 +125,27 @@ const BrandGuide = (() => {
     check(Array.isArray(a.unconfirmed) && a.unconfirmed.length <= 200 && a.unconfirmed.every(s => text(s, 100)));
     check(Array.isArray(a.examples) && a.examples.length <= 200 && a.examples.every(e => text(e.brand) && text(e.code) && text(e.year) && sourceOK(e.url)));
     check(sourceOK(a.source));
+    if (data.allGenre !== undefined) validateAllGenre(data.allGenre);
     return { brands: data.brands.filter(b => !b.parentBrand).length, photos };
   }
+  function validateAllGenre(a) {
+    check(a && a.version === 1 && text(a.revision, 100) && a.revision && Number.isInteger(a.videoCount) && a.videoCount > 0);
+    check(Array.isArray(a.products) && a.products.length <= 500 && Array.isArray(a.held) && a.held.length <= 500);
+    const ids = new Set();
+    for (const p of a.products) {
+      check(p && text(p.id,100) && p.id && !ids.has(p.id)); ids.add(p.id);
+      check(['name','brand','genre','model','identity'].every(k => text(p[k],1500)) && p.name && p.brand && p.genre);
+      check(p.photo && p.photo.fullProduct === true && text(p.photo.image,2800000) && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(p.photo.image) && sourceOK(p.photo.source) && text(p.photo.label,200));
+      check(Array.isArray(p.features) && p.features.length <= 3 && p.features.every(f => f && text(f.label,80) && typeof f.confirmed === 'boolean' && text(f.note,3000)));
+      check(Array.isArray(p.checks) && p.checks.length <= 3 && p.checks.every(x=>text(x,1000)));
+      check(Array.isArray(p.prices) && p.prices.length <= 20 && p.prices.every(r=>Array.isArray(r)&&r.length===2&&r.every(x=>text(x,1000))));
+      check(Array.isArray(p.notes) && p.notes.length <= 40 && p.notes.every(x=>text(x,3000)));
+      check(Array.isArray(p.evidence) && p.evidence.length <= 30 && p.evidence.every(e=>e&&text(e.label,1000)&&sourceOK(e.url)));
+    }
+    for(const p of a.held) {check(p && text(p.id,100) && p.id && !ids.has(p.id) && text(p.name,200) && text(p.reason,500));ids.add(p.id);}
+  }
   async function parsePackage(raw) {
-    check(typeof raw === 'string' && new TextEncoder().encode(raw).length <= MAX_BYTES, 'ファイルが大きすぎます（上限40MB）。');
+    check(typeof raw === 'string' && new TextEncoder().encode(raw).length <= MAX_BYTES, 'ファイルが大きすぎます（上限48MB）。');
     let envelope;
     try { envelope = JSON.parse(raw); } catch { throw new Error('ファイルを読めませんでした。専用ファイルを選び直してください。'); }
     check(envelope && envelope.format === 'private-brand-guide' && envelope.schemaVersion === 1 && text(envelope.payload, MAX_BYTES) && /^[a-f0-9]{64}$/.test(envelope.sha256));
@@ -193,7 +210,8 @@ const BrandGuide = (() => {
   }
   async function verifyImages(data) {
     // Start after package validation; inspect each image; finish only when all decode.
-    for (const b of data.brands) for (const g of b.groups) for (const p of g.photos) {
+    const images = [...data.brands.flatMap(b=>b.groups.flatMap(g=>g.photos)), ...(data.allGenre?.products || []).map(p=>p.photo)];
+    for (const p of images) {
       await new Promise((resolve, reject) => {
         const img = new Image();
         const timer = setTimeout(() => finish(new Error('写真を読み込めませんでした。')), 10000);
@@ -208,7 +226,7 @@ const BrandGuide = (() => {
     if (importing) throw new Error('取り込み中です。完了までお待ちください。');
     importing = true;
     try {
-      check(file && file.size <= MAX_BYTES, '40MB以下の専用ファイルを選んでください。');
+      check(file && file.size <= MAX_BYTES, '48MB以下の専用ファイルを選んでください。');
       const record = await parsePackage(await file.text());
       if (expected) {
         check(record.sha === expected.sha256 && record.data.updatedAt === expected.updatedAt, '更新情報と資料が一致しません。次回もう一度確認します。');
@@ -217,6 +235,7 @@ const BrandGuide = (() => {
       }
       await verifyImages(record.data);
       await save({ ...record, savedAt: new Date().toISOString() });
+      if (typeof document !== 'undefined' && typeof CustomEvent !== 'undefined') document.dispatchEvent(new CustomEvent('brand-guide-saved')); 
       return record;
     } catch (error) {
       if (error.name === 'QuotaExceededError') throw new Error('端末の空き容量が足りません。以前の図鑑は残しています。');

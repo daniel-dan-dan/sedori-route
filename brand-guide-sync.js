@@ -111,7 +111,7 @@ const BrandGuideSync = (() => {
   function validateManifest(m) {
     if (!m || m.schemaVersion !== 1 || !Number.isSafeInteger(m.revision) || m.revision < 1
       || !/^[a-f0-9]{64}$/.test(m.sha256) || !/^\d{4}-\d{2}-\d{2}$/.test(m.updatedAt) || !Number.isFinite(Date.parse(m.updatedAt)) || new Date(m.updatedAt).toISOString().slice(0, 10) !== m.updatedAt
-      || !Number.isSafeInteger(m.bytes) || m.bytes < 1 || m.bytes > 40 * 1024 * 1024) fail('図鑑の更新情報が正しくありません。');
+      || !Number.isSafeInteger(m.bytes) || m.bytes < 1 || m.bytes > 48 * 1024 * 1024) fail('図鑑の更新情報が正しくありません。');
     if (m.transport !== undefined && (m.transport !== 'chunks-v1' || !Number.isSafeInteger(m.characters)
       || m.characters < 1 || m.characters > m.bytes || m.chunkCharacters !== 4 * 1024 * 1024)) fail('図鑑の分割情報が正しくありません。');
     return m;

@@ -2,7 +2,7 @@
   "id": "./",
   "name": "ブランド図鑑",
   "short_name": "ブランド図鑑",
-  "description": "ブランドタグと型番から服の年代を調べる非公開図鑑",
+  "description": "アパレルのブランドタグと、オールジャンルの利益商品を確認する非公開図鑑",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
