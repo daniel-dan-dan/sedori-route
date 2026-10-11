@@ -5,9 +5,9 @@ import {readFileSync} from 'node:fs';
 const code=readFileSync(new URL('brand-guide/all-genre.js',import.meta.url),'utf8');
 const make=(id,name,genre,brand='A')=>({id,name,genre,brand,model:'',features:[{label:'付属品',confirmed:false,note:'未確認'}],checks:[],photo:{image:'data:image/jpeg;base64,',label:'全体',source:'https://example.com'},prices:[],notes:[],evidence:[]});
 const data=[make('a','ベビーカー','ベビー用品'),make('b','チャイルドシート','ベビー用品','B'),make('c','電気ポット','生活家電','C')];
-function harness(){
+function harness(extra={}){
  const nodes=[];function node(tag){const n={tag,children:[],attrs:{},listeners:{},hidden:false,append(...xs){this.children.push(...xs);},replaceChildren(...xs){this.children=xs;},setAttribute(k,v){this.attrs[k]=v;},addEventListener(k,f){this.listeners[k]=f;}};nodes.push(n);return n;}
- const context={document:{createElement:node,addEventListener(){}},BrandGuide:{load:async()=>({data:{allGenre:{revision:'one',products:data,held:[],videoCount:1}}})}};
+ const context={URL,document:{createElement:node,addEventListener(){}},BrandGuide:{load:async()=>({data:{allGenre:{revision:'one',products:data,held:[],videoCount:1,...extra}}})}};
  vm.runInNewContext(code+'\nthis.view=AllGenre;',context);const root=node('main');return {view:context.view,root,nodes};
 }
 test('small genres do not mix unrelated types and preserve unknown categories',()=>{
@@ -16,6 +16,20 @@ test('small genres do not mix unrelated types and preserve unknown categories',(
  assert.equal(h.view.subgenre(make('s','スノーボードブーツ','スキー・スノーボード')),'スノーボードブーツ');
  assert.equal(h.view.subgenre(make('x','分類不明','ベビー用品')),'その他');
  assert.equal(h.view.select(data,'ベビー用品','B','ベビーカー','ベビーカー').length,0);
+});
+const learning={id:'learn-bed',name:'ココネルエアー',brand:'Aprica',genre:'ベビー用品',subgenre:'ベビーベッド',model:'',features:[{label:'重点モデル',confirmed:true,note:'動画の説明'}],checks:['脚の品番'],notes:['全体画像は確認待ち'],evidence:[{label:'9:30',url:'https://www.youtube.com/watch?v=shSa9vO8ZTE&t=570'}]};
+test('learning records show factors without a publishable product image',async()=>{
+ const h=harness({products:[],guides:[learning]});await h.view.mount(h.root).refresh();
+ const section=cls=>h.nodes.find(n=>n.className===cls),choose=(box,text)=>box.children.find(n=>n.tag==='button'&&n.textContent===text).listeners.click();
+ choose(section('ag-genres'),'ベビー用品');choose(section('ag-subgenres'),'ベビーベッド');
+ assert.equal(section('ag-factor-list').children[0].tag,'details');assert.equal(section('ag-grid').children[0].tag,'p');
+ assert.equal(h.view.select(h.view.readGuides([learning]),'ベビー用品','Aprica','','ベビーベッド').length,1);
+ assert.equal(h.view.subgenre(make('j','ジュニアシート','ベビー用品')),'ジュニアシート');
+});
+test('malformed independent learning sources are rejected before rendering',()=>{
+ const h=harness();assert.deepEqual(Array.from(h.view.readGuides(undefined)),[]);
+ assert.throws(()=>h.view.readGuides([{...learning,evidence:[{label:'bad',url:'javascript:alert(1)'}]}]));
+ assert.throws(()=>h.view.readGuides([learning,learning]));assert.throws(()=>h.view.readGuides([{...learning,features:[{label:'x',confirmed:'yes',note:'x'}]}]));
 });
 test('feature aggregation separates confirmed and unconfirmed claims',()=>{
  const h=harness(),copy=structuredClone(data);copy[1].name='ベビーカー';copy[1].features[0].confirmed=true;
