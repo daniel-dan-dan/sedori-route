@@ -106,54 +106,42 @@ const AllGenre = (() => {
       };
     });
   }
-  // Each entry keeps the original claim and its own records. A label is a
-  // browsing aid, never a new claim that all models share the same feature.
-  function factorEntries(records) {
-    const groups=new Map();
-    const short=text=>({'メッシュ素材':'メッシュ','ISOFIX型':'ISOFIX','同じ価格なら新しい世代':'新しい世代'}[text] || text);
-    for(const p of records){
-      const q=p.guide?p.quick:undefined;
-      if(!p.features.length && !q?.points.length)continue;
-      let points;
-      if(q?.points.length)points=q.points;
-      else if(q)points=[{text:p.features.some(f=>f.label.includes('メッシュ'))?'メッシュ':q.name,confirmed:p.features.every(f=>f.confirmed)}];
-      else points=p.features.flatMap(f=>f.label.split('・').filter(Boolean).map(text=>({text,confirmed:f.confirmed})));
-      for(const point of points){
-        const label=short(point.text),key=JSON.stringify([p.genre,subgenre(p),label,point.confirmed]);
-        if(!groups.has(key))groups.set(key,{genre:p.genre,subgenre:subgenre(p),label,confirmed:point.confirmed,records:[],labels:[]});
-        const g=groups.get(key);
-        if(!g.records.some(x=>x.id===p.id))g.records.push(p);
-        if(!g.labels.includes(point.text))g.labels.push(point.text);
-      }
+  // Only explicitly reviewed, generalizable traits belong in this section.
+  // Legacy feature labels and model-identification copy never become factors.
+  function readValueFactors(value,records) {
+    if(value===undefined)return [];
+    const text=(x,max)=>typeof x==='string'&&x.trim()&&x.length<=max;
+    const rows=new Map(records.map(p=>[p.id,p])),ids=new Set(),keys=new Set();
+    const dimensions=['material','function','generation','condition','accessories','specification'];
+    const url=x=>{try{const u=new URL(x);return u.protocol==='https:'&&['www.youtube.com','youtube.com','youtu.be'].includes(u.hostname)&&!u.username&&!u.password;}catch{return false;}};
+    if(!value||value.version!==1||!text(value.reviewedAt,100)||!Array.isArray(value.items)||value.items.length>200)throw new Error('Invalid reviewed factors');
+    for(const f of value.items){
+      if(!f||!text(f.id,100)||ids.has(f.id)||!text(f.genre,100)||!text(f.subgenre,100)||!text(f.label,60)||
+        !dimensions.includes(f.dimension)||f.generalizable!==true||typeof f.confirmed!=='boolean'||!text(f.explanation,1500)||
+        !Array.isArray(f.checks)||f.checks.length>3||!f.checks.every(x=>text(x,300))||
+        !Array.isArray(f.sourceIds)||!f.sourceIds.length||f.sourceIds.length>30||!f.sourceIds.every(id=>rows.has(id)&&rows.get(id).genre===f.genre&&subgenre(rows.get(id))===f.subgenre)||
+        !Array.isArray(f.evidence)||!f.evidence.length||f.evidence.length>30||!f.evidence.every(e=>e&&text(e.label,1000)&&url(e.url)&&f.sourceIds.some(id=>rows.get(id).evidence.some(x=>x.url===e.url))))throw new Error('Invalid reviewed factor');
+      const key=JSON.stringify([f.genre,f.subgenre,f.label]);if(keys.has(key))throw new Error('Duplicate reviewed factor');ids.add(f.id);keys.add(key);
     }
-    return [...groups.values()];
+    return value.items;
+  }
+  function factorEntries(records,reviewed=[]) {
+    const byId=new Map(records.map(p=>[p.id,p]));
+    return reviewed.map(f=>({...f,records:f.sourceIds.filter(id=>byId.has(id)).map(id=>byId.get(id))})).filter(f=>f.records.length);
   }
   function factorView(group) {
-    const row=el('details',undefined,'ag-factor-row');
-    const summary=el('summary');summary.append(el('span',group.label,'ag-factor-label'));
+    const row=el('details',undefined,'ag-factor-row'),summary=el('summary');
+    summary.append(el('span',group.label,'ag-factor-label'));
     if(!group.confirmed)summary.append(el('span','要確認','ag-factor-pending'));
-    row.append(summary);
-    const content=el('div',undefined,'ag-factor-content');
-    // The original wording preserves conditions such as "at the same price".
-    for(const label of group.labels)if(label!==group.label && label!=='メッシュ素材' && label!=='ISOFIX型')content.append(el('p',label,'ag-factor-condition'));
-    for(const p of group.records){
-      const q=p.guide?p.quick:undefined,section=el('section',undefined,'ag-factor-example');
-      section.append(el('h4',p.brand+' / '+(q?.name||p.name),'ag-factor-example-title'));
-      if(q?.clue)section.append(el('p','見分け方：'+q.clue));
-      const relevant=q?p.features:p.features.filter(f=>group.labels.some(label=>f.label.split('・').includes(label)||f.label===label));
-      for(const f of relevant)section.append(el('p',f.note,'ag-factor-explanation'));
-      const checks=q?.check?[q.check]:p.checks;
-      if(checks.length){section.append(el('h5','店頭チェック'));const ul=el('ul');for(const text of checks)ul.append(el('li',text));section.append(ul);}
-      for(const text of q?.cautions||[])section.append(el('p',text,'ag-quick-caution'));
-      const more=el('details',undefined,'ag-factor-evidence');more.append(el('summary','動画・補足を見る'));
-      if(q){for(const text of p.checks)more.append(el('p',text));}
-      for(const text of p.notes)more.append(el('p',text,'ag-muted'));
-      for(const e of p.evidence)more.append(link(e.label,e.url));section.append(more);content.append(section);
-    }
-    row.append(content);return row;
+    const content=el('div',undefined,'ag-factor-content');content.append(el('p',group.explanation));
+    if(group.checks.length){content.append(el('h4','店頭チェック'));const ul=el('ul');for(const x of group.checks)ul.append(el('li',x));content.append(ul);}
+    const evidence=el('details',undefined,'ag-factor-evidence');evidence.append(el('summary','動画の根拠・紹介例を見る'));
+    for(const e of group.evidence)evidence.append(link(e.label,e.url));
+    for(const p of group.records){evidence.append(el('p',p.brand+' / '+p.name,'ag-muted'));}
+    content.append(evidence);row.append(summary,content);return row;
   }
   function mount(root) {
-    let record=null, guides=[], genre='', small='', brand='', query='', request=0;
+    let record=null, guides=[], valueFactors=[], genre='', small='', brand='', query='', request=0;
     const header=el('header',undefined,'ag-header');header.append(el('h1','オールジャンル'),el('p','ジャンルを選んで、特徴と商品を確認。','ag-muted'));
     const search=el('input');search.type='search';search.placeholder='ブランド・商品名・型番';search.setAttribute('aria-label','商品を検索');
     const genres=el('div',undefined,'ag-genres');genres.setAttribute('role','group');genres.setAttribute('aria-label','大ジャンル');
@@ -181,21 +169,21 @@ const AllGenre = (() => {
       if(!result.length)brandList.append(el('li','該当する利益商品はありません。','ag-brand-empty'));
       factorList.replaceChildren();
       const sections=new Map();
-      for(const entry of factorEntries([...select(guides,genre,brand,query,small),...result])){
+      for(const entry of factorEntries([...select(guides,genre,brand,query,small),...result],valueFactors)){
         const key=JSON.stringify([entry.genre,entry.subgenre]);
         if(!sections.has(key)){const box=el('section',undefined,'ag-factor-group');if(!genre||!small)box.append(el('h3',(!genre?entry.genre+' / ':'')+entry.subgenre,'ag-quick-title'));sections.set(key,box);factorList.append(box);}
         sections.get(key).append(factorView(entry));
       }
-      if(!factorList.children.length)factorList.append(el('p','この条件の高値要素は未登録です。','ag-empty'));
+      if(!factorList.children.length)factorList.append(el('p','汎用的な高値要素は未確認です。','ag-empty'));
       grid.replaceChildren();
       for(const p of result){const card=button('',()=>detail(p,card),'ag-card');card.append(photo(p));const content=el('div',undefined,'ag-card-body');content.append(el('p',p.brand,'ag-eyebrow'),el('h3',p.name),el('p',subgenre(p),'ag-card-type'));if(p.kind==='紹介・比較例')content.append(el('p','動画の紹介例','ag-example-badge'));card.append(content);grid.append(card);}
       if(!result.length)grid.append(el('p','この小ジャンルの商品は未登録です。','ag-empty'));
     }
     search.addEventListener('input',()=>{query=search.value;if(record)render();});brands.addEventListener('change',()=>{brand=brands.value;if(record)render();});
-    async function refresh(){const ticket=++request;try{const saved=await BrandGuide.load();if(ticket!==request)return;const next=saved?.data?.allGenre;if(!next){status.textContent='商品資料はまだ保存されていません。アパレルブランド図鑑で最新資料を受信してください。';return;}if(next.revision===record?.revision)return;guides=readGuides(next.guides);record=next;renderGenres();renderSmall();if(!select([...record.products,...guides],genre,'','',small).some(p=>p.brand===brand))brand='';renderBrands();render();held.replaceChildren();held.append(el('summary',`画像確認待ち ${record.held.length}商品`),el('p','商品全体の画像を確認してから掲載します。'));for(const p of record.held)held.append(el('p',p.name+' — '+p.reason));}catch{status.textContent='保存済み資料を読み込めませんでした。もう一度この画面を開いてください。';}}
+    async function refresh(){const ticket=++request;try{const saved=await BrandGuide.load();if(ticket!==request)return;const next=saved?.data?.allGenre;if(!next){status.textContent='商品資料はまだ保存されていません。アパレルブランド図鑑で最新資料を受信してください。';return;}if(next.revision===record?.revision)return;const nextGuides=readGuides(next.guides),nextFactors=readValueFactors(next.valueFactors,[...next.products,...nextGuides]);guides=nextGuides;valueFactors=nextFactors;record=next;renderGenres();renderSmall();if(!select([...record.products,...guides],genre,'','',small).some(p=>p.brand===brand))brand='';renderBrands();render();held.replaceChildren();held.append(el('summary',`画像確認待ち ${record.held.length}商品`),el('p','商品全体の画像を確認してから掲載します。'));for(const p of record.held)held.append(el('p',p.name+' — '+p.reason));}catch{status.textContent='保存済み資料を読み込めませんでした。もう一度この画面を開いてください。';}}
     document.addEventListener('brand-guide-saved',()=>{if(!root.hidden)refresh();});return {refresh};
   }
   function init(){const apparel=document.getElementById('app'),root=document.getElementById('all-genre');if(!root)return;const view=mount(root);const nav=document.getElementById('guide-tabs');let active='app';const positions={app:0,'all-genre':0};for(const b of nav.querySelectorAll('button'))b.addEventListener('click',()=>{const next=b.dataset.pane;if(next===active){if(next==='all-genre')view.refresh();return;}positions[active]=window.scrollY;active=next;apparel.hidden=active!=='app';root.hidden=active!=='all-genre';for(const n of nav.querySelectorAll('button'))n.setAttribute('aria-pressed',String(n===b));window.scrollTo(0,positions[active]);if(active==='all-genre')view.refresh();});}
   if(typeof document!=='undefined')document.addEventListener('DOMContentLoaded',init);
-  return {select,norm,subgenre,subgenres,featureGroups,quickGroups,factorEntries,readGuides,mount};
+  return {select,norm,subgenre,subgenres,featureGroups,quickGroups,factorEntries,readGuides,readValueFactors,mount};
 })();

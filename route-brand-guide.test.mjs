@@ -436,3 +436,10 @@ test('all-genre filters combine category, brand and normalized model search',()=
  assert.equal(ctx.app.select(products,'','','').length,2);
  assert.doesNotMatch(read('brand-guide/all-genre.js'),/innerHTML|\bfetch\s*\(|localStorage|indexedDB/);
 });
+
+test('private import validates optional generic factor review before saving it',()=>{
+ const {guide}=harness(),data=fixture();const p=productFixture();
+ const f={id:'condition',genre:'家電',subgenre:'その他',label:'状態が良い',dimension:'condition',generalizable:true,confirmed:false,explanation:'動画の説明。未検証。',checks:['状態を確認'],sourceIds:[p.id],evidence:[{label:'説明',url:'https://www.youtube.com/watch?v=example'}]};
+ data.allGenre={version:1,revision:'reviewed',videoCount:1,products:[p],held:[],valueFactors:{version:1,reviewedAt:'2026-10-12',items:[f]}};guide.validate(data);
+ for(const patch of [{generalizable:false},{dimension:'model'},{sourceIds:['missing']},{confirmed:'yes'},{evidence:[{label:'bad',url:'javascript:alert(1)'}]}]){const copy=structuredClone(data);Object.assign(copy.allGenre.valueFactors.items[0],patch);assert.throws(()=>guide.validate(copy));}
+});

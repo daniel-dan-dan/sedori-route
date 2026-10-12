@@ -142,6 +142,18 @@ const BrandGuide = (() => {
       check(Array.isArray(p.notes) && p.notes.length <= 40 && p.notes.every(x=>text(x,3000)));
       check(Array.isArray(p.evidence) && p.evidence.length <= 30 && p.evidence.every(e=>e&&text(e.label,1000)&&sourceOK(e.url)));
     }
+    if(a.valueFactors!==undefined){
+      const v=a.valueFactors,sourceIds=new Set([...a.products,...(a.guides||[])].map(p=>p.id)),factorIds=new Set();
+      check(v && v.version===1 && text(v.reviewedAt,100) && v.reviewedAt && Array.isArray(v.items) && v.items.length<=200);
+      for(const f of v.items){
+        check(f && text(f.id,100) && f.id && !factorIds.has(f.id));factorIds.add(f.id);
+        check(['genre','subgenre','label','explanation'].every(k=>text(f[k],k==='explanation'?1500:100)&&f[k]) &&
+          ['material','function','generation','condition','accessories','specification'].includes(f.dimension) && f.generalizable===true && typeof f.confirmed==='boolean');
+        check(Array.isArray(f.checks) && f.checks.length<=3 && f.checks.every(x=>text(x,300)) &&
+          Array.isArray(f.sourceIds) && f.sourceIds.length>0 && f.sourceIds.length<=30 && f.sourceIds.every(id=>sourceIds.has(id)) &&
+          Array.isArray(f.evidence) && f.evidence.length>0 && f.evidence.length<=30 && f.evidence.every(e=>e&&text(e.label,1000)&&sourceOK(e.url)));
+      }
+    }
     for(const p of a.held) {check(p && text(p.id,100) && p.id && !ids.has(p.id) && text(p.name,200) && text(p.reason,500));ids.add(p.id);}
   }
   async function parsePackage(raw) {
