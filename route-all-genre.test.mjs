@@ -91,3 +91,15 @@ test('individual factors start folded, mesh and ISOFIX are separate, and conditi
  assert.ok(h.nodes.some(n=>n.textContent==='同じ価格なら新しい世代'));
  assert.ok(h.nodes.some(n=>n.textContent==='mesh source'));assert.ok(h.nodes.some(n=>n.textContent==='fix source'));
 });
+
+test('brand section precedes factors and follows displayed products without guide-only brands or duplicates',async()=>{
+ const products=[make('a','ベビーカー','ベビー用品','A'),make('b','ベビーカー2','ベビー用品','A'),make('c','抱っこ紐','ベビー用品','B')];
+ const h=harness({products,guides:[{...learning,brand:'Guide only'}]});await h.view.mount(h.root).refresh();
+ const section=cls=>h.nodes.find(n=>n.className===cls),list=section('ag-brand-list');
+ assert.deepEqual(list.children.map(n=>n.textContent),['A','B']);assert.ok(h.root.children.indexOf(section('ag-brand-section'))<h.root.children.indexOf(section('ag-factor-section')));
+ const choose=(box,text)=>box.children.find(n=>n.tag==='button'&&n.textContent===text).listeners.click();
+ choose(section('ag-genres'),'ベビー用品');choose(section('ag-subgenres'),'ベビーカー');assert.deepEqual(list.children.map(n=>n.textContent),['A']);
+ const search=h.nodes.find(n=>n.tag==='input');search.value='存在しない';search.listeners.input();assert.equal(list.children[0].className,'ag-brand-empty');
+ search.value='';search.listeners.input();choose(section('ag-subgenres'),'抱っこ紐');assert.deepEqual(list.children.map(n=>n.textContent),['B']);
+ choose(section('ag-subgenres'),'ベビーベッド');assert.equal(list.children[0].className,'ag-brand-empty');
+});

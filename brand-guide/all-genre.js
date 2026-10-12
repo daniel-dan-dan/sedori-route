@@ -162,17 +162,23 @@ const AllGenre = (() => {
     const brands=el('select');brands.setAttribute('aria-label','ブランドで絞り込み');
     const tools=el('div',undefined,'ag-tools');tools.append(search,brands);
     const status=el('p','資料を読み込み中…','ag-muted');status.setAttribute('role','status');
+    const productBrands=el('section',undefined,'ag-brand-section');productBrands.setAttribute('aria-labelledby','ag-brands-title');
+    const brandTitle=el('h2','ブランド','ag-section-title');brandTitle.id='ag-brands-title';const brandList=el('ul',undefined,'ag-brand-list');productBrands.append(brandTitle,brandList);
     const factors=el('section',undefined,'ag-factor-section');factors.setAttribute('aria-labelledby','ag-factors-title');
     const factorTitle=el('h2','高値要素','ag-section-title');factorTitle.id='ag-factors-title';const factorList=el('div',undefined,'ag-factor-list');factors.append(factorTitle,el('p','動画の説明をもとにした目安です。現在の相場は未確認。','ag-factor-context'),factorList);
     const products=el('section',undefined,'ag-product-section');products.setAttribute('aria-labelledby','ag-products-title');
     const productTitle=el('h2','利益商品','ag-section-title');productTitle.id='ag-products-title';const grid=el('div',undefined,'ag-grid');products.append(productTitle,grid);
-    const held=el('details',undefined,'ag-held');root.append(header,genres,smallBox,tools,status,factors,products,held);
+    const held=el('details',undefined,'ag-held');root.append(header,genres,smallBox,tools,status,productBrands,factors,products,held);
     function renderGenres(){genres.replaceChildren();for(const g of ['',...new Set([...record.products,...guides].map(p=>p.genre))]){const b=button(g||'すべて',()=>{genre=g;small='';brand='';renderGenres();renderSmall();renderBrands();render();},'ag-genre');b.setAttribute('aria-pressed',String(g===genre));genres.append(b);}}
     function renderSmall(){smallBox.hidden=!genre;smallGenres.replaceChildren();for(const g of ['',...subgenres([...record.products,...guides],genre)]){const b=button(g||'すべて',()=>{small=g;brand='';renderSmall();renderBrands();render();},'ag-genre ag-subgenre');b.setAttribute('aria-pressed',String(g===small));smallGenres.append(b);}}
     function renderBrands(){brands.replaceChildren();for(const b of ['',...new Set(select([...record.products,...guides],genre,'','',small).map(p=>p.brand))].sort((a,b)=>a.localeCompare(b,'ja'))){const o=el('option',b||'すべてのブランド');o.value=b;brands.append(o);}brands.value=brand;}
     function render(){
       const result=select(record.products,genre,brand,query,small);
       status.textContent=[genre,small].filter(Boolean).join(' › ')+(genre?' · ':'')+`${result.length}商品`;
+      brandList.replaceChildren();
+      // Use only the displayed profit products, not learning-only examples or held items.
+      for(const name of [...new Set(result.map(p=>p.brand))].sort((a,b)=>a.localeCompare(b,'ja')))brandList.append(el('li',name));
+      if(!result.length)brandList.append(el('li','該当する利益商品はありません。','ag-brand-empty'));
       factorList.replaceChildren();
       const sections=new Map();
       for(const entry of factorEntries([...select(guides,genre,brand,query,small),...result])){
