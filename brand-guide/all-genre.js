@@ -106,39 +106,51 @@ const AllGenre = (() => {
       };
     });
   }
-  function quickView(group,showGenre,showSmall) {
-    const box=el('section',undefined,'ag-quick-group');
-    if(showGenre||showSmall)box.append(el('h3',(showGenre?group.genre+' / ':'')+group.subgenre,'ag-quick-title'));
-    if(group.points.length){
-      box.append(el('h4','狙い目','ag-quick-label'));
-      const points=el('ul',undefined,'ag-quick-points');
-      for(const point of group.points.slice(0,3)){const li=el('li',point.text);if(!point.confirmed)li.append(el('span','要確認','ag-factor-pending'));points.append(li);}
-      box.append(points);
+  // Each entry keeps the original claim and its own records. A label is a
+  // browsing aid, never a new claim that all models share the same feature.
+  function factorEntries(records) {
+    const groups=new Map();
+    const short=text=>({'メッシュ素材':'メッシュ','ISOFIX型':'ISOFIX','同じ価格なら新しい世代':'新しい世代'}[text] || text);
+    for(const p of records){
+      const q=p.guide?p.quick:undefined;
+      if(!p.features.length && !q?.points.length)continue;
+      let points;
+      if(q?.points.length)points=q.points;
+      else if(q)points=[{text:p.features.some(f=>f.label.includes('メッシュ'))?'メッシュ':q.name,confirmed:p.features.every(f=>f.confirmed)}];
+      else points=p.features.flatMap(f=>f.label.split('・').filter(Boolean).map(text=>({text,confirmed:f.confirmed})));
+      for(const point of points){
+        const label=short(point.text),key=JSON.stringify([p.genre,subgenre(p),label,point.confirmed]);
+        if(!groups.has(key))groups.set(key,{genre:p.genre,subgenre:subgenre(p),label,confirmed:point.confirmed,records:[],labels:[]});
+        const g=groups.get(key);
+        if(!g.records.some(x=>x.id===p.id))g.records.push(p);
+        if(!g.labels.includes(point.text))g.labels.push(point.text);
+      }
     }
-    const table=el('table',undefined,'ag-quick-table'),head=el('thead'),tr=el('tr');
-    for(const text of ['狙い目のモデル','見分け方']){const th=el('th',text);th.setAttribute('scope','col');tr.append(th);}head.append(tr);table.append(head);
-    const body=el('tbody');
-    for(const t of group.targets){
-      const row=el('tr'),name=el('th'),clue=el('td',t.clue||'詳しい説明で確認');name.setAttribute('scope','row');name.append(el('span',t.record.brand,'ag-target-brand'));
-      if(t.record.guide)name.append(el('span',t.name,'ag-target-name'));
-      else{const item=button(t.name,()=>detail(t.record,item),'ag-factor-product');name.append(item);}
-      for(const text of t.cautions)clue.append(el('span',text,'ag-target-caution'));
-      row.append(name,clue);body.append(row);
-    }
-    table.append(body);box.append(table);
-    if(group.checks.length){box.append(el('h4','店頭チェック','ag-quick-label'));const ul=el('ul',undefined,'ag-quick-checks');for(const text of group.checks)ul.append(el('li',text));box.append(ul);}
-    for(const text of group.cautions)box.append(el('p',text,'ag-quick-caution'));
-    const more=el('details',undefined,'ag-quick-more');more.append(el('summary','詳しい理由・動画を見る'));
-    const notes=new Set(),sources=new Map(),claims=new Set(),checks=new Set();
+    return [...groups.values()];
+  }
+  function factorView(group) {
+    const row=el('details',undefined,'ag-factor-row');
+    const summary=el('summary');summary.append(el('span',group.label,'ag-factor-label'));
+    if(!group.confirmed)summary.append(el('span','要確認','ag-factor-pending'));
+    row.append(summary);
+    const content=el('div',undefined,'ag-factor-content');
+    // The original wording preserves conditions such as "at the same price".
+    for(const label of group.labels)if(label!==group.label && label!=='メッシュ素材' && label!=='ISOFIX型')content.append(el('p',label,'ag-factor-condition'));
     for(const p of group.records){
-      for(const f of p.features){const key=JSON.stringify([f.label,f.note,f.confirmed]);if(claims.has(key))continue;claims.add(key);more.append(el('p',f.label+(f.confirmed?'':'（要確認）'),'ag-detail-factor'),el('p',f.note));}
-      for(const x of p.checks)checks.add(x);
-      for(const x of p.notes)notes.add(x);
-      for(const e of p.evidence)if(!sources.has(e.url))sources.set(e.url,e.label);
+      const q=p.guide?p.quick:undefined,section=el('section',undefined,'ag-factor-example');
+      section.append(el('h4',p.brand+' / '+(q?.name||p.name),'ag-factor-example-title'));
+      if(q?.clue)section.append(el('p','見分け方：'+q.clue));
+      const relevant=q?p.features:p.features.filter(f=>group.labels.some(label=>f.label.split('・').includes(label)||f.label===label));
+      for(const f of relevant)section.append(el('p',f.note,'ag-factor-explanation'));
+      const checks=q?.check?[q.check]:p.checks;
+      if(checks.length){section.append(el('h5','店頭チェック'));const ul=el('ul');for(const text of checks)ul.append(el('li',text));section.append(ul);}
+      for(const text of q?.cautions||[])section.append(el('p',text,'ag-quick-caution'));
+      const more=el('details',undefined,'ag-factor-evidence');more.append(el('summary','動画・補足を見る'));
+      if(q){for(const text of p.checks)more.append(el('p',text));}
+      for(const text of p.notes)more.append(el('p',text,'ag-muted'));
+      for(const e of p.evidence)more.append(link(e.label,e.url));section.append(more);content.append(section);
     }
-    if(checks.size){more.append(el('h4','確認の補足'));const ul=el('ul');for(const text of checks)ul.append(el('li',text));more.append(ul);}
-    for(const text of notes)more.append(el('p',text,'ag-muted'));
-    for(const [url,label] of sources)more.append(link(label,url));box.append(more);return box;
+    row.append(content);return row;
   }
   function mount(root) {
     let record=null, guides=[], genre='', small='', brand='', query='', request=0;
@@ -162,7 +174,12 @@ const AllGenre = (() => {
       const result=select(record.products,genre,brand,query,small);
       status.textContent=[genre,small].filter(Boolean).join(' › ')+(genre?' · ':'')+`${result.length}商品`;
       factorList.replaceChildren();
-      for(const group of quickGroups([...select(guides,genre,brand,query,small),...result]))factorList.append(quickView(group,!genre,!small));
+      const sections=new Map();
+      for(const entry of factorEntries([...select(guides,genre,brand,query,small),...result])){
+        const key=JSON.stringify([entry.genre,entry.subgenre]);
+        if(!sections.has(key)){const box=el('section',undefined,'ag-factor-group');if(!genre||!small)box.append(el('h3',(!genre?entry.genre+' / ':'')+entry.subgenre,'ag-quick-title'));sections.set(key,box);factorList.append(box);}
+        sections.get(key).append(factorView(entry));
+      }
       if(!factorList.children.length)factorList.append(el('p','この条件の高値要素は未登録です。','ag-empty'));
       grid.replaceChildren();
       for(const p of result){const card=button('',()=>detail(p,card),'ag-card');card.append(photo(p));const content=el('div',undefined,'ag-card-body');content.append(el('p',p.brand,'ag-eyebrow'),el('h3',p.name),el('p',subgenre(p),'ag-card-type'));if(p.kind==='紹介・比較例')content.append(el('p','動画の紹介例','ag-example-badge'));card.append(content);grid.append(card);}
@@ -174,5 +191,5 @@ const AllGenre = (() => {
   }
   function init(){const apparel=document.getElementById('app'),root=document.getElementById('all-genre');if(!root)return;const view=mount(root);const nav=document.getElementById('guide-tabs');let active='app';const positions={app:0,'all-genre':0};for(const b of nav.querySelectorAll('button'))b.addEventListener('click',()=>{const next=b.dataset.pane;if(next===active){if(next==='all-genre')view.refresh();return;}positions[active]=window.scrollY;active=next;apparel.hidden=active!=='app';root.hidden=active!=='all-genre';for(const n of nav.querySelectorAll('button'))n.setAttribute('aria-pressed',String(n===b));window.scrollTo(0,positions[active]);if(active==='all-genre')view.refresh();});}
   if(typeof document!=='undefined')document.addEventListener('DOMContentLoaded',init);
-  return {select,norm,subgenre,subgenres,featureGroups,quickGroups,readGuides,mount};
+  return {select,norm,subgenre,subgenres,featureGroups,quickGroups,factorEntries,readGuides,mount};
 })();

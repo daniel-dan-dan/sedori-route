@@ -41,13 +41,13 @@ test('shared subgenre advice is shown once while model clues stay separate',asyn
  const h=harness({products:[],guides}),groups=h.view.quickGroups(h.view.readGuides(guides));
  assert.equal(groups.length,1);assert.equal(groups[0].points.length,1);assert.equal(groups[0].checks.length,1);assert.equal(groups[0].cautions.length,1);assert.equal(groups[0].targets[0].clue,'線が2本');assert.equal(groups[0].targets[1].clue,'メッシュ素材');
  await h.view.mount(h.root).refresh();
- assert.equal(h.nodes.find(n=>n.className==='ag-quick-points').children.length,1);
- assert.equal(h.nodes.filter(n=>n.className==='ag-quick-more').length,1);
- assert.equal(h.nodes.filter(n=>n.tag==='a'&&n.href===learning.evidence[0].url).length,1);
+ assert.equal(h.nodes.filter(n=>n.className==='ag-factor-row').length,1);
+ assert.equal(h.nodes.filter(n=>n.className==='ag-factor-evidence').length,2);
+ assert.equal(h.nodes.filter(n=>n.tag==='a'&&n.href===learning.evidence[0].url).length,2);
  const brands=h.nodes.find(n=>n.tag==='select');brands.value='B';brands.listeners.change();
  const current=h.nodes.find(n=>n.className==='ag-factor-list').children[0];
  const text=n=>[n.textContent,...n.children.flatMap(c=>text(c))].filter(Boolean);
- assert.ok(text(current).includes('メッシュ素材'));assert.ok(!text(current).includes('線が2本'));
+ assert.ok(text(current).includes('見分け方：メッシュ素材'));assert.ok(!text(current).includes('見分け方：線が2本'));
 });
 test('bad concise copy is rejected rather than silently losing uncertainty',()=>{
  const h=harness();
@@ -64,9 +64,9 @@ test('legacy facts retain uncertainty and full details when the visible list is 
  ps[1].features=[{label:'同じ特徴',confirmed:true,note:'確認済みの全文'},{label:'四番目',confirmed:false,note:'理由4'}];
  const h=harness({products:ps});await h.view.mount(h.root).refresh();
  assert.equal(h.view.quickGroups(ps)[0].points.length,5);
- assert.equal(h.nodes.find(n=>n.className==='ag-quick-points').children.length,3);
+ assert.equal(h.nodes.filter(n=>n.className==='ag-factor-row').length,5);
  assert.ok(h.nodes.some(n=>n.textContent==='未確認の全文'));assert.ok(h.nodes.some(n=>n.textContent==='理由4'));
- assert.ok(h.nodes.some(n=>n.textContent==='同じ特徴（要確認）'));
+ assert.ok(h.nodes.some(n=>n.textContent==='要確認'));
 });
 test('category changes reset small type and brand; both sections follow empty and matching selections',async()=>{
  const h=harness(),v=h.view.mount(h.root);await v.refresh();
@@ -78,4 +78,16 @@ test('category changes reset small type and brand; both sections follow empty an
  choose(section('ag-genres'),'生活家電');choose(section('ag-subgenres'),'電気ポット');assert.equal(section('ag-grid').children.length,1);
  choose(section('ag-genres'),'すべて');assert.equal(section('ag-subgenre-box').hidden,true);assert.equal(section('ag-grid').children.length,3);
  assert.equal(h.root.children.filter(n=>n.tag==='section' && /ag-(factor|product)-section/.test(n.className)).length,2);
+});
+
+test('individual factors start folded, mesh and ISOFIX are separate, and conditions and source scope survive',async()=>{
+ const guides=[{...learning,id:'mesh',subgenre:'抱っこ紐',name:'Model M',features:[{label:'Model M・メッシュ',confirmed:true,note:'mesh source'}],quick:{...quick,name:'Model M',points:[]}},{...learning,id:'fix',subgenre:'チャイルドシート',name:'Model I',features:[{label:'ISOFIX・新しい世代',confirmed:true,note:'fix source'}],quick:{...quick,name:'Model I',points:[{text:'ISOFIX型',confirmed:true},{text:'同じ価格なら新しい世代',confirmed:true}]}}];
+ const h=harness({products:[],guides});await h.view.mount(h.root).refresh();
+ const entries=h.view.factorEntries(h.view.readGuides(guides));assert.deepEqual(Array.from(entries,e=>e.label),['メッシュ','ISOFIX','新しい世代']);
+ assert.equal(entries[0].records.length,1);assert.equal(entries[0].records[0].id,'mesh');
+ assert.equal(entries[1].records[0].id,'fix');assert.equal(entries[2].labels[0],'同じ価格なら新しい世代');
+ const rows=h.nodes.filter(n=>n.className==='ag-factor-row');assert.equal(rows.length,3);
+ for(const row of rows){assert.equal(row.tag,'details');assert.ok(!row.open);assert.equal(row.children[0].tag,'summary');assert.ok(row.children[1].children.length);}
+ assert.ok(h.nodes.some(n=>n.textContent==='同じ価格なら新しい世代'));
+ assert.ok(h.nodes.some(n=>n.textContent==='mesh source'));assert.ok(h.nodes.some(n=>n.textContent==='fix source'));
 });
