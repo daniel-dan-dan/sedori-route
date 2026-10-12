@@ -47,6 +47,12 @@ const AllGenre = (() => {
         !Array.isArray(g.features) || g.features.length>3 || !g.features.every(f=>f&&str(f.label,80)&&typeof f.confirmed==='boolean'&&str(f.note,3000)) ||
         !strings(g.checks,1000,3) || !strings(g.notes,3000,40) || !Array.isArray(g.evidence) || g.evidence.length<1 || g.evidence.length>30 || !g.evidence.every(e=>e&&str(e.label,1000)&&url(e.url)))throw new Error('Invalid learning record');
       ids.add(g.id);
+      if(g.quick!==undefined){
+        const q=g.quick;
+        if(!q || !str(q.name,100) || !q.name || !str(q.clue,120) || !str(q.check,100) ||
+          !Array.isArray(q.points) || q.points.length>3 || !q.points.every(p=>p&&str(p.text,60)&&p.text&&typeof p.confirmed==='boolean') ||
+          !strings(q.cautions,80,3))throw new Error('Invalid quick guide');
+      }
     }
     return value.map(g=>({...g,guide:true}));
   }
@@ -74,6 +80,66 @@ const AllGenre = (() => {
     }
     return [...groups.values()];
   }
+  // Group shared advice once per subgenre. Short copy is curated with its
+  // evidence in the private library; never infer or truncate a price claim.
+  function quickGroups(records) {
+    const groups=new Map(),unique=(xs,key)=>xs.filter((x,i)=>xs.findIndex(y=>key(y)===key(x))===i);
+    for(const p of records){
+      if(!p.guide && !p.features.length)continue;
+      const key=JSON.stringify([p.genre,subgenre(p)]);
+      if(!groups.has(key))groups.set(key,{genre:p.genre,subgenre:subgenre(p),records:[]});
+      groups.get(key).records.push(p);
+    }
+    return [...groups.values()].map(g=>{
+      const quick=p=>p.guide?p.quick:undefined;
+      const cautions=unique(g.records.flatMap(p=>quick(p)?.cautions || []),x=>x).filter(x=>g.records.every(p=>quick(p)?.cautions.includes(x)));
+      const targets=new Map();
+      for(const p of g.records){
+        const q=quick(p),name=q?.name || p.name,clue=q?.clue || '',key=JSON.stringify([p.brand,name,clue]);
+        if(!targets.has(key))targets.set(key,{record:p,name,clue,cautions:[]});
+        const t=targets.get(key);t.cautions=unique([...t.cautions,...(q?.cautions || []).filter(x=>!cautions.includes(x))],x=>x);
+      }
+      return {...g,
+        points:unique(g.records.flatMap(p=>quick(p)?.points || p.features.map(f=>({text:f.label,confirmed:f.confirmed}))),p=>JSON.stringify([p.text,p.confirmed])),
+        targets:[...targets.values()],
+        checks:unique(g.records.map(p=>quick(p)?.check).filter(Boolean),x=>x),cautions
+      };
+    });
+  }
+  function quickView(group,showGenre,showSmall) {
+    const box=el('section',undefined,'ag-quick-group');
+    if(showGenre||showSmall)box.append(el('h3',(showGenre?group.genre+' / ':'')+group.subgenre,'ag-quick-title'));
+    if(group.points.length){
+      box.append(el('h4','狙い目','ag-quick-label'));
+      const points=el('ul',undefined,'ag-quick-points');
+      for(const point of group.points.slice(0,3)){const li=el('li',point.text);if(!point.confirmed)li.append(el('span','要確認','ag-factor-pending'));points.append(li);}
+      box.append(points);
+    }
+    const table=el('table',undefined,'ag-quick-table'),head=el('thead'),tr=el('tr');
+    for(const text of ['狙い目のモデル','見分け方']){const th=el('th',text);th.setAttribute('scope','col');tr.append(th);}head.append(tr);table.append(head);
+    const body=el('tbody');
+    for(const t of group.targets){
+      const row=el('tr'),name=el('th'),clue=el('td',t.clue||'詳しい説明で確認');name.setAttribute('scope','row');name.append(el('span',t.record.brand,'ag-target-brand'));
+      if(t.record.guide)name.append(el('span',t.name,'ag-target-name'));
+      else{const item=button(t.name,()=>detail(t.record,item),'ag-factor-product');name.append(item);}
+      for(const text of t.cautions)clue.append(el('span',text,'ag-target-caution'));
+      row.append(name,clue);body.append(row);
+    }
+    table.append(body);box.append(table);
+    if(group.checks.length){box.append(el('h4','店頭チェック','ag-quick-label'));const ul=el('ul',undefined,'ag-quick-checks');for(const text of group.checks)ul.append(el('li',text));box.append(ul);}
+    for(const text of group.cautions)box.append(el('p',text,'ag-quick-caution'));
+    const more=el('details',undefined,'ag-quick-more');more.append(el('summary','詳しい理由・動画を見る'));
+    const notes=new Set(),sources=new Map(),claims=new Set(),checks=new Set();
+    for(const p of group.records){
+      for(const f of p.features){const key=JSON.stringify([f.label,f.note,f.confirmed]);if(claims.has(key))continue;claims.add(key);more.append(el('p',f.label+(f.confirmed?'':'（要確認）'),'ag-detail-factor'),el('p',f.note));}
+      for(const x of p.checks)checks.add(x);
+      for(const x of p.notes)notes.add(x);
+      for(const e of p.evidence)if(!sources.has(e.url))sources.set(e.url,e.label);
+    }
+    if(checks.size){more.append(el('h4','確認の補足'));const ul=el('ul');for(const text of checks)ul.append(el('li',text));more.append(ul);}
+    for(const text of notes)more.append(el('p',text,'ag-muted'));
+    for(const [url,label] of sources)more.append(link(label,url));box.append(more);return box;
+  }
   function mount(root) {
     let record=null, guides=[], genre='', small='', brand='', query='', request=0;
     const header=el('header',undefined,'ag-header');header.append(el('h1','オールジャンル'),el('p','ジャンルを選んで、特徴と商品を確認。','ag-muted'));
@@ -85,7 +151,7 @@ const AllGenre = (() => {
     const tools=el('div',undefined,'ag-tools');tools.append(search,brands);
     const status=el('p','資料を読み込み中…','ag-muted');status.setAttribute('role','status');
     const factors=el('section',undefined,'ag-factor-section');factors.setAttribute('aria-labelledby','ag-factors-title');
-    const factorTitle=el('h2','高値要素','ag-section-title');factorTitle.id='ag-factors-title';const factorList=el('div',undefined,'ag-factor-list');factors.append(factorTitle,factorList);
+    const factorTitle=el('h2','高値要素','ag-section-title');factorTitle.id='ag-factors-title';const factorList=el('div',undefined,'ag-factor-list');factors.append(factorTitle,el('p','動画の説明をもとにした目安です。現在の相場は未確認。','ag-factor-context'),factorList);
     const products=el('section',undefined,'ag-product-section');products.setAttribute('aria-labelledby','ag-products-title');
     const productTitle=el('h2','利益商品','ag-section-title');productTitle.id='ag-products-title';const grid=el('div',undefined,'ag-grid');products.append(productTitle,grid);
     const held=el('details',undefined,'ag-held');root.append(header,genres,smallBox,tools,status,factors,products,held);
@@ -96,14 +162,7 @@ const AllGenre = (() => {
       const result=select(record.products,genre,brand,query,small);
       status.textContent=[genre,small].filter(Boolean).join(' › ')+(genre?' · ':'')+`${result.length}商品`;
       factorList.replaceChildren();
-      for(const group of featureGroups([...select(guides,genre,brand,query,small),...result])){
-        const row=el('details',undefined,'ag-factor-row'),summary=el('summary'),title=el('span',group.label,'ag-factor-label');
-        summary.append(title);if(!group.confirmed)summary.append(el('span','要確認','ag-factor-pending'));
-        const scope=(!genre?group.genre+' / ':'')+(!small?group.subgenre+' · ':'');
-        summary.append(el('span',scope+[...new Set(group.products.map(p=>p.brand))].join('・'),'ag-factor-brands'));row.append(summary);
-        for(const p of group.products){const f=p.features.find(f=>f.label===group.label && f.confirmed===group.confirmed);if(p.guide){row.append(el('p',p.name,'ag-eyebrow'),el('p',f.note,'ag-muted'));for(const x of p.checks)row.append(el('p','店頭：'+x,'ag-muted'));for(const x of p.notes)row.append(el('p',x,'ag-muted'));for(const e of p.evidence)row.append(link(e.label,e.url));}else{const item=button(p.name,()=>detail(p,item),'ag-factor-product');row.append(item,el('p',f.note,'ag-muted'));}}
-        factorList.append(row);
-      }
+      for(const group of quickGroups([...select(guides,genre,brand,query,small),...result]))factorList.append(quickView(group,!genre,!small));
       if(!factorList.children.length)factorList.append(el('p','この条件の高値要素は未登録です。','ag-empty'));
       grid.replaceChildren();
       for(const p of result){const card=button('',()=>detail(p,card),'ag-card');card.append(photo(p));const content=el('div',undefined,'ag-card-body');content.append(el('p',p.brand,'ag-eyebrow'),el('h3',p.name),el('p',subgenre(p),'ag-card-type'));if(p.kind==='紹介・比較例')content.append(el('p','動画の紹介例','ag-example-badge'));card.append(content);grid.append(card);}
@@ -115,5 +174,5 @@ const AllGenre = (() => {
   }
   function init(){const apparel=document.getElementById('app'),root=document.getElementById('all-genre');if(!root)return;const view=mount(root);const nav=document.getElementById('guide-tabs');let active='app';const positions={app:0,'all-genre':0};for(const b of nav.querySelectorAll('button'))b.addEventListener('click',()=>{const next=b.dataset.pane;if(next===active){if(next==='all-genre')view.refresh();return;}positions[active]=window.scrollY;active=next;apparel.hidden=active!=='app';root.hidden=active!=='all-genre';for(const n of nav.querySelectorAll('button'))n.setAttribute('aria-pressed',String(n===b));window.scrollTo(0,positions[active]);if(active==='all-genre')view.refresh();});}
   if(typeof document!=='undefined')document.addEventListener('DOMContentLoaded',init);
-  return {select,norm,subgenre,subgenres,featureGroups,readGuides,mount};
+  return {select,norm,subgenre,subgenres,featureGroups,quickGroups,readGuides,mount};
 })();
