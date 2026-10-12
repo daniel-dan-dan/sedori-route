@@ -76,7 +76,7 @@ test('category changes reset small type and brand; both sections follow empty an
  const brands=h.nodes.find(n=>n.tag==='select');brands.value='A';brands.listeners.change();
  choose(section('ag-subgenres'),'抱っこ紐');assert.equal(brands.value,'');assert.equal(section('ag-grid').children[0].tag,'p');assert.equal(section('ag-factor-list').children[0].tag,'p');
  choose(section('ag-genres'),'生活家電');choose(section('ag-subgenres'),'電気ポット');assert.equal(section('ag-grid').children.length,1);
- choose(section('ag-genres'),'すべて');assert.equal(section('ag-subgenre-box').hidden,true);assert.equal(section('ag-grid').children.length,3);
+ assert.ok(!buttons(section('ag-genres')).some(n=>n.textContent==='すべて'));assert.ok(!buttons(section('ag-subgenres')).some(n=>n.textContent==='すべて'));assert.equal(section('ag-subgenre-box').hidden,false);
  assert.equal(h.root.children.filter(n=>n.tag==='section' && /ag-(factor|product)-section/.test(n.className)).length,2);
 });
 
@@ -86,20 +86,31 @@ test('individual factors start folded, mesh and ISOFIX are separate, and conditi
  const entries=h.view.factorEntries(h.view.readGuides(guides));assert.deepEqual(Array.from(entries,e=>e.label),['メッシュ','ISOFIX','新しい世代']);
  assert.equal(entries[0].records.length,1);assert.equal(entries[0].records[0].id,'mesh');
  assert.equal(entries[1].records[0].id,'fix');assert.equal(entries[2].labels[0],'同じ価格なら新しい世代');
- const rows=h.nodes.filter(n=>n.className==='ag-factor-row');assert.equal(rows.length,3);
+ const rows=h.nodes.filter(n=>n.className==='ag-factor-row');assert.equal(rows.length,1);
  for(const row of rows){assert.equal(row.tag,'details');assert.ok(!row.open);assert.equal(row.children[0].tag,'summary');assert.ok(row.children[1].children.length);}
- assert.ok(h.nodes.some(n=>n.textContent==='同じ価格なら新しい世代'));
- assert.ok(h.nodes.some(n=>n.textContent==='mesh source'));assert.ok(h.nodes.some(n=>n.textContent==='fix source'));
+ assert.ok(h.nodes.some(n=>n.textContent==='mesh source'));
+ const section=cls=>h.nodes.find(n=>n.className===cls);section('ag-subgenres').children.find(n=>n.textContent==='チャイルドシート').listeners.click();
+ assert.ok(h.nodes.some(n=>n.textContent==='同じ価格なら新しい世代'));assert.ok(h.nodes.some(n=>n.textContent==='fix source'));
 });
 
 test('brand section precedes factors and follows displayed products without guide-only brands or duplicates',async()=>{
  const products=[make('a','ベビーカー','ベビー用品','A'),make('b','ベビーカー2','ベビー用品','A'),make('c','抱っこ紐','ベビー用品','B')];
  const h=harness({products,guides:[{...learning,brand:'Guide only'}]});await h.view.mount(h.root).refresh();
  const section=cls=>h.nodes.find(n=>n.className===cls),list=section('ag-brand-list');
- assert.deepEqual(list.children.map(n=>n.textContent),['A','B']);assert.ok(h.root.children.indexOf(section('ag-brand-section'))<h.root.children.indexOf(section('ag-factor-section')));
+ assert.deepEqual(list.children.map(n=>n.textContent),['A']);assert.ok(h.root.children.indexOf(section('ag-brand-section'))<h.root.children.indexOf(section('ag-factor-section')));
  const choose=(box,text)=>box.children.find(n=>n.tag==='button'&&n.textContent===text).listeners.click();
  choose(section('ag-genres'),'ベビー用品');choose(section('ag-subgenres'),'ベビーカー');assert.deepEqual(list.children.map(n=>n.textContent),['A']);
  const search=h.nodes.find(n=>n.tag==='input');search.value='存在しない';search.listeners.input();assert.equal(list.children[0].className,'ag-brand-empty');
  search.value='';search.listeners.input();choose(section('ag-subgenres'),'抱っこ紐');assert.deepEqual(list.children.map(n=>n.textContent),['B']);
  choose(section('ag-subgenres'),'ベビーベッド');assert.equal(list.children[0].className,'ag-brand-empty');
+});
+
+test('initial category selection is concrete, populated when available, with no all choices even after refresh',async()=>{
+ const h=harness({products:[make('a','抱っこ紐','ベビー用品'),make('b','電気ポット','生活家電')]});const v=h.view.mount(h.root);await v.refresh();
+ const section=cls=>h.nodes.find(n=>n.className===cls),selected=cls=>section(cls).children.filter(n=>n.attrs['aria-pressed']==='true');
+ assert.equal(selected('ag-genres')[0].textContent,'ベビー用品');assert.equal(selected('ag-subgenres')[0].textContent,'抱っこ紐');
+ for(const cls of ['ag-genres','ag-subgenres'])assert.ok(section(cls).children.every(n=>n.textContent!=='すべて'));
+ section('ag-genres').children.find(n=>n.textContent==='生活家電').listeners.click();assert.equal(selected('ag-subgenres')[0].textContent,'電気ポット');
+ await v.refresh();assert.equal(selected('ag-genres').length,1);assert.equal(selected('ag-subgenres').length,1);
+ const empty=harness({products:[],guides:[]});await empty.view.mount(empty.root).refresh();assert.equal(empty.nodes.find(n=>n.className==='ag-genres').children.length,0);
 });
