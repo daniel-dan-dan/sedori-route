@@ -64,7 +64,24 @@ const BrandGuide = (() => {
     const dx = end.x - start.x, dy = Math.abs(end.y - start.y);
     return dx >= 80 && dy <= 60 && dx > dy * 1.5;
   }
+  function assetService() {
+    if (typeof BrandGuideAssets !== 'undefined') return BrandGuideAssets;
+    if (typeof require === 'function') return require('./brand-guide-assets.js');
+    throw new Error('写真の受信機能を読み込めません。画面を開き直してください。');
+  }
+  function validPhoto(photo, references) {
+    if (references) return assetService().photoValid(photo, true);
+    return Boolean(photo && text(photo.image, 2800000) && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(photo.image) && photo.assetSha256 === undefined);
+  }
+  function prepareAssets(data, receive, onStatus) { return assetService().prepare(data, receive, onStatus); }
+  async function imageURI(photo) { return photo.image !== undefined ? photo.image : assetService().imageURI(photo); }
+  function setImage(img, photo) {
+    if (photo.image !== undefined) { img.src = photo.image; return; }
+    imageURI(photo).then(uri => { if (img.isConnected) img.src = uri; }).catch(() => { if (img.isConnected) img.alt += '（写真を表示できません）'; });
+  }
   function validate(data) {
+    const references = data?.assetManifest !== undefined;
+    if (references) assetService().validateIndex(data);
     check(data && data.version === 1 && text(data.updatedAt, 10) && /^\d{4}-\d{2}-\d{2}$/.test(data.updatedAt) && Number.isFinite(Date.parse(data.updatedAt)));
     check(new Date(data.updatedAt).toISOString().slice(0, 10) === data.updatedAt);
     check(Array.isArray(data.brands) && data.brands.length >= 1 && data.brands.length <= 200, '1〜200ブランド入りの図鑑ファイルを選んでください。');
@@ -98,9 +115,9 @@ const BrandGuide = (() => {
           (typeof g.representativePhotoSha256 === 'string' && /^[a-f0-9]{64}$/.test(g.representativePhotoSha256) &&
             g.photos.some(photo => photo?.reviewedImageSha256 === g.representativePhotoSha256)), '代表写真が資料と一致しません。');
         for (const p of g.photos) {
-          check(p && text(p.image, 2800000) && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(p.image));
+          check(validPhoto(p, references));
           check(sourceOK(p.source) && text(p.basis, 3000) && typeof p.currentOfficial === 'boolean');
-          size += p.image.length; photos++;
+          size += p.image?.length || 0; photos++;
         }
       }
       check(b.method && ['code', 'highlight', 'result', 'how', 'caution', 'mode'].every(k => text(b.method[k])));
@@ -125,17 +142,18 @@ const BrandGuide = (() => {
     check(Array.isArray(a.unconfirmed) && a.unconfirmed.length <= 200 && a.unconfirmed.every(s => text(s, 100)));
     check(Array.isArray(a.examples) && a.examples.length <= 200 && a.examples.every(e => text(e.brand) && text(e.code) && text(e.year) && sourceOK(e.url)));
     check(sourceOK(a.source));
-    if (data.allGenre !== undefined) validateAllGenre(data.allGenre);
+    if (data.allGenre !== undefined) validateAllGenre(data.allGenre, references);
     return { brands: data.brands.filter(b => !b.parentBrand).length, photos };
   }
-  function validateAllGenre(a) {
+  function validateAllGenre(a, references = false) {
     check(a && a.version === 1 && text(a.revision, 100) && a.revision && Number.isInteger(a.videoCount) && a.videoCount > 0);
-    check(Array.isArray(a.products) && a.products.length <= 500 && Array.isArray(a.held) && a.held.length <= 500);
+    const maxRecords = references ? 2000 : 500;
+    check(Array.isArray(a.products) && a.products.length <= maxRecords && Array.isArray(a.held) && a.held.length <= maxRecords);
     const ids = new Set();
     for (const p of a.products) {
       check(p && text(p.id,100) && p.id && !ids.has(p.id)); ids.add(p.id);
       check(['name','brand','genre','model','identity'].every(k => text(p[k],1500)) && p.name && p.brand && p.genre);
-      check(p.photo && p.photo.fullProduct === true && text(p.photo.image,2800000) && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(p.photo.image) && sourceOK(p.photo.source) && text(p.photo.label,200));
+      check(p.photo && p.photo.fullProduct === true && validPhoto(p.photo, references) && sourceOK(p.photo.source) && text(p.photo.label,200));
       check(Array.isArray(p.features) && p.features.length <= 3 && p.features.every(f => f && text(f.label,80) && typeof f.confirmed === 'boolean' && text(f.note,3000)));
       check(Array.isArray(p.checks) && p.checks.length <= 3 && p.checks.every(x=>text(x,1000)));
       check(Array.isArray(p.prices) && p.prices.length <= 20 && p.prices.every(r=>Array.isArray(r)&&r.length===2&&r.every(x=>text(x,1000))));
@@ -160,12 +178,15 @@ const BrandGuide = (() => {
     check(typeof raw === 'string' && new TextEncoder().encode(raw).length <= MAX_BYTES, 'ファイルが大きすぎます（上限48MB）。');
     let envelope;
     try { envelope = JSON.parse(raw); } catch { throw new Error('ファイルを読めませんでした。専用ファイルを選び直してください。'); }
-    check(envelope && envelope.format === 'private-brand-guide' && envelope.schemaVersion === 1 && text(envelope.payload, MAX_BYTES) && /^[a-f0-9]{64}$/.test(envelope.sha256));
+    check(envelope && envelope.format === 'private-brand-guide' && [1, 2].includes(envelope.schemaVersion) && text(envelope.payload, MAX_BYTES) && /^[a-f0-9]{64}$/.test(envelope.sha256));
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(envelope.payload));
     const sha = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
     check(sha === envelope.sha256, 'ファイルの一部が壊れています。元のファイルをもう一度取り込んでください。');
-    const data = JSON.parse(envelope.payload); validate(data);
-    return { data, sha };
+    const data = JSON.parse(envelope.payload);
+    check((envelope.schemaVersion === 2) === (data.assetManifest !== undefined));
+    if (envelope.schemaVersion === 2) check(new TextEncoder().encode(raw).length <= 4 * 1024 * 1024, '商品資料が大きすぎます。');
+    validate(data);
+    return { data, sha, schemaVersion: envelope.schemaVersion };
   }
   function openDB() {
     return new Promise((resolve, reject) => {
@@ -183,6 +204,11 @@ const BrandGuide = (() => {
     });
   }
   async function load() {
+    // Separate metadata preserves the old client's active library during migration.
+    if (typeof BrandGuideAssets !== 'undefined') {
+      const current = await BrandGuideAssets.loadRecord();
+      if (current) { validate(current.data); return current; }
+    }
     const db = await openDB();
     try {
       return await new Promise((resolve, reject) => {
@@ -194,6 +220,7 @@ const BrandGuide = (() => {
     } finally { db.close(); }
   }
   async function save(record) {
+    if (record.schemaVersion === 2) return assetService().saveRecord(record);
     const db = await openDB();
     try {
       await new Promise((resolve, reject) => {
@@ -225,12 +252,12 @@ const BrandGuide = (() => {
     const images = [...data.brands.flatMap(b=>b.groups.flatMap(g=>g.photos)), ...(data.allGenre?.products || []).map(p=>p.photo)];
     for (const p of images) {
       await new Promise((resolve, reject) => {
-        const img = new Image();
+        const img = new Image(); let finished = false;
         const timer = setTimeout(() => finish(new Error('写真を読み込めませんでした。')), 10000);
-        const finish = error => { clearTimeout(timer); img.onload = img.onerror = null; img.src = ''; error ? reject(error) : resolve(); };
+        const finish = error => { if (finished) return; finished = true; clearTimeout(timer); img.onload = img.onerror = null; img.src = ''; error ? reject(error) : resolve(); };
         img.onload = () => finish(img.naturalWidth > 0 && img.naturalWidth <= 4096 && img.naturalHeight <= 4096 && img.naturalWidth * img.naturalHeight <= 12000000 ? null : new Error('写真のサイズが不正です。'));
         img.onerror = () => finish(new Error('壊れた写真があります。以前の資料は変更していません。'));
-        img.src = p.image;
+        imageURI(p).then(uri => { if (!finished) img.src = uri; }).catch(error => finish(error));
       });
     }
   }
@@ -266,7 +293,7 @@ const BrandGuide = (() => {
   function showPhoto(photo, name, root, trigger) {
     const dialog = el('dialog', 'bg-lightbox');
     dialog.setAttribute('aria-label', name + 'のタグ拡大');
-    const img = el('img', 'bg-large-photo'); img.src = photo.image; img.alt = name + 'のブランドタグ';
+    const img = el('img', 'bg-large-photo'); setImage(img, photo); img.alt = name + 'のブランドタグ';
     const close = () => dialog.close();
     dialog.append(button('閉じる ×', close), el('p', 'bg-muted', '指で広げると拡大できます'), img);
     dialog.addEventListener('close', () => { dialog.remove(); if (trigger.isConnected) trigger.focus(); });
@@ -334,7 +361,7 @@ const BrandGuide = (() => {
       if (!isLive() || typeof BrandGuideSync === 'undefined') return;
       retry.disabled = true; input.disabled = true;
       try {
-        const result = await BrandGuideSync.run({ guide: { load, importFile, MAX_BYTES }, force,
+        const result = await BrandGuideSync.run({ guide: { load, importFile, parsePackage, prepareAssets, MAX_BYTES }, force,
           onStatus: message => { if (isLive()) { syncStatus.textContent = message; syncStatus.hidden = false; } },
           onSaved: acceptRecord,
         });
@@ -500,7 +527,7 @@ const BrandGuide = (() => {
           const p = representativePhoto(g);
           const photoButton = button('', () => showPhoto(p, b.name, root, photoButton), 'bg-photo-button');
           photoButton.setAttribute('aria-label', `${b.name} ${g.displayPeriod.label}のタグ写真を拡大`);
-          const img = el('img', 'bg-tag-photo'); img.src = p.image; img.alt = b.name + ' ブランドタグ'; img.loading = 'lazy';
+          const img = el('img', 'bg-tag-photo'); setImage(img, p); img.alt = b.name + ' ブランドタグ'; img.loading = 'lazy';
           photoButton.append(img); card.append(photoButton);
           const refs = el('details', 'bg-refs'); refs.append(el('summary', '', '出典を見る'));
           // Keep the full dating evidence even when only one photo is displayed.
@@ -593,6 +620,6 @@ const BrandGuide = (() => {
     }, 15 * 60 * 1000);
     await sync(Boolean(options.forceSync));
   }
-  return { representativePhoto, modelExplanation, isBackSwipe, tagPeriod, tagTimeline, render, validate, parsePackage, normalize, matches, importFile, load, save, DB_NAME, MAX_BYTES };
+  return { representativePhoto, modelExplanation, isBackSwipe, tagPeriod, tagTimeline, render, validate, parsePackage, normalize, matches, importFile, load, save, prepareAssets, imageURI, setImage, DB_NAME, MAX_BYTES };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = BrandGuide;

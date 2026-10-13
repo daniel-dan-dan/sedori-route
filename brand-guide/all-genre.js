@@ -58,7 +58,7 @@ const AllGenre = (() => {
   }
   function button(text, action, cls='ag-button') { const n=el('button',text,cls);n.type='button';n.addEventListener('click',action);return n; }
   function link(text,url) { const n=el('a',text);n.href=url;n.target='_blank';n.rel='noopener noreferrer';n.referrerPolicy='no-referrer';return n; }
-  function photo(p) { const n=el('img');n.src=p.photo.image;n.alt=p.name+'の商品全体';n.loading='lazy';n.decoding='async';return n; }
+  function photo(p) { const n=el('img');if(typeof BrandGuide.setImage==='function')BrandGuide.setImage(n,p.photo);else n.src=p.photo.image;n.alt=p.name+'の商品全体';n.loading='lazy';n.decoding='async';return n; }
   function features(p) {const box=el('div',undefined,'ag-features');for(const f of p.features){box.append(el('span',f.label+(f.confirmed?'':' · 要確認'),f.confirmed?'ag-chip':'ag-chip ag-unconfirmed'));}return box;}
   function detail(p,trigger) {
     const d=el('dialog',undefined,'ag-detail');d.setAttribute('aria-label',p.name);

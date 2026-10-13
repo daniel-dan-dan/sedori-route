@@ -109,9 +109,13 @@ const BrandGuideSync = (() => {
     } finally { clearTimeout(timer); }
   }
   function validateManifest(m) {
-    if (!m || m.schemaVersion !== 1 || !Number.isSafeInteger(m.revision) || m.revision < 1
+    if (!m || ![1, 2].includes(m.schemaVersion) || !Number.isSafeInteger(m.revision) || m.revision < 1
       || !/^[a-f0-9]{64}$/.test(m.sha256) || !/^\d{4}-\d{2}-\d{2}$/.test(m.updatedAt) || !Number.isFinite(Date.parse(m.updatedAt)) || new Date(m.updatedAt).toISOString().slice(0, 10) !== m.updatedAt
       || !Number.isSafeInteger(m.bytes) || m.bytes < 1 || m.bytes > 48 * 1024 * 1024) fail('図鑑の更新情報が正しくありません。');
+    if (m.schemaVersion === 2) {
+      if (m.transport !== 'assets-v2' || m.bytes > 4 * 1024 * 1024) fail('写真の配信情報が正しくありません。');
+      return m;
+    }
     if (m.transport !== undefined && (m.transport !== 'chunks-v1' || !Number.isSafeInteger(m.characters)
       || m.characters < 1 || m.characters > m.bytes || m.chunkCharacters !== 4 * 1024 * 1024)) fail('図鑑の分割情報が正しくありません。');
     return m;
@@ -151,12 +155,20 @@ const BrandGuideSync = (() => {
         onStatus('最新版を確認しています…');
         const token = await (credentialProvider ? credentialProvider() : credential());
         if (!/^[A-Za-z0-9._~-]{32,256}$/.test(token)) fail(credentialProvider ? 'この図鑑はまだ接続されていません。「今すぐ更新を確認」から初回接続を行ってください。' : '店舗アプリの接続設定を一度行うと、自動で図鑑を保存できます。', 'AUTH_REQUIRED');
-        const manifest = validateManifest(await request('getBrandGuideManifest', token));
+        const manifest = validateManifest(await request('getBrandGuideManifest', token, { transport: 'assets-v2' }));
         const old = await guide.load();
         if (old?.sha === manifest.sha256) { onStatus('最新版を保存済みです。ファイル選択は不要です。'); return { status: 'current', record: old }; }
         if (old && (old.data.updatedAt > manifest.updatedAt || (old.remoteRevision || 0) > manifest.revision)) fail('配信中の資料が古いため、保存済みの図鑑を使います。');
         onStatus('図鑑を受け取っています…');
-        const raw = await receivePackage(manifest, token, guide, onStatus);
+        const raw = manifest.transport === 'assets-v2'
+          ? await request('getBrandGuidePackage', token, { transport: 'assets-v2', sha256: manifest.sha256, revision: manifest.revision }, manifest.bytes + 65536)
+          : await receivePackage(manifest, token, guide, onStatus);
+        if (manifest.transport === 'assets-v2') {
+          const index = await guide.parsePackage(raw);
+          if (index.schemaVersion !== 2 || index.sha !== manifest.sha256 || index.data.updatedAt !== manifest.updatedAt) fail('写真の資料と更新情報が一致しません。');
+          await guide.prepareAssets(index.data, bundle => request('getBrandGuidePackage', token,
+            { transport: 'assets-v2', sha256: manifest.sha256, revision: manifest.revision, assetBundleSha: bundle.sha256 }, bundle.bytes + 65536), onStatus);
+        }
         if (new TextEncoder().encode(raw).length !== manifest.bytes) fail('資料を最後まで受け取れませんでした。');
         onStatus('図鑑を保存しています…');
         const record = await guide.importFile({ size: manifest.bytes, text: async () => raw }, manifest);
