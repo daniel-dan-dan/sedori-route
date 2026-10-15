@@ -443,3 +443,12 @@ test('private import validates optional generic factor review before saving it',
  data.allGenre={version:1,revision:'reviewed',videoCount:1,products:[p],held:[],valueFactors:{version:1,reviewedAt:'2026-10-12',items:[f]}};guide.validate(data);
  for(const patch of [{generalizable:false},{dimension:'model'},{sourceIds:['missing']},{confirmed:'yes'},{evidence:[{label:'bad',url:'javascript:alert(1)'}]}]){const copy=structuredClone(data);Object.assign(copy.allGenre.valueFactors.items[0],patch);assert.throws(()=>guide.validate(copy));}
 });
+test('partial product images and unknown prices may be listed without claiming a whole view',()=>{
+ const {guide}=harness();const data=fixture();const p=productFixture();
+ p.photo.fullProduct=false;p.photo.coverage='partial-or-unverified';p.photo.label='動画の商品画像（全体像は未確認）';p.prices=[['販売予定','未確認']];
+ data.allGenre={version:1,revision:'partial-policy',videoCount:1,products:[p],held:[]};
+ assert.doesNotThrow(()=>guide.validate(data));
+ for(const patch of [{source:'javascript:alert(1)'},{image:'https://example.org/image.jpg'},{coverage:'verified-full'}]){
+  const bad=structuredClone(data);Object.assign(bad.allGenre.products[0].photo,patch);assert.throws(()=>guide.validate(bad));
+ }
+});

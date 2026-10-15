@@ -72,3 +72,9 @@ test('initial selection uses a populated minor genre and empty libraries remain 
  choose(h,'ag-genres','生活家電');assert.equal(selected('ag-subgenres')[0].textContent,'電気ポット');await v.refresh();assert.equal(selected('ag-genres').length,1);
  const empty=harness({products:[],guides:[]});await empty.view.mount(empty.root).refresh();assert.equal(find(empty,'ag-genres').children.length,0);
 });
+test('partial pictures use truthful alt text and empty held lists are hidden',async()=>{
+ const p={...data[0],photo:{...data[0].photo,fullProduct:false,coverage:'partial-or-unverified'}};
+ const h=harness({products:[p],held:[]});await h.view.mount(h.root).refresh();
+ assert.equal(find(h,'ag-held').hidden,true);assert.equal(h.nodes.find(n=>n.tag==='img').alt,p.name+'の参考画像');
+ const held=harness({held:[{id:'pending',name:'不明品',reason:'根拠なし'}]});await held.view.mount(held.root).refresh();assert.equal(find(held,'ag-held').hidden,false);
+});

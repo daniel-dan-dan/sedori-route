@@ -153,7 +153,7 @@ const BrandGuide = (() => {
     for (const p of a.products) {
       check(p && text(p.id,100) && p.id && !ids.has(p.id)); ids.add(p.id);
       check(['name','brand','genre','model','identity'].every(k => text(p[k],1500)) && p.name && p.brand && p.genre);
-      check(p.photo && p.photo.fullProduct === true && validPhoto(p.photo, references) && sourceOK(p.photo.source) && text(p.photo.label,200));
+      check(p.photo && (p.photo.fullProduct === true || p.photo.fullProduct === false && p.photo.coverage === 'partial-or-unverified') && validPhoto(p.photo, references) && sourceOK(p.photo.source) && text(p.photo.label,200));
       check(Array.isArray(p.features) && p.features.length <= 3 && p.features.every(f => f && text(f.label,80) && typeof f.confirmed === 'boolean' && text(f.note,3000)));
       check(Array.isArray(p.checks) && p.checks.length <= 3 && p.checks.every(x=>text(x,1000)));
       check(Array.isArray(p.prices) && p.prices.length <= 20 && p.prices.every(r=>Array.isArray(r)&&r.length===2&&r.every(x=>text(x,1000))));
