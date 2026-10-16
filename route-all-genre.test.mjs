@@ -78,3 +78,5 @@ test('partial pictures use truthful alt text and empty held lists are hidden',as
  assert.equal(find(h,'ag-held').hidden,true);assert.equal(h.nodes.find(n=>n.tag==='img').alt,p.name+'の参考画像');
  const held=harness({held:[{id:'pending',name:'不明品',reason:'根拠なし'}]});await held.view.mount(held.root).refresh();assert.equal(find(held,'ag-held').hidden,false);
 });
+
+test('growing reviewed library accepts over 200 traits but retains a hard bound and source validation',()=>{const h=harness();const items=Array.from({length:1000},(_,i)=>({...factor,id:'factor-'+i,label:'trait-'+i}));assert.equal(h.view.readValueFactors(packageOf(items),data).length,1000);assert.throws(()=>h.view.readValueFactors(packageOf([...items,{...factor,id:'overflow',label:'overflow'}]),data));assert.throws(()=>h.view.readValueFactors(packageOf([...items.slice(0,200),{...factor,id:'bad',label:'bad',sourceIds:['missing']}]),data));});

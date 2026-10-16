@@ -162,7 +162,7 @@ const BrandGuide = (() => {
     }
     if(a.valueFactors!==undefined){
       const v=a.valueFactors,sourceIds=new Set([...a.products,...(a.guides||[])].map(p=>p.id)),factorIds=new Set();
-      check(v && v.version===1 && text(v.reviewedAt,100) && v.reviewedAt && Array.isArray(v.items) && v.items.length<=200);
+      check(v && v.version===1 && text(v.reviewedAt,100) && v.reviewedAt && Array.isArray(v.items) && v.items.length<=1000);
       for(const f of v.items){
         check(f && text(f.id,100) && f.id && !factorIds.has(f.id));factorIds.add(f.id);
         check(['genre','subgenre','label','explanation'].every(k=>text(f[k],k==='explanation'?1500:100)&&f[k]) &&

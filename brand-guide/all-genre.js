@@ -114,7 +114,7 @@ const AllGenre = (() => {
     const rows=new Map(records.map(p=>[p.id,p])),ids=new Set(),keys=new Set();
     const dimensions=['material','function','generation','condition','accessories','specification'];
     const url=x=>{try{const u=new URL(x);return u.protocol==='https:'&&['www.youtube.com','youtube.com','youtu.be'].includes(u.hostname)&&!u.username&&!u.password;}catch{return false;}};
-    if(!value||value.version!==1||!text(value.reviewedAt,100)||!Array.isArray(value.items)||value.items.length>200)throw new Error('Invalid reviewed factors');
+    if(!value||value.version!==1||!text(value.reviewedAt,100)||!Array.isArray(value.items)||value.items.length>1000)throw new Error('Invalid reviewed factors');
     for(const f of value.items){
       if(!f||!text(f.id,100)||ids.has(f.id)||!text(f.genre,100)||!text(f.subgenre,100)||!text(f.label,60)||
         !dimensions.includes(f.dimension)||f.generalizable!==true||typeof f.confirmed!=='boolean'||!text(f.explanation,1500)||

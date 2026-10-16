@@ -441,6 +441,7 @@ test('private import validates optional generic factor review before saving it',
  const {guide}=harness(),data=fixture();const p=productFixture();
  const f={id:'condition',genre:'家電',subgenre:'その他',label:'状態が良い',dimension:'condition',generalizable:true,confirmed:false,explanation:'動画の説明。未検証。',checks:['状態を確認'],sourceIds:[p.id],evidence:[{label:'説明',url:'https://www.youtube.com/watch?v=example'}]};
  data.allGenre={version:1,revision:'reviewed',videoCount:1,products:[p],held:[],valueFactors:{version:1,reviewedAt:'2026-10-12',items:[f]}};guide.validate(data);
+ const growing=structuredClone(data);growing.allGenre.valueFactors.items=Array.from({length:1000},(_,i)=>({...f,id:'factor-'+i,label:'trait-'+i}));assert.doesNotThrow(()=>guide.validate(growing));growing.allGenre.valueFactors.items.push({...f,id:'overflow'});assert.throws(()=>guide.validate(growing));
  for(const patch of [{generalizable:false},{dimension:'model'},{sourceIds:['missing']},{confirmed:'yes'},{evidence:[{label:'bad',url:'javascript:alert(1)'}]}]){const copy=structuredClone(data);Object.assign(copy.allGenre.valueFactors.items[0],patch);assert.throws(()=>guide.validate(copy));}
 });
 test('partial product images and unknown prices may be listed without claiming a whole view',()=>{
