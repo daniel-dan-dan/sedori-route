@@ -32,6 +32,9 @@ const AllGenre = (() => {
     const terms = norm(query).split(/[,、]+/).filter(Boolean);
     return products.filter(p => (!genre || p.genre === genre) && (!brand || p.brand === brand) && (!small || subgenre(p)===small) && terms.every(t => norm([p.name,p.brand,p.model,p.genre,subgenre(p),...p.features.map(f=>f.label)].join(' ')).includes(t)));
   }
+  function listedBrands(records) {
+    return [...new Set(records.map(p=>p.brand).filter(name=>name && !name.includes('未確認')))].sort((a,b)=>a.localeCompare(b,'ja'));
+  }
   function el(tag, text, cls) { const n=document.createElement(tag); if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n; }
   // Learning records have no product photo; verify their bounded text and sources
   // before use, independently of the whole-product image gate.
@@ -159,14 +162,14 @@ const AllGenre = (() => {
     const held=el('details',undefined,'ag-held');root.append(header,genres,smallBox,tools,status,productBrands,factors,products,held);
     function renderGenres(){const available=[...new Set([...record.products,...guides].map(p=>p.genre))];if(!available.includes(genre))genre=available[0]||'';genres.replaceChildren();for(const g of available){const b=button(g,()=>{genre=g;small='';brand='';renderGenres();renderSmall();renderBrands();render();},'ag-genre');b.setAttribute('aria-pressed',String(g===genre));genres.append(b);}}
     function renderSmall(){const rows=[...record.products,...guides],available=subgenres(rows,genre);if(!available.includes(small))small=available.find(g=>rows.some(p=>p.genre===genre&&subgenre(p)===g))||available[0]||'';smallBox.hidden=!genre;smallGenres.replaceChildren();for(const g of available){const b=button(g,()=>{small=g;brand='';renderSmall();renderBrands();render();},'ag-genre ag-subgenre');b.setAttribute('aria-pressed',String(g===small));smallGenres.append(b);}}
-    function renderBrands(){brands.replaceChildren();for(const b of ['',...new Set(select([...record.products,...guides],genre,'','',small).map(p=>p.brand))].sort((a,b)=>a.localeCompare(b,'ja'))){const o=el('option',b||'すべてのブランド');o.value=b;brands.append(o);}brands.value=brand;}
+    function renderBrands(){brands.replaceChildren();for(const b of ['',...listedBrands(select([...record.products,...guides],genre,'','',small))]){const o=el('option',b||'すべてのブランド');o.value=b;brands.append(o);}brands.value=brand;}
     function render(){
       const result=select(record.products,genre,brand,query,small);
       status.textContent=[genre,small].filter(Boolean).join(' › ')+(genre?' · ':'')+`${result.length}商品`;
       brandList.replaceChildren();
       // Use only the displayed profit products, not learning-only examples or held items.
-      for(const name of [...new Set(result.map(p=>p.brand))].sort((a,b)=>a.localeCompare(b,'ja')))brandList.append(el('li',name));
-      if(!result.length)brandList.append(el('li','該当する利益商品はありません。','ag-brand-empty'));
+      for(const name of listedBrands(result))brandList.append(el('li',name));
+      if(!brandList.children.length)brandList.append(el('li','','ag-brand-empty'));
       factorList.replaceChildren();
       const sections=new Map();
       for(const entry of factorEntries([...select(guides,genre,brand,query,small),...result],valueFactors)){
@@ -185,5 +188,5 @@ const AllGenre = (() => {
   }
   function init(){const apparel=document.getElementById('app'),root=document.getElementById('all-genre');if(!root)return;const view=mount(root);const nav=document.getElementById('guide-tabs');let active='app';const positions={app:0,'all-genre':0};for(const b of nav.querySelectorAll('button'))b.addEventListener('click',()=>{const next=b.dataset.pane;if(next===active){if(next==='all-genre')view.refresh();return;}positions[active]=window.scrollY;active=next;apparel.hidden=active!=='app';root.hidden=active!=='all-genre';for(const n of nav.querySelectorAll('button'))n.setAttribute('aria-pressed',String(n===b));window.scrollTo(0,positions[active]);if(active==='all-genre')view.refresh();});}
   if(typeof document!=='undefined')document.addEventListener('DOMContentLoaded',init);
-  return {select,norm,subgenre,subgenres,featureGroups,quickGroups,factorEntries,readGuides,readValueFactors,mount};
+  return {listedBrands,select,norm,subgenre,subgenres,featureGroups,quickGroups,factorEntries,readGuides,readValueFactors,mount};
 })();

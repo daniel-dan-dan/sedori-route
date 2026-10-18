@@ -80,3 +80,11 @@ test('partial pictures use truthful alt text and empty held lists are hidden',as
 });
 
 test('growing reviewed library accepts over 200 traits but retains a hard bound and source validation',()=>{const h=harness();const items=Array.from({length:1000},(_,i)=>({...factor,id:'factor-'+i,label:'trait-'+i}));assert.equal(h.view.readValueFactors(packageOf(items),data).length,1000);assert.throws(()=>h.view.readValueFactors(packageOf([...items,{...factor,id:'overflow',label:'overflow'}]),data));assert.throws(()=>h.view.readValueFactors(packageOf([...items.slice(0,200),{...factor,id:'bad',label:'bad',sourceIds:['missing']}]),data));});
+
+test('unknown brand placeholders are omitted from brand lists and filters without removing their products',async()=>{
+ const products=[make('known','ベビーカー','ベビー用品','Aprica'),make('unknown','ベビーカー不明品','ベビー用品','ブランド未確認'),make('maker','ベビーカー参考品','ベビー用品','メーカー未確認')];
+ const h=harness({products});await h.view.mount(h.root).refresh();
+ assert.deepEqual(find(h,'ag-brand-list').children.map(n=>n.textContent),['Aprica']);
+ assert.deepEqual(h.nodes.find(n=>n.tag==='select').children.map(n=>n.textContent),['すべてのブランド','Aprica']);
+ assert.equal(find(h,'ag-grid').children.length,3);
+});
