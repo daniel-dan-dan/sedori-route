@@ -55,16 +55,16 @@ test('unverified generalizable claims visibly retain uncertainty',async()=>{
  const h=harness({valueFactors:packageOf([{...factor,confirmed:false,explanation:'自動字幕由来。直接音声は未照合。'}])});await h.view.mount(h.root).refresh();
  assert.ok(contents(find(h,'ag-factor-row')).includes('要確認'));assert.ok(contents(find(h,'ag-factor-row')).includes('自動字幕由来。直接音声は未照合。'));
 });
-test('category changes reset brand and all three sections follow the concrete small genre',async()=>{
+test('all three sections follow the concrete small genre',async()=>{
  const h=harness({valueFactors:packageOf([factor])});await h.view.mount(h.root).refresh();choose(h,'ag-subgenres','ベビーカー');
- const brands=h.nodes.find(n=>n.tag==='select');brands.value='A';brands.listeners.change();choose(h,'ag-subgenres','抱っこ紐');assert.equal(brands.value,'');assert.equal(find(h,'ag-grid').children[0].tag,'p');assert.equal(find(h,'ag-factor-list').children[0].tag,'p');assert.equal(find(h,'ag-brand-list').children[0].className,'ag-brand-empty');
+ choose(h,'ag-subgenres','抱っこ紐');assert.equal(find(h,'ag-grid').children[0].tag,'p');assert.equal(find(h,'ag-factor-list').children[0].tag,'p');assert.equal(find(h,'ag-brand-list').children[0].className,'ag-brand-empty');
  choose(h,'ag-genres','生活家電');assert.equal(find(h,'ag-grid').children.length,1);
  for(const cls of ['ag-genres','ag-subgenres'])assert.ok(find(h,cls).children.every(n=>n.textContent!=='すべて'));
 });
 test('brand section precedes factors and contains only displayed product brands once',async()=>{
  const products=[{...data[0]},{...data[0],id:'a2'}];const h=harness({products,guides:[learning],valueFactors:packageOf([factor])});await h.view.mount(h.root).refresh();
  assert.deepEqual(find(h,'ag-brand-list').children.map(n=>n.textContent),['A']);assert.ok(h.root.children.indexOf(find(h,'ag-brand-section'))<h.root.children.indexOf(find(h,'ag-factor-section')));
- const search=h.nodes.find(n=>n.tag==='input');search.value='存在しない';search.listeners.input();assert.equal(find(h,'ag-brand-list').children[0].className,'ag-brand-empty');
+ choose(h,'ag-subgenres','抱っこ紐');assert.equal(find(h,'ag-brand-list').children[0].className,'ag-brand-empty');
 });
 test('initial selection uses a populated minor genre and empty libraries remain empty',async()=>{
  const h=harness({products:[make('a','抱っこ紐','ベビー用品'),make('b','電気ポット','生活家電')]});const v=h.view.mount(h.root);await v.refresh();
@@ -85,6 +85,5 @@ test('unknown brand placeholders are omitted from brand lists and filters withou
  const products=[make('known','ベビーカー','ベビー用品','Aprica'),make('unknown','ベビーカー不明品','ベビー用品','ブランド未確認'),make('maker','ベビーカー参考品','ベビー用品','メーカー未確認')];
  const h=harness({products});await h.view.mount(h.root).refresh();
  assert.deepEqual(find(h,'ag-brand-list').children.map(n=>n.textContent),['Aprica']);
- assert.deepEqual(h.nodes.find(n=>n.tag==='select').children.map(n=>n.textContent),['すべてのブランド','Aprica']);
  assert.equal(find(h,'ag-grid').children.length,3);
 });

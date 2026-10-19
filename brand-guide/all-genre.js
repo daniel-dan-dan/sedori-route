@@ -144,14 +144,11 @@ const AllGenre = (() => {
     content.append(evidence);row.append(summary,content);return row;
   }
   function mount(root) {
-    let record=null, guides=[], valueFactors=[], genre='', small='', brand='', query='', request=0;
-    const header=el('header',undefined,'ag-header');header.append(el('h1','オールジャンル'),el('p','ジャンルを選んで、特徴と商品を確認。','ag-muted'));
-    const search=el('input');search.type='search';search.placeholder='ブランド・商品名・型番';search.setAttribute('aria-label','商品を検索');
+    let record=null, guides=[], valueFactors=[], genre='', small='', request=0;
+    const header=el('header',undefined,'ag-header');header.append(el('h1','オールジャンル'));
     const genres=el('div',undefined,'ag-genres');genres.setAttribute('role','group');genres.setAttribute('aria-label','大ジャンル');
     const smallBox=el('section',undefined,'ag-subgenre-box');smallBox.hidden=true;
-    const smallLabel=el('p','小ジャンル','ag-filter-label');const smallGenres=el('div',undefined,'ag-subgenres');smallGenres.setAttribute('role','group');smallGenres.setAttribute('aria-label','小ジャンル');smallBox.append(smallLabel,smallGenres);
-    const brands=el('select');brands.setAttribute('aria-label','ブランドで絞り込み');
-    const tools=el('div',undefined,'ag-tools');tools.append(search,brands);
+    const smallGenres=el('div',undefined,'ag-subgenres');smallGenres.setAttribute('role','group');smallGenres.setAttribute('aria-label','小ジャンル');smallBox.append(smallGenres);
     const status=el('p','資料を読み込み中…','ag-muted');status.setAttribute('role','status');
     const productBrands=el('section',undefined,'ag-brand-section');productBrands.setAttribute('aria-labelledby','ag-brands-title');
     const brandTitle=el('h2','ブランド','ag-section-title');brandTitle.id='ag-brands-title';const brandList=el('ul',undefined,'ag-brand-list');productBrands.append(brandTitle,brandList);
@@ -159,12 +156,11 @@ const AllGenre = (() => {
     const factorTitle=el('h2','高値要素','ag-section-title');factorTitle.id='ag-factors-title';const factorList=el('div',undefined,'ag-factor-list');factors.append(factorTitle,el('p','動画の説明をもとにした目安です。現在の相場は未確認。','ag-factor-context'),factorList);
     const products=el('section',undefined,'ag-product-section');products.setAttribute('aria-labelledby','ag-products-title');
     const productTitle=el('h2','利益商品','ag-section-title');productTitle.id='ag-products-title';const grid=el('div',undefined,'ag-grid');products.append(productTitle,grid);
-    const held=el('details',undefined,'ag-held');root.append(header,genres,smallBox,tools,status,productBrands,factors,products,held);
-    function renderGenres(){const available=[...new Set([...record.products,...guides].map(p=>p.genre))];if(!available.includes(genre))genre=available[0]||'';genres.replaceChildren();for(const g of available){const b=button(g,()=>{genre=g;small='';brand='';renderGenres();renderSmall();renderBrands();render();},'ag-genre');b.setAttribute('aria-pressed',String(g===genre));genres.append(b);}}
-    function renderSmall(){const rows=[...record.products,...guides],available=subgenres(rows,genre);if(!available.includes(small))small=available.find(g=>rows.some(p=>p.genre===genre&&subgenre(p)===g))||available[0]||'';smallBox.hidden=!genre;smallGenres.replaceChildren();for(const g of available){const b=button(g,()=>{small=g;brand='';renderSmall();renderBrands();render();},'ag-genre ag-subgenre');b.setAttribute('aria-pressed',String(g===small));smallGenres.append(b);}}
-    function renderBrands(){brands.replaceChildren();for(const b of ['',...listedBrands(select([...record.products,...guides],genre,'','',small))]){const o=el('option',b||'すべてのブランド');o.value=b;brands.append(o);}brands.value=brand;}
+    const held=el('details',undefined,'ag-held');root.append(header,genres,smallBox,status,productBrands,factors,products,held);
+    function renderGenres(){const available=[...new Set([...record.products,...guides].map(p=>p.genre))];if(!available.includes(genre))genre=available[0]||'';genres.replaceChildren();for(const g of available){const b=button(g,()=>{genre=g;small='';renderGenres();renderSmall();render();},'ag-genre');b.setAttribute('aria-pressed',String(g===genre));genres.append(b);}}
+    function renderSmall(){const rows=[...record.products,...guides],available=subgenres(rows,genre);if(!available.includes(small))small=available.find(g=>rows.some(p=>p.genre===genre&&subgenre(p)===g))||available[0]||'';smallBox.hidden=!genre;smallGenres.replaceChildren();for(const g of available){const b=button(g,()=>{small=g;renderSmall();render();},'ag-genre ag-subgenre');b.setAttribute('aria-pressed',String(g===small));smallGenres.append(b);}}
     function render(){
-      const result=select(record.products,genre,brand,query,small);
+      const result=select(record.products,genre,'','',small);
       status.textContent=[genre,small].filter(Boolean).join(' › ')+(genre?' · ':'')+`${result.length}商品`;
       brandList.replaceChildren();
       // Use only the displayed profit products, not learning-only examples or held items.
@@ -172,7 +168,7 @@ const AllGenre = (() => {
       if(!brandList.children.length)brandList.append(el('li','','ag-brand-empty'));
       factorList.replaceChildren();
       const sections=new Map();
-      for(const entry of factorEntries([...select(guides,genre,brand,query,small),...result],valueFactors)){
+      for(const entry of factorEntries([...select(guides,genre,'','',small),...result],valueFactors)){
         const key=JSON.stringify([entry.genre,entry.subgenre]);
         if(!sections.has(key)){const box=el('section',undefined,'ag-factor-group');if(!genre||!small)box.append(el('h3',(!genre?entry.genre+' / ':'')+entry.subgenre,'ag-quick-title'));sections.set(key,box);factorList.append(box);}
         sections.get(key).append(factorView(entry));
@@ -182,8 +178,7 @@ const AllGenre = (() => {
       for(const p of result){const card=button('',()=>detail(p,card),'ag-card');card.append(photo(p));const content=el('div',undefined,'ag-card-body');content.append(el('p',p.brand,'ag-eyebrow'),el('h3',p.name),el('p',subgenre(p),'ag-card-type'));if(p.kind==='紹介・比較例')content.append(el('p','動画の紹介例','ag-example-badge'));card.append(content);grid.append(card);}
       if(!result.length)grid.append(el('p','この小ジャンルの商品は未登録です。','ag-empty'));
     }
-    search.addEventListener('input',()=>{query=search.value;if(record)render();});brands.addEventListener('change',()=>{brand=brands.value;if(record)render();});
-    async function refresh(){const ticket=++request;try{const saved=await BrandGuide.load();if(ticket!==request)return;const next=saved?.data?.allGenre;if(!next){status.textContent='商品資料はまだ保存されていません。アパレルブランド図鑑で最新資料を受信してください。';return;}if(next.revision===record?.revision)return;const nextGuides=readGuides(next.guides),nextFactors=readValueFactors(next.valueFactors,[...next.products,...nextGuides]);guides=nextGuides;valueFactors=nextFactors;record=next;renderGenres();renderSmall();if(!select([...record.products,...guides],genre,'','',small).some(p=>p.brand===brand))brand='';renderBrands();render();held.replaceChildren();held.hidden=!record.held.length;held.append(el('summary',`資料確認待ち ${record.held.length}商品`),el('p','掲載できない理由を個別に記録しています。画像の欠けや価格未確認だけでは保留しません。'));for(const p of record.held)held.append(el('p',p.name+' — '+p.reason));}catch{status.textContent='保存済み資料を読み込めませんでした。もう一度この画面を開いてください。';}}
+    async function refresh(){const ticket=++request;try{const saved=await BrandGuide.load();if(ticket!==request)return;const next=saved?.data?.allGenre;if(!next){status.textContent='商品資料はまだ保存されていません。アパレルブランド図鑑で最新資料を受信してください。';return;}if(next.revision===record?.revision)return;const nextGuides=readGuides(next.guides),nextFactors=readValueFactors(next.valueFactors,[...next.products,...nextGuides]);guides=nextGuides;valueFactors=nextFactors;record=next;renderGenres();renderSmall();render();held.replaceChildren();held.hidden=!record.held.length;held.append(el('summary',`資料確認待ち ${record.held.length}商品`),el('p','掲載できない理由を個別に記録しています。画像の欠けや価格未確認だけでは保留しません。'));for(const p of record.held)held.append(el('p',p.name+' — '+p.reason));}catch{status.textContent='保存済み資料を読み込めませんでした。もう一度この画面を開いてください。';}}
     document.addEventListener('brand-guide-saved',()=>{if(!root.hidden)refresh();});return {refresh};
   }
   function init(){const apparel=document.getElementById('app'),root=document.getElementById('all-genre');if(!root)return;const view=mount(root);const nav=document.getElementById('guide-tabs');let active='app';const positions={app:0,'all-genre':0};for(const b of nav.querySelectorAll('button'))b.addEventListener('click',()=>{const next=b.dataset.pane;if(next===active){if(next==='all-genre')view.refresh();return;}positions[active]=window.scrollY;active=next;apparel.hidden=active!=='app';root.hidden=active!=='all-genre';for(const n of nav.querySelectorAll('button'))n.setAttribute('aria-pressed',String(n===b));window.scrollTo(0,positions[active]);if(active==='all-genre')view.refresh();});}
