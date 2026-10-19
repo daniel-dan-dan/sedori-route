@@ -8,7 +8,7 @@ const data=[make('a','ベビーカー','ベビー用品'),make('b','チャイル
 function harness(extra={}){
  const nodes=[];function node(tag){const n={tag,children:[],attrs:{},listeners:{},hidden:false,append(...xs){this.children.push(...xs);},replaceChildren(...xs){this.children=xs;},setAttribute(k,v){this.attrs[k]=v;},addEventListener(k,f){this.listeners[k]=f;}};nodes.push(n);return n;}
  const context={URL,document:{createElement:node,addEventListener(){}},BrandGuide:{load:async()=>({data:{allGenre:{revision:'one',products:data,held:[],videoCount:1,...extra}}})}};
- vm.runInNewContext(code+'\nthis.view=AllGenre;',context);const root=node('main');return {view:context.view,root,nodes};
+ vm.runInNewContext(readFileSync(new URL('brand-guide/taxonomy.js',import.meta.url),'utf8')+'\n'+code+'\nthis.view=AllGenre;this.taxonomy=GuideTaxonomy;',context);const root=node('main');return {view:context.view,taxonomy:context.taxonomy,root,nodes};
 }
 
 const evidence=[{label:'説明',url:'https://www.youtube.com/watch?v=example&t=30'}];
@@ -56,7 +56,7 @@ test('unverified generalizable claims visibly retain uncertainty',async()=>{
  assert.ok(contents(find(h,'ag-factor-row')).includes('要確認'));assert.ok(contents(find(h,'ag-factor-row')).includes('自動字幕由来。直接音声は未照合。'));
 });
 test('all three sections follow the concrete small genre',async()=>{
- const h=harness({valueFactors:packageOf([factor])});await h.view.mount(h.root).refresh();choose(h,'ag-subgenres','ベビーカー');
+ const h=harness({guides:[{...learning,subgenre:'抱っこ紐'}],valueFactors:packageOf([factor])});await h.view.mount(h.root).refresh();choose(h,'ag-subgenres','ベビーカー');
  choose(h,'ag-subgenres','抱っこ紐');assert.equal(find(h,'ag-grid').children[0].tag,'p');assert.equal(find(h,'ag-factor-list').children[0].tag,'p');assert.equal(find(h,'ag-brand-list').children[0].className,'ag-brand-empty');
  choose(h,'ag-genres','生活家電');assert.equal(find(h,'ag-grid').children.length,1);
  for(const cls of ['ag-genres','ag-subgenres'])assert.ok(find(h,cls).children.every(n=>n.textContent!=='すべて'));
@@ -64,7 +64,7 @@ test('all three sections follow the concrete small genre',async()=>{
 test('brand section precedes factors and contains only displayed product brands once',async()=>{
  const products=[{...data[0]},{...data[0],id:'a2'}];const h=harness({products,guides:[learning],valueFactors:packageOf([factor])});await h.view.mount(h.root).refresh();
  assert.deepEqual(find(h,'ag-brand-list').children.map(n=>n.textContent),['A']);assert.ok(h.root.children.indexOf(find(h,'ag-brand-section'))<h.root.children.indexOf(find(h,'ag-factor-section')));
- choose(h,'ag-subgenres','抱っこ紐');assert.equal(find(h,'ag-brand-list').children[0].className,'ag-brand-empty');
+ choose(h,'ag-middles','睡眠・くつろぎ');choose(h,'ag-subgenres','ベビーベッド');assert.equal(find(h,'ag-brand-list').children[0].className,'ag-brand-empty');
 });
 test('initial selection uses a populated minor genre and empty libraries remain empty',async()=>{
  const h=harness({products:[make('a','抱っこ紐','ベビー用品'),make('b','電気ポット','生活家電')]});const v=h.view.mount(h.root);await v.refresh();
@@ -86,4 +86,32 @@ test('unknown brand placeholders are omitted from brand lists and filters withou
  const h=harness({products});await h.view.mount(h.root).refresh();
  assert.deepEqual(find(h,'ag-brand-list').children.map(n=>n.textContent),['Aprica']);
  assert.equal(find(h,'ag-grid').children.length,3);
+});
+
+test('middle selection narrows leaves and keeps products, brands and reviewed factors in scope',async()=>{
+ const drum={...data[0],id:'drum',genre:'楽器',subgenre:'電子ドラム',name:'電子ドラム'},guitar={...drum,id:'guitar',name:'ギター',subgenre:'ギター'};
+ const trait={...factor,genre:'楽器',subgenre:'電子ドラム',sourceIds:['drum']};
+ const h=harness({products:[drum,guitar],valueFactors:packageOf([trait])});await h.view.mount(h.root).refresh();
+ assert.equal(find(h,'ag-middle-box').hidden,false);
+ choose(h,'ag-middles','打楽器');assert.deepEqual(find(h,'ag-subgenres').children.map(n=>n.textContent),['電子ドラム']);assert.equal(find(h,'ag-grid').children.length,1);assert.ok(contents(find(h,'ag-factor-list')).includes(trait.label));
+ choose(h,'ag-middles','ギター・ベース');assert.deepEqual(find(h,'ag-subgenres').children.map(n=>n.textContent),['ギター']);assert.equal(find(h,'ag-factor-list').children[0].tag,'p');
+ assert.ok(contents(h.root).includes('オールジャンル図鑑'));assert.ok(!contents(h.root).includes('中ジャンル'));assert.ok(!h.nodes.some(n=>n.tag==='input'||n.tag==='select'));
+});
+test('aliases merge only the displayed labels while product IDs and original evidence remain intact',async()=>{
+ const rows=[{...data[0],id:'x',genre:'楽器',subgenre:'楽器用ケース'},{...data[0],id:'y',genre:'楽器',subgenre:'楽器ケース'}],before=JSON.stringify(rows);
+ const h=harness({products:rows});await h.view.mount(h.root).refresh();
+ assert.deepEqual(find(h,'ag-subgenres').children.map(n=>n.textContent),['楽器ケース']);assert.equal(find(h,'ag-grid').children.length,2);assert.equal(JSON.stringify(rows),before);assert.equal(find(h,'ag-middle-box').hidden,true);
+ assert.equal(h.taxonomy.classify('アウトドア','チェア').subgenre,'チェア');assert.equal(h.taxonomy.classify('家具','チェア').subgenre,'椅子');assert.equal(h.taxonomy.classify('生活家電','餅つき機').subgenre,'もちつき機');
+});
+test('moved products carry reviewed factors and preserve every original source reference',async()=>{
+ const p={...data[0],genre:'生活家電',subgenre:'スピーカー'},trait={...factor,genre:p.genre,subgenre:p.subgenre},before=JSON.stringify([p,trait]);
+ const h=harness({products:[p],valueFactors:packageOf([trait])});await h.view.mount(h.root).refresh();
+ assert.deepEqual(find(h,'ag-genres').children.map(n=>n.textContent),['オーディオ機器']);assert.equal(find(h,'ag-grid').children.length,1);assert.ok(contents(find(h,'ag-factor-list')).includes(trait.label));assert.equal(JSON.stringify([p,trait]),before);
+ const tax=h.taxonomy;const projected=[tax.project(p,p.subgenre),tax.project({...p,id:'b',genre:'楽器',subgenre:'アンプ'},'アンプ')];const split=tax.factors([{...trait,sourceIds:['a','b']}],projected);assert.equal(split.length,2);assert.deepEqual(split.flatMap(f=>f.sourceIds),['a','b']);
+});
+test('new unknown categories remain reachable and refreshed data repairs obsolete selections',async()=>{
+ const options={products:[{...data[0],genre:'新しいジャンル',subgenre:'新しい種類'}]},h=harness(options),v=h.view.mount(h.root);await v.refresh();
+ assert.equal(find(h,'ag-grid').children.length,1);assert.deepEqual(find(h,'ag-subgenres').children.map(n=>n.textContent),['新しい種類']);
+ options.revision='two';options.products=[{...data[0],genre:'旅行用品',subgenre:'スーツケース'}];await v.refresh();assert.deepEqual(find(h,'ag-genres').children.map(n=>n.textContent),['旅行用品']);assert.equal(find(h,'ag-grid').children.length,1);assert.equal(find(h,'ag-middle-box').hidden,true);
+ assert.equal(h.taxonomy.classify('__proto__','constructor').subgenre,'constructor');
 });

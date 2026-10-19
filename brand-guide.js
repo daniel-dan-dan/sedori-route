@@ -309,7 +309,7 @@ const BrandGuide = (() => {
       top.append(button('‹ 店舗アプリ', () => Router.navigate('home'), 'bg-text-button'), el('span', 'bg-eyebrow', 'PRIVATE LIBRARY'));
       root.append(top);
     }
-    root.append(el('h1', 'bg-title', options.standalone ? 'ブランド図鑑' : '古着図鑑'));
+    root.append(el('h1', 'bg-title', options.standalone ? 'アパレル図鑑' : '古着図鑑'));
     if (!options.standalone) root.append(el('p', 'bg-subtitle', 'タグと型番で、何年ごろの服かを調べる'));
     const status = el('p', 'bg-status', '保存済みの資料を確認中…'); status.setAttribute('role', 'status'); if (!options.standalone) root.append(status);
     const offlineStatus = el('p', 'bg-muted bg-offline-status', '通信なしで開くための画面を準備しています。'); if (!options.standalone) root.append(offlineStatus);
@@ -416,7 +416,7 @@ const BrandGuide = (() => {
         swipeHome = el('div', 'bg-swipe-home'); swipeHome.inert = true;
         swipeHome.setAttribute('aria-hidden', 'true');
         swipeHome.style.left = `${bounds.left}px`; swipeHome.style.width = `${bounds.width}px`;
-        const title = el('h1', 'bg-title', options.standalone ? 'ブランド図鑑' : '古着図鑑');
+        const title = el('h1', 'bg-title', options.standalone ? 'アパレル図鑑' : '古着図鑑');
         const copies = [label, count, list].map(node => { const copy = node.cloneNode(true); copy.hidden = false; return copy; });
         const preview = el('div', 'bg-swipe-preview');
         preview.style.transform = `translateY(-${listScrollY}px)`;
