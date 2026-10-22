@@ -47,7 +47,7 @@ test('duplicate connect clicks share one registration; malformed code never regi
 });
 test('every standalone asset exists and version/scope stay consistent',()=>{
  const sw=read('brand-guide/sw.js'),html=read('brand-guide/index.html');
- assert.match(sw,/brand-guide-v43/);assert.match(html,/data-version="v43"/);assert.match(read('brand-guide/bootstrap.js'),/scope:'\.\/'/);
+ const version=html.match(/data-version="(v\d+)"/)[1];assert.ok(sw.includes('brand-guide-'+version));assert.match(read('brand-guide/bootstrap.js'),/scope:'\.\/'/);
  const assets=vm.runInNewContext(sw.slice(sw.indexOf('const ASSETS =')+15,sw.indexOf(';',sw.indexOf('const ASSETS ='))));
  for(const asset of assets){if(asset==='./')continue;const path=new URL(asset.split('?')[0],new URL('brand-guide/',import.meta.url));assert.ok(readFileSync(path).length);}
 });
@@ -87,4 +87,4 @@ test('worker confirmation uses the displayed version rather than permanently com
  }
 });
 
- test("standalone release cache busts all versioned assets consistently", () => { const html=readFileSync(new URL("./brand-guide/index.html",import.meta.url),"utf8"); const sw=readFileSync(new URL("./brand-guide/sw.js",import.meta.url),"utf8"); assert.ok(html.includes("v43")); assert.ok(!html.includes("?v=36") && !sw.includes("?v=36")); });
+ test("standalone release cache busts all versioned assets consistently", () => { const html=readFileSync(new URL("./brand-guide/index.html",import.meta.url),"utf8"); const sw=readFileSync(new URL("./brand-guide/sw.js",import.meta.url),"utf8"); const version=html.match(/data-version="v(\d+)"/)[1]; const versions=[...html.matchAll(/\?v=(\d+)/g),...sw.matchAll(/\?v=(\d+)/g)].map(m=>m[1]); assert.ok(versions.length>10); assert.ok(versions.every(v=>v===version)); });

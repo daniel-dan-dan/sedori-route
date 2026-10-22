@@ -5,7 +5,7 @@ const BrandGuideAssets = (() => {
   const SHA = /^[a-f0-9]{64}$/;
   const JPEG = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
   const MAX_BUNDLE_BYTES = 4 * 1024 * 1024;
-  const MAX_ASSET_BYTES = 256 * 1024 * 1024;
+  const MAX_ASSET_BYTES = 1024 * 1024 * 1024;
   const MAX_IMAGE_CHARACTERS = 2800000;
   function check(ok, message = '写真の資料を確認できません。以前の図鑑は残しています。') { if (!ok) throw new Error(message); }
   function photos(data) { return [...data.brands.flatMap(b => b.groups.flatMap(g => g.photos)), ...(data.allGenre?.products || []).map(p => p.photo)]; }
@@ -13,7 +13,7 @@ const BrandGuideAssets = (() => {
     return Boolean(photo && (typeof photo.image === 'string' && photo.image.length <= MAX_IMAGE_CHARACTERS && JPEG.test(photo.image) && photo.assetSha256 === undefined || references && photo.image === undefined && SHA.test(photo.assetSha256)));
   }
   function validateManifest(value) {
-    check(value?.version === 1 && Array.isArray(value.bundles) && value.bundles.length > 0 && value.bundles.length <= 128);
+    check(value?.version === 1 && Array.isArray(value.bundles) && value.bundles.length > 0 && value.bundles.length <= 512);
     const bundles = new Set(), images = new Set(); let bytes = 0;
     for (const b of value.bundles) {
       check(b && SHA.test(b.sha256) && !bundles.has(b.sha256) && Number.isSafeInteger(b.bytes) && b.bytes > 0 && b.bytes <= MAX_BUNDLE_BYTES);
@@ -21,7 +21,7 @@ const BrandGuideAssets = (() => {
       for (const hash of b.imageShas) { check(typeof hash === 'string' && SHA.test(hash) && !images.has(hash)); images.add(hash); }
       bundles.add(b.sha256); bytes += b.bytes;
     }
-    check(bytes <= MAX_ASSET_BYTES && images.size <= 4000);
+    check(bytes <= MAX_ASSET_BYTES && images.size <= 8000);
     return { imageShas: images, totalBytes: bytes };
   }
   function validateIndex(data) {

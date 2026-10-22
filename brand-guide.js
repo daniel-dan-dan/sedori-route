@@ -147,7 +147,7 @@ const BrandGuide = (() => {
   }
   function validateAllGenre(a, references = false) {
     check(a && a.version === 1 && text(a.revision, 100) && a.revision && Number.isInteger(a.videoCount) && a.videoCount > 0);
-    const maxRecords = references ? 2000 : 500;
+    const maxRecords = references ? 8000 : 500;
     check(Array.isArray(a.products) && a.products.length <= maxRecords && Array.isArray(a.held) && a.held.length <= maxRecords);
     const ids = new Set();
     for (const p of a.products) {
@@ -162,7 +162,7 @@ const BrandGuide = (() => {
     }
     if(a.valueFactors!==undefined){
       const v=a.valueFactors,sourceIds=new Set([...a.products,...(a.guides||[])].map(p=>p.id)),factorIds=new Set();
-      check(v && v.version===1 && text(v.reviewedAt,100) && v.reviewedAt && Array.isArray(v.items) && v.items.length<=1000);
+      check(v && v.version===1 && text(v.reviewedAt,100) && v.reviewedAt && Array.isArray(v.items) && v.items.length<=(references?4000:1000));
       for(const f of v.items){
         check(f && text(f.id,100) && f.id && !factorIds.has(f.id));factorIds.add(f.id);
         check(['genre','subgenre','label','explanation'].every(k=>text(f[k],k==='explanation'?1500:100)&&f[k]) &&
@@ -184,7 +184,7 @@ const BrandGuide = (() => {
     check(sha === envelope.sha256, 'ファイルの一部が壊れています。元のファイルをもう一度取り込んでください。');
     const data = JSON.parse(envelope.payload);
     check((envelope.schemaVersion === 2) === (data.assetManifest !== undefined));
-    if (envelope.schemaVersion === 2) check(new TextEncoder().encode(raw).length <= 4 * 1024 * 1024, '商品資料が大きすぎます。');
+    if (envelope.schemaVersion === 2) check(new TextEncoder().encode(raw).length <= 16 * 1024 * 1024, '商品資料が大きすぎます。');
     validate(data);
     return { data, sha, schemaVersion: envelope.schemaVersion };
   }
