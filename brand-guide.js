@@ -160,18 +160,13 @@ const BrandGuide = (() => {
       check(Array.isArray(p.notes) && p.notes.length <= 40 && p.notes.every(x=>text(x,3000)));
       check(Array.isArray(p.evidence) && p.evidence.length <= 30 && p.evidence.every(e=>e&&text(e.label,1000)&&sourceOK(e.url)));
     }
-    if(a.valueFactors!==undefined){
-      const v=a.valueFactors,sourceIds=new Set([...a.products,...(a.guides||[])].map(p=>p.id)),factorIds=new Set();
-      check(v && v.version===1 && text(v.reviewedAt,100) && v.reviewedAt && Array.isArray(v.items) && v.items.length<=(references?4000:1000));
-      for(const f of v.items){
-        check(f && text(f.id,100) && f.id && !factorIds.has(f.id));factorIds.add(f.id);
-        check(['genre','subgenre','label','explanation'].every(k=>text(f[k],k==='explanation'?1500:100)&&f[k]) &&
-          ['material','function','generation','condition','accessories','specification'].includes(f.dimension) && f.generalizable===true && typeof f.confirmed==='boolean');
-        check(Array.isArray(f.checks) && f.checks.length<=3 && f.checks.every(x=>text(x,300)) &&
-          Array.isArray(f.sourceIds) && f.sourceIds.length>0 && f.sourceIds.length<=30 && f.sourceIds.every(id=>sourceIds.has(id)) &&
-          Array.isArray(f.evidence) && f.evidence.length>0 && f.evidence.length<=30 && f.evidence.every(e=>e&&text(e.label,1000)&&sourceOK(e.url)));
-      }
-    }
+    // Import and display share the same limits and evidence-scope checks.
+    const shared = typeof AllGenreData !== 'undefined' ? AllGenreData :
+      (typeof require === 'function' ? require('./brand-guide/all-genre-data.js') : null);
+    check(shared, '商品資料の確認機能を読み込めません。画面を開き直してください。');
+    const guides = shared.readGuides(a.guides);
+    for (const g of guides) { check(!ids.has(g.id)); ids.add(g.id); }
+    shared.readValueFactors(a.valueFactors, [...a.products, ...guides], references ? 4000 : 1000);
     for(const p of a.held) {check(p && text(p.id,100) && p.id && !ids.has(p.id) && text(p.name,200) && text(p.reason,500));ids.add(p.id);}
   }
   async function parsePackage(raw) {
@@ -204,23 +199,46 @@ const BrandGuide = (() => {
     });
   }
   async function load() {
-    // Separate metadata preserves the old client's active library during migration.
+    // Both package schemas now use one active record; retain the old DB as a
+    // read-only migration source so an older browser cannot hide a new import.
     if (typeof BrandGuideAssets !== 'undefined') {
       const current = await BrandGuideAssets.loadRecord();
       if (current) { validate(current.data); return current; }
     }
+    return loadLegacyRecord();
+  }
+  async function loadLegacyRecord(validateRecord = true) {
     const db = await openDB();
     try {
       return await new Promise((resolve, reject) => {
         const tx = db.transaction('library', 'readonly'); const req = tx.objectStore('library').get('active');
         const timer = setTimeout(() => { try { tx.abort(); } catch {} reject(new Error('資料の読み出しに時間がかかっています。開き直してください。')); }, 15000);
-        tx.oncomplete = () => { clearTimeout(timer); resolve(req.result || null); };
+        tx.oncomplete = () => {
+          clearTimeout(timer);
+          try { if (req.result && validateRecord) validate(req.result.data); resolve(req.result || null); }
+          catch (error) { reject(error); }
+        };
         tx.onabort = tx.onerror = () => { clearTimeout(timer); reject(tx.error || new Error('保存済み資料を読めません。')); };
       });
     } finally { db.close(); }
   }
+  function compareRecord(old, record) {
+    if (old?.data?.updatedAt > record.data.updatedAt) throw new Error('保存済みの資料より古いファイルです。新しい資料を選んでください。');
+    if (old?.remoteRevision && record.remoteRevision && old.remoteRevision > record.remoteRevision) throw new Error('以前の版への更新は行いません。');
+    if (old?.sha === record.sha && old.remoteRevision) record.remoteRevision = Math.max(old.remoteRevision, record.remoteRevision || 0);
+  }
   async function save(record) {
-    if (record.schemaVersion === 2) return assetService().saveRecord(record);
+    validate(record?.data);
+    check(record.schemaVersion === undefined || record.schemaVersion === (record.data.assetManifest !== undefined ? 2 : 1));
+    if (typeof BrandGuideAssets !== 'undefined') {
+      const next = { ...record };
+      // An invalid old payload must not prevent recovery with a fully validated
+      // replacement. Compare its metadata without rendering the old payload.
+      const old = await BrandGuideAssets.loadRecord() || await loadLegacyRecord(false);
+      compareRecord(old, next);
+      return BrandGuideAssets.saveRecord(next);
+    }
+    check(record.schemaVersion !== 2, '写真の保存機能を読み込めません。画面を開き直してください。');
     const db = await openDB();
     try {
       await new Promise((resolve, reject) => {
@@ -233,9 +251,7 @@ const BrandGuide = (() => {
         store.get('active').onsuccess = event => {
           try {
           const old = event.target.result;
-          if (old && old.data.updatedAt > record.data.updatedAt) { abort(new Error('保存済みの資料より古いファイルです。新しい資料を選んでください。')); return; }
-          if (old?.remoteRevision && record.remoteRevision && old.remoteRevision > record.remoteRevision) { abort(new Error('以前の版への更新は行いません。')); return; }
-          if (old?.sha === record.sha && old.remoteRevision) record.remoteRevision = Math.max(old.remoteRevision, record.remoteRevision || 0);
+          compareRecord(old, record);
           const write = store.put(record, 'active');
           write.onsuccess = () => {
             store.get('active').onsuccess = read => {
@@ -335,7 +351,8 @@ const BrandGuide = (() => {
     } else offlineStatus.textContent = 'このブラウザでは通信なしでの起動に対応していません。';
     const syncStatus = el('p', 'bg-status', '図鑑を開くと、自動で最新版を確認します。'); syncStatus.setAttribute('role', 'status'); if (!options.standalone) root.append(syncStatus);
     const controls = el('details', 'bg-import'); controls.append(el('summary', '', '更新・接続設定'));
-    controls.append(el('p', '', options.standalone ? '非公開の資料をこの図鑑に保存します。開いている間は15分ごとに更新を確認します。' : '店舗アプリに接続済みなら、非公開の配信先から自動で保存します。開いている間は15分ごとに更新を確認します。'));
+    controls.append(el('p', '', '表示中は15分ごとに更新を確認します。'));
+    const savedDetails = el('p', 'bg-muted'); savedDetails.hidden = true; controls.append(savedDetails);
     const retry = button('今すぐ更新を確認', () => sync(true));
     controls.append(retry, button(options.standalone ? '図鑑の接続設定' : '店舗アプリの接続設定', options.standalone ? options.onConnection : () => window.location.assign('index.html#settings'), 'bg-text-button'));
     const manual = el('details'); manual.append(el('summary', '', '予備のファイルから取り込む'));
@@ -343,7 +360,8 @@ const BrandGuide = (() => {
     input.disabled = true;
     manual.append(input, el('p', 'bg-muted', '通常はファイル選択不要です。圏外での復旧用に使えます。')); controls.append(manual);
     if (options.standalone) { status.hidden = true; offlineStatus.hidden = true; syncStatus.hidden = true; controls.append(status, offlineStatus, syncStatus); }
-    const body = el('div', 'bg-body'); root.append(body, controls);
+    const updateError = el('p', 'bg-update-error', '資料を更新できませんでした'); updateError.hidden = true; updateError.setAttribute('role', 'status');
+    const body = el('div', 'bg-body'); root.append(body, updateError, controls);
     let currentRecord = null;
     let pendingRecord = null, updateNotice = null;
     function acceptRecord(record) {
@@ -368,29 +386,43 @@ const BrandGuide = (() => {
         // A shared in-flight update or another tab can save after this view loaded.
         // Reconcile from the validated record even when the transport reports current.
         if (result?.record) acceptRecord(result.record);
-        if (options.standalone && ['saved', 'current'].includes(result?.status)) syncStatus.hidden = true;
-        if (options.standalone && result?.status === 'failed' && isLive()) controls.open = true;
+        if (['saved', 'current'].includes(result?.status)) {
+          updateError.hidden = true;
+          if (options.standalone) syncStatus.hidden = true;
+        }
+        if (['failed', 'auth-required'].includes(result?.status) && isLive()) updateError.hidden = result.status === 'auth-required' && !currentRecord;
         if (result?.status === 'auth-required' && isLive()) {
-          controls.open = true;
           if (force && options.standalone && options.onConnection) options.onConnection();
+        }
+      } catch (error) {
+        if (isLive()) {
+          updateError.hidden = false; syncStatus.hidden = false;
+          syncStatus.textContent = '更新を確認できませんでした。保存済みの資料はそのまま使えます。';
+          console.warn('[brand-guide] update failed', error.name || 'Error');
         }
       } finally { if (isLive()) { retry.disabled = false; if (!importing) input.disabled = false; } }
     }
-    function showLibrary(record) {
+    function showLibrary(record, restoreFocus = null) {
       pendingRecord = null; updateNotice?.remove(); updateNotice = null;
       currentRecord = record;
       root.classList.remove('bg-viewing');
       const data = record.data; const counts = validate(data);
       status.hidden = Boolean(options.standalone);
       status.textContent = `保存済み · ${counts.brands}ブランド / 写真${counts.photos}枚 · 資料更新 ${data.updatedAt}`;
+      savedDetails.textContent = `資料更新 ${data.updatedAt}`;
+      if (record.savedAt && Number.isFinite(Date.parse(record.savedAt))) savedDetails.textContent += ` · 保存 ${new Date(record.savedAt).toLocaleString('ja-JP')}`;
+      savedDetails.hidden = false;
       body.replaceChildren();
       const label = el('label', 'bg-search-label', options.standalone ? '' : 'ブランドを探す');
       const search = el('input', 'bg-search'); search.type = 'search'; search.setAttribute('aria-label', 'ブランド検索'); search.placeholder = '例：バトナー / BATONER'; search.value = query; label.append(search);
       const list = el('div', 'bg-brand-list'); const detail = el('div', 'bg-brand-detail');
       const count = el('p', 'bg-muted'); count.setAttribute('role', 'status');
+      count.tabIndex = -1;
       body.append(label, count, list, detail);
       let swipeStart = null, swipeHome = null, swipeMoving = false, swipeSettling = false, swipeTimer = null;
       let listScrollY = 0;
+      let returnEntry = restoreFocus;
+      const listButtons = new Map();
       let swipeWidth = 0, swipeOffset = 0;
       function clearSwipe() {
         clearTimeout(swipeTimer); swipeTimer = null;
@@ -402,12 +434,13 @@ const BrandGuide = (() => {
       function returnToList() {
         clearSwipe();
         if (pendingRecord) {
-          showLibrary(pendingRecord);
+          showLibrary(pendingRecord, returnEntry);
           window.scrollTo(0, listScrollY);
           return;
         }
         root.classList.remove('bg-viewing'); detail.replaceChildren();
         label.hidden = count.hidden = list.hidden = false;
+        (listButtons.get(returnEntry) || count).focus({ preventScroll: true });
         window.scrollTo(0, listScrollY);
       }
       function beginSwipe() {
@@ -471,13 +504,14 @@ const BrandGuide = (() => {
         settleSwipe(Boolean(back));
       }, { passive: true });
       function drawList() {
-        list.replaceChildren(); const found = data.brands.filter(b => !b.parentBrand && matches(b, query)); count.textContent = `${found.length}ブランド`;
+        list.replaceChildren(); listButtons.clear(); const found = data.brands.filter(b => !b.parentBrand && matches(b, query)); count.textContent = `${found.length}ブランド`;
         for (const b of found) {
-          const btn = button('', () => showBrand(b), 'bg-brand-card');
+          const btn = button('', () => { returnEntry = b.id; showBrand(b); }, 'bg-brand-card'); listButtons.set(b.id, btn);
           btn.append(el('span', 'bg-brand-name', b.name), el('span', 'bg-brand-kana', b.aliases[0] || ''), el('span', 'bg-card-arrow', '›')); list.append(btn);
         }
         if (!found.length) list.append(el('p', '', '見つかりません。日本語または英語のブランド名を短く入力してください。'));
-        list.append(button('ベイクルーズ系列の共通する読み方', showBaycrews, 'bg-appendix-entry'));
+        const appendix = button('ベイクルーズ系列の共通する読み方', () => { returnEntry = 'appendix'; showBaycrews(); }, 'bg-appendix-entry');
+        listButtons.set('appendix', appendix); list.append(appendix);
       }
       function startDetail(title, back = returnToList) {
         if (!root.classList.contains('bg-viewing')) listScrollY = window.scrollY;
@@ -594,21 +628,22 @@ const BrandGuide = (() => {
         detail.append(el('h3', 'bg-section-title', `当てはまる商品が見つかった${a.confirmed.length}ブランド`), el('p', '', a.confirmed.join(' / ')), el('p', 'bg-caution', '掲載ブランドも、全商品・すべての年に使えるとは確認できていません。'), el('h3', 'bg-section-title', `読み方をまだ確認していない${a.unconfirmed.length}ブランド`), el('p', '', a.unconfirmed.join(' / ')), el('p', 'bg-caution', a.caution), link('系列一覧の出典', a.source));
       }
       search.addEventListener('input', () => { query = search.value; drawList(); }); drawList();
+      if (restoreFocus) (listButtons.get(restoreFocus) || count).focus({ preventScroll: true });
     }
     input.addEventListener('change', async () => {
       const file = input.files[0]; if (!file) return;
       input.disabled = true; status.hidden = false; status.textContent = '内容と写真を確認して保存中… この画面を開いたままお待ちください。';
       try {
         const record = await importFile(file);
-        if (isLive()) { controls.open = false; showLibrary(record); }
+        if (isLive()) { controls.open = false; updateError.hidden = true; syncStatus.hidden = true; showLibrary(record); }
       } catch (error) { if (isLive()) status.textContent = `取り込めませんでした：${error.message} 保存済みの図鑑はそのまま使えます。`; }
       finally { input.disabled = false; input.value = ''; }
     });
     try {
       const record = await load(); if (!isLive()) return;
       if (record) showLibrary(record);
-      else { status.textContent = 'この端末に図鑑を自動で保存します。'; }
-    } catch { if (isLive()) { status.hidden = false; status.textContent = '保存済みの図鑑を読めませんでした。画面を開き直してください。'; controls.open = true; } }
+      else { status.textContent = 'この端末に図鑑を自動で保存します。'; body.append(el('p', 'bg-empty', '資料がありません。更新・接続設定から接続してください。')); }
+    } catch { if (isLive()) { status.hidden = false; status.textContent = '保存済みの図鑑を読めませんでした。更新・接続設定から取り込み直してください。'; body.append(el('p', 'bg-empty', status.textContent)); } }
     finally { if (!importing) input.disabled = false; }
     const foreground = () => { if (document.visibilityState !== 'hidden') sync(); };
     const online = () => sync(true);

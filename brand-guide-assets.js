@@ -128,7 +128,8 @@ const BrandGuideAssets = (() => {
       tx.onerror = tx.onabort = () => { clearTimeout(timer); reject(failure || tx.error || new Error('商品資料を保存できません。')); };
       store.get('active').onsuccess = event => {
         const old = event.target.result;
-        if (old && (old.data.updatedAt > record.data.updatedAt || old.remoteRevision && record.remoteRevision && old.remoteRevision > record.remoteRevision)) { abort(new Error('以前の版への更新は行いません。')); return; }
+        if (old && (old.data?.updatedAt > record.data.updatedAt || old.remoteRevision && record.remoteRevision && old.remoteRevision > record.remoteRevision)) { abort(new Error('以前の版への更新は行いません。')); return; }
+        if (old?.sha === record.sha && old.remoteRevision) record.remoteRevision = Math.max(old.remoteRevision, record.remoteRevision || 0);
         try { store.put(record, 'active').onsuccess = () => {
           store.get('active').onsuccess = readback => { if (readback.target.result?.sha !== record.sha) abort(new Error('保存内容が一致しません。')); };
         }; } catch (error) { abort(error); }

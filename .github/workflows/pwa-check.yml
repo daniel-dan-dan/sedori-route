@@ -18,13 +18,17 @@ jobs:
       - run: node --check api.js
       - run: node --check amazon-pricing.js
       - run: node --check brand-guide.js
+      - run: node --check brand-guide-assets.js
+      - run: node --check brand-guide/all-genre-data.js
+      - run: node --check brand-guide/all-genre.js
+      - run: node --check brand-guide/taxonomy.js
       - run: node --check brand-guide-entry.js
       - run: node --check brand-guide/app.js
       - run: node --check brand-guide/credentials.js
       - run: node --check brand-guide/bootstrap.js
       - run: node --check brand-guide/sw.js
       - run: node --test route-brand-guide-sync.test.mjs route-brand-guide-standalone.test.mjs
-      - run: node --test route-brand-guide.test.mjs route-all-genre.test.mjs
+      - run: node --test route-brand-guide.test.mjs route-brand-guide-storage.test.mjs route-brand-guide-transfer.test.mjs route-all-genre.test.mjs route-guide-taxonomy.test.mjs
       - run: node --check app.js
       - run: node --check storage.js
       - run: node --check quiz.js

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash, webcrypto } from 'node:crypto';
 import vm from 'node:vm';
+import AllGenreData from './brand-guide/all-genre-data.js';
 
 const source = readFileSync(new URL('./brand-guide.js', import.meta.url), 'utf8');
 const read = name => readFileSync(new URL(name, import.meta.url), 'utf8');
@@ -45,7 +46,7 @@ function harness(options = {}) {
       return req;
     },
   };
-  const context = { module: { exports: {} }, URL, TextEncoder, Uint8Array, crypto: webcrypto, indexedDB: fake, setTimeout, clearTimeout, ...options.context };
+  const context = { module: { exports: {} }, AllGenreData, URL, TextEncoder, Uint8Array, crypto: webcrypto, indexedDB: fake, setTimeout, clearTimeout, ...options.context };
   vm.runInNewContext(source, context);
   return { guide: context.module.exports, durable: () => durable, closes: () => closes };
 }
@@ -377,7 +378,7 @@ function updateRenderHarness() {
       replaceChildren(...children){this.children=[];this.append(...children);},
       remove(){if(this.parent)this.parent.children=this.parent.children.filter(c=>c!==this);this.isConnected=false;},
       contains(child){return this===child||this.children.some(c=>c.contains?.(child));},
-      addEventListener(type,fn){this.listeners[type]=fn;},querySelector(){return null;},focus(){},
+      addEventListener(type,fn){this.listeners[type]=fn;},querySelector(){return null;},focus(options){context.document.activeElement=this;this.focusOptions=options;},
     };
   }
   const container=node('main');let synced, result={status:'current'},scroll=0;
@@ -418,10 +419,22 @@ test('multiple received releases keep only the newest queued record and one upda
 
 test('failed background updates expose the error without replacing the saved list',async()=>{
   const h=updateRenderHarness();await h.start();h.result={status:'failed'};await h.refresh();
-  assert.equal(h.find(h.container,'bg-import')[0].open,true);assert.equal(h.names().length,30);
+  assert.ok(!h.find(h.container,'bg-import')[0].open);assert.equal(h.names().length,30);
+  assert.equal(h.find(h.container,'bg-update-error')[0].hidden,false);
+  assert.equal(h.find(h.container,'bg-update-error')[0].textContent,'資料を更新できませんでした');
+  h.result={status:'current'};await h.refresh();assert.equal(h.find(h.container,'bg-update-error')[0].hidden,true);
 });
 
-function productFixture() {return {id:'video/item',name:'商品',brand:'ブランド',genre:'家電',model:'',identity:'未確認',photo:{image:'data:image/jpeg;base64,/9j/2Q==',fullProduct:true,label:'動画内の商品全体',source:'https://www.youtube.com/watch?v=example'},features:[{label:'付属品',confirmed:false,note:'未確認'}],checks:['付属品'],prices:[['その他費用','未確認']],notes:[],evidence:[]};}
+test('returning to a brand list restores its card focus and scroll without focusing search',async()=>{
+  const h=updateRenderHarness();await h.start();h.scroll=520;
+  const card=h.find(h.container,'bg-brand-card')[5];card.listeners.click();h.back();
+  assert.equal(h.context.document.activeElement,card);assert.equal(h.context.document.activeElement.tag,'button');
+  assert.equal(h.context.document.activeElement.focusOptions.preventScroll,true);assert.equal(h.scroll,520);
+  card.listeners.click();h.synced.onSaved(h.next);h.back();
+  assert.equal(h.context.document.activeElement,h.find(h.container,'bg-brand-card')[5]);assert.equal(h.scroll,520);
+});
+
+function productFixture() {return {id:'video/item',name:'商品',brand:'ブランド',genre:'家電',model:'',identity:'未確認',photo:{image:'data:image/jpeg;base64,/9j/2Q==',fullProduct:true,label:'動画内の商品全体',source:'https://www.youtube.com/watch?v=example'},features:[{label:'付属品',confirmed:false,note:'未確認'}],checks:['付属品'],prices:[['その他費用','未確認']],notes:[],evidence:[{label:'説明',url:'https://www.youtube.com/watch?v=example'}]};}
 test('optional all-genre records keep old apparel compatible and enforce image/provenance/limits',()=>{
  const {guide}=harness();const data=fixture();guide.validate(data);
  data.allGenre={version:1,revision:'test-v1',videoCount:3,products:[productFixture()],held:[]};guide.validate(data);
@@ -429,7 +442,7 @@ test('optional all-genre records keep old apparel compatible and enforce image/p
  data.allGenre.held.push({id:'video/item',name:'重複',reason:'画像待ち'});assert.throws(()=>guide.validate(data));
 });
 test('all-genre filters combine category, brand and normalized model search',()=>{
- const ctx={};vm.runInNewContext(read('brand-guide/all-genre.js')+'\nthis.app=AllGenre;',ctx);
+ const ctx={AllGenreData};vm.runInNewContext(read('brand-guide/all-genre.js')+'\nthis.app=AllGenre;',ctx);
  const products=[{...productFixture(),name:'AM09',model:'AM09',brand:'Dyson',genre:'家電'},{...productFixture(),name:'別商品',brand:'Dyson',genre:'スポーツ'}];
  assert.equal(ctx.app.select(products,'家電','Dyson','ＡＭ０９').length,1);
  assert.equal(ctx.app.select(products,'スポーツ','Dyson','AM09').length,0);
