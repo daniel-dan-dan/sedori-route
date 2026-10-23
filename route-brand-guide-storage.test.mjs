@@ -72,6 +72,33 @@ test('accepted guide and factor limits pass the exact validators used by the dis
  const guides=AllGenreData.readGuides(saved.guides);assert.equal(guides.length,1);
  assert.equal(AllGenreData.readValueFactors(saved.valueFactors,[...saved.products,...guides]).length,1);
 });
+function withLearningGuides(count){
+ const value=withAllGenre(),a=value.allGenre,guide=a.guides[0];
+ a.products=[];
+ a.guides=Array.from({length:count},(_,index)=>({...structuredClone(guide),id:'learning-'+index}));
+ a.valueFactors.items[0].sourceIds=[a.guides.at(-1).id];
+ return value;
+}
+for(const count of [201,4000])test(`${count} general-learning guides import and display with guide-only factor sources`,async()=>{
+ const h=harness({current:record(2)}),value=withLearningGuides(count);
+ const imported=await h.guide.importFile(file(value)),saved=await h.guide.load();
+ assert.equal(saved.sha,imported.sha);assert.equal(h.writes(),1);
+ const a=saved.data.allGenre,guides=AllGenreData.readGuides(a.guides);
+ assert.equal(a.products.length,0);assert.equal(guides.length,count);assert.ok(guides.every(g=>g.guide));
+ const factors=AllGenreData.readValueFactors(a.valueFactors,guides);
+ assert.equal(factors.length,1);assert.deepEqual(Array.from(factors[0].sourceIds),[guides.at(-1).id]);
+});
+for(const [label,change]of [
+ ['4001 learning guides',a=>a.guides.push({...structuredClone(a.guides[0]),id:'over-limit'})],
+ ['invalid source in the last of 4000 guides',a=>a.guides.at(-1).evidence[0].url='https://example.org'],
+ ['duplicate id in the last of 4000 guides',a=>a.guides.at(-1).id=a.guides[0].id],
+ ['unrelated factor source with 4000 guides',a=>a.valueFactors.items[0].sourceIds=['missing-product']],
+])test(`${label} is rejected without replacing either saved library`,async()=>{
+ const current=record(2),legacy=record(1),h=harness({current,legacy}),value=withLearningGuides(4000);change(value.allGenre);
+ await assert.rejects(h.guide.importFile(file(value)));
+ assert.equal(h.writes(),0);assert.deepEqual(h.saved(CURRENT),current);assert.deepEqual(h.saved(LEGACY),legacy);
+ if(label==='4001 learning guides')assert.throws(()=>AllGenreData.readGuides(value.allGenre.guides),/Invalid learning records/);
+});
 test('valid import can repair an existing payload rejected by the display validator',async()=>{
  const current=record(1);current.data=withAllGenre();current.data.allGenre.guides[0].evidence[0].url='https://example.org';
  const h=harness({current});await assert.rejects(h.guide.load());

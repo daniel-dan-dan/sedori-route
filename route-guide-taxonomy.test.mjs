@@ -40,3 +40,12 @@ test('display moves preserve each factor source exactly and unknown future categ
   assert.equal(future.middle,'その他');assert.deepEqual(Array.from(tax.leaves([future],future.genre,future.middle)),['新しい種類']);
   assert.equal(tax.classify('__proto__','constructor').subgenre,'constructor');
 });
+
+test('djembe is a percussion leaf while original learning evidence stays intact',()=>{
+  const original={id:'learning-djembe',guide:true,genre:'楽器',subgenre:'ジャンベ',evidence:[{url:'https://www.youtube.com/watch?v=example'}]},before=JSON.stringify(original);
+  const projected=tax.project(original,original.subgenre);
+  assert.equal(projected.genre,'楽器');assert.equal(projected.middle,'打楽器');assert.equal(projected.subgenre,'ジャンベ');
+  assert.deepEqual(Array.from(tax.middles([projected],'楽器')),['打楽器']);
+  assert.deepEqual(Array.from(tax.leaves([projected],'楽器','打楽器')),['ジャンベ']);
+  assert.equal(projected.id,original.id);assert.equal(projected.evidence,original.evidence);assert.equal(JSON.stringify(original),before);
+});

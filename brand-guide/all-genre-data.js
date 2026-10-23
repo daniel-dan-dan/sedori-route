@@ -28,7 +28,7 @@ const AllGenreData = (() => {
     const str=(x,max)=>typeof x==='string' && x.length<=max;
     const strings=(xs,max,count)=>Array.isArray(xs)&&xs.length<=count&&xs.every(x=>str(x,max));
     const url=x=>{try{const u=new URL(x);return u.protocol==='https:' && ['www.youtube.com','youtube.com','youtu.be'].includes(u.hostname) && !u.username && !u.password;}catch{return false;}};
-    if(!Array.isArray(value)||value.length>200)throw new Error('Invalid learning records');
+    if(!Array.isArray(value)||value.length>4000)throw new Error('Invalid learning records');
     const ids=new Set();
     for(const g of value){
       if(!g || !['name','brand','genre','subgenre','model'].every(k=>str(g[k],1500)) || !str(g.id,100) || !g.id || ids.has(g.id) || !g.name || !g.genre || !g.subgenre || !g.brand ||
