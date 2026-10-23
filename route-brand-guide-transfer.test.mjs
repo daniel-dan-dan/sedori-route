@@ -34,7 +34,7 @@ test('large unicode package reconstructs exactly with bounded concurrency before
  const h=harness();assert.equal((await h.run()).status,'saved');assert.equal(h.saved,1);assert.equal(h.maxActive,3);assert.equal(h.active,0);assert.deepEqual([...h.offsets].sort((a,b)=>a-b),[0,1,2,3,4,5,6]);
 });
 test('part failure drains the active batch, starts no later batch, and preserves the old library',async()=>{
- const h=harness({failIndex:1});assert.equal((await h.run()).status,'failed');assert.equal(h.saved,0);assert.deepEqual([...h.offsets].sort((a,b)=>a-b),[0,1,2,3]);assert.equal(h.active,0);assert.match(h.statuses.at(-1),/変更していません/);
+ const h=harness({failIndex:1});assert.equal((await h.run()).status,'failed');assert.equal(h.saved,0);assert.deepEqual([...h.offsets].sort((a,b)=>a-b),[0,1,1,2,3]);assert.equal(h.active,0);assert.match(h.statuses.at(-1),/変更していません/);
 });
 test('revision switch during transfer never saves mixed releases',async()=>{
  const h=harness({change(part,index){if(index===2)part.revision++;}});assert.equal((await h.run()).status,'failed');assert.equal(h.saved,0);
@@ -45,10 +45,10 @@ test('wrong offset, truncated part and mismatched identity are rejected before t
  }
 });
 test('legacy large response failure is diagnosed without sensitive content',async()=>{
- const h=harness({legacy:true});assert.equal((await h.run()).status,'failed');assert.equal(h.saved,0);assert.deepEqual(h.logs,[['[brand-guide] HTTP failure','getBrandGuidePackage',500,'']]);
+ const h=harness({legacy:true});assert.equal((await h.run()).status,'failed');assert.equal(h.saved,0);assert.deepEqual(JSON.parse(JSON.stringify(h.logs)),[['[brand-guide] retry read','getBrandGuidePackage','HTTP_500',{redirected:false,destination:'other'}],['[brand-guide] HTTP failure','getBrandGuidePackage',500,'',{redirected:false,destination:'other'}]]);
 });
 test('temporary 404 read is retried once with a fresh public request discriminator',async()=>{
- const h=harness({failOnce:true});assert.equal((await h.run()).status,'saved');assert.equal(h.saved,1);assert.equal(h.offsets.filter(i=>i===0).length,2);assert.equal(new Set(h.urls).size,h.urls.length);assert.deepEqual(h.logs,[['[brand-guide] retry read','getBrandGuidePackage',404]]);
+ const h=harness({failOnce:true});assert.equal((await h.run()).status,'saved');assert.equal(h.saved,1);assert.equal(h.offsets.filter(i=>i===0).length,2);assert.equal(new Set(h.urls).size,h.urls.length);assert.deepEqual(JSON.parse(JSON.stringify(h.logs)),[['[brand-guide] retry read','getBrandGuidePackage','HTTP_404',{redirected:false,destination:'other'}]]);
 });
 test('persistent 404 stops after one retry without saving or requesting later parts',async()=>{
  const h=harness({always404:true});assert.equal((await h.run()).status,'failed');assert.equal(h.saved,0);assert.deepEqual(h.offsets,[0,0]);

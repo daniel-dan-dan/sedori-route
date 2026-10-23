@@ -353,7 +353,7 @@ const BrandGuide = (() => {
     const controls = el('details', 'bg-import'); controls.append(el('summary', '', '更新・接続設定'));
     controls.append(el('p', '', '表示中は15分ごとに更新を確認します。'));
     const savedDetails = el('p', 'bg-muted'); savedDetails.hidden = true; controls.append(savedDetails);
-    const retry = button('今すぐ更新を確認', () => sync(true));
+    const retry = button('今すぐ更新を確認', () => sync(true, true));
     controls.append(retry, button(options.standalone ? '図鑑の接続設定' : '店舗アプリの接続設定', options.standalone ? options.onConnection : () => window.location.assign('index.html#settings'), 'bg-text-button'));
     const manual = el('details'); manual.append(el('summary', '', '予備のファイルから取り込む'));
     const input = el('input'); input.type = 'file'; input.accept = '.json,application/json'; input.setAttribute('aria-label', '図鑑の専用ファイル');
@@ -364,6 +364,30 @@ const BrandGuide = (() => {
     const body = el('div', 'bg-body'); root.append(body, updateError, controls);
     let currentRecord = null;
     let pendingRecord = null, updateNotice = null;
+    let retryTimer = null, tick = null, syncInFlight = null, lifecycleObserver = null;
+    const canSync = () => document.visibilityState !== 'hidden' && navigator.onLine !== false;
+    function clearScheduledRetry() {
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    function stopSyncLifecycle() {
+      clearScheduledRetry();
+      if (tick !== null) clearInterval(tick);
+      tick = null;
+      window.removeEventListener('online', online);
+      document.removeEventListener('visibilitychange', foreground);
+      lifecycleObserver?.disconnect(); lifecycleObserver = null;
+    }
+    function scheduleRetry(result) {
+      clearScheduledRetry();
+      const scheduled = result?.status === 'retry-pending' || (result?.status === 'failed' && result.retryable === true);
+      if (!scheduled || !Number.isSafeInteger(result.retryAt) || result.retryAt < 1 || !isLive() || !canSync()) return;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (!isLive()) { stopSyncLifecycle(); return; }
+        if (canSync()) return sync(false, false);
+      }, Math.max(0, result.retryAt - Date.now()));
+    }
     function acceptRecord(record) {
       if (!isLive() || !record || record.sha === currentRecord?.sha || record.sha === pendingRecord?.sha) return;
       // Keep the opened page intact, then install the newest saved release on return.
@@ -375,10 +399,15 @@ const BrandGuide = (() => {
         }
       } else showLibrary(record);
     }
-    async function sync(force = false) {
-      if (!isLive() || typeof BrandGuideSync === 'undefined') return;
+    function sync(force = false, interactive = false) {
+      if (!isLive()) { stopSyncLifecycle(); return; }
+      if (!canSync() || typeof BrandGuideSync === 'undefined') return;
+      // Online/foreground events may overlap the same request. Let its final
+      // result install the single retry timer instead of starting another cycle.
+      if (syncInFlight) return syncInFlight;
+      clearScheduledRetry();
       retry.disabled = true; input.disabled = true;
-      try {
+      syncInFlight = Promise.resolve().then(async () => { try {
         const result = await BrandGuideSync.run({ guide: { load, importFile, parsePackage, prepareAssets, MAX_BYTES }, force,
           onStatus: message => { if (isLive()) { syncStatus.textContent = message; syncStatus.hidden = false; } },
           onSaved: acceptRecord,
@@ -392,15 +421,17 @@ const BrandGuide = (() => {
         }
         if (['failed', 'auth-required'].includes(result?.status) && isLive()) updateError.hidden = result.status === 'auth-required' && !currentRecord;
         if (result?.status === 'auth-required' && isLive()) {
-          if (force && options.standalone && options.onConnection) options.onConnection();
+          if (interactive && options.standalone && options.onConnection) options.onConnection();
         }
+        scheduleRetry(result);
       } catch (error) {
         if (isLive()) {
           updateError.hidden = false; syncStatus.hidden = false;
           syncStatus.textContent = '更新を確認できませんでした。保存済みの資料はそのまま使えます。';
           console.warn('[brand-guide] update failed', error.name || 'Error');
         }
-      } finally { if (isLive()) { retry.disabled = false; if (!importing) input.disabled = false; } }
+      } finally { syncInFlight = null; if (isLive()) { retry.disabled = false; if (!importing) input.disabled = false; } } });
+      return syncInFlight;
     }
     function showLibrary(record, restoreFocus = null) {
       pendingRecord = null; updateNotice?.remove(); updateNotice = null;
@@ -632,6 +663,7 @@ const BrandGuide = (() => {
     }
     input.addEventListener('change', async () => {
       const file = input.files[0]; if (!file) return;
+      clearScheduledRetry();
       input.disabled = true; status.hidden = false; status.textContent = '内容と写真を確認して保存中… この画面を開いたままお待ちください。';
       try {
         const record = await importFile(file);
@@ -645,15 +677,23 @@ const BrandGuide = (() => {
       else { status.textContent = 'この端末に図鑑を自動で保存します。'; body.append(el('p', 'bg-empty', '資料がありません。更新・接続設定から接続してください。')); }
     } catch { if (isLive()) { status.hidden = false; status.textContent = '保存済みの図鑑を読めませんでした。更新・接続設定から取り込み直してください。'; body.append(el('p', 'bg-empty', status.textContent)); } }
     finally { if (!importing) input.disabled = false; }
-    const foreground = () => { if (document.visibilityState !== 'hidden') sync(); };
-    const online = () => sync(true);
+    function foreground() {
+      if (!isLive()) { stopSyncLifecycle(); return; }
+      if (document.visibilityState === 'hidden') clearScheduledRetry();
+      else return sync(false, false);
+    }
+    function online() { return sync(false, false); }
     window.addEventListener('online', online);
     document.addEventListener('visibilitychange', foreground);
-    const tick = setInterval(() => {
-      if (!isLive()) { clearInterval(tick); window.removeEventListener('online', online); document.removeEventListener('visibilitychange', foreground); return; }
+    tick = setInterval(() => {
+      if (!isLive()) { stopSyncLifecycle(); return; }
       foreground();
     }, 15 * 60 * 1000);
-    await sync(Boolean(options.forceSync));
+    if (typeof MutationObserver !== 'undefined' && document.body) {
+      lifecycleObserver = new MutationObserver(() => { if (!isLive()) stopSyncLifecycle(); });
+      lifecycleObserver.observe(document.body, { childList: true, subtree: true });
+    }
+    await sync(Boolean(options.forceSync), false);
   }
   return { representativePhoto, modelExplanation, isBackSwipe, tagPeriod, tagTimeline, render, validate, parsePackage, normalize, matches, importFile, load, save, prepareAssets, imageURI, setImage, DB_NAME, MAX_BYTES };
 })();

@@ -366,7 +366,7 @@ test('actual brand rendering shows one chosen image, all sources, and expands th
   assert.equal(data.brands[0].groups.length,2);
 });
 
-function updateRenderHarness() {
+function updateRenderHarness(options={}) {
   function node(tag) {
     const classes=new Set();
     return {tag,children:[],listeners:{},attrs:{},textContent:'',isConnected:true,
@@ -381,17 +381,30 @@ function updateRenderHarness() {
       addEventListener(type,fn){this.listeners[type]=fn;},querySelector(){return null;},focus(options){context.document.activeElement=this;this.focusOptions=options;},
     };
   }
-  const container=node('main');let synced, result={status:'current'},scroll=0;
-  const context={document:{createElement:node,createTextNode:value=>({textContent:value}),getElementById:()=>null,addEventListener(){}},navigator:{},
-    window:{get scrollY(){return scroll;},scrollTo(x,y){scroll=y;},addEventListener(){}},setInterval:()=>1,
-    BrandGuideSync:{async run(options){synced=options;return result;}}};
+  const container=node('main');let synced, result={status:'current'},scroll=0,now=100000,id=0;
+  const calls=[],timers=new Map(),intervals=new Map(),docEvents=new Map(),windowEvents=new Map(),observers=[];
+  const add=(map,type,fn)=>{if(!map.has(type))map.set(type,new Set());map.get(type).add(fn);},remove=(map,type,fn)=>map.get(type)?.delete(fn);
+  const context={document:{body:container,visibilityState:'visible',createElement:node,createTextNode:value=>({textContent:value}),getElementById:()=>null,addEventListener:(type,fn)=>add(docEvents,type,fn),removeEventListener:(type,fn)=>remove(docEvents,type,fn)},navigator:{onLine:true},
+    window:{get scrollY(){return scroll;},scrollTo(x,y){scroll=y;},addEventListener:(type,fn)=>add(windowEvents,type,fn),removeEventListener:(type,fn)=>remove(windowEvents,type,fn)},setInterval:()=>1,clearInterval(){},
+    BrandGuideSync:{async run(options){synced=options;calls.push(options);return typeof result==='function'?result(options):result;}}};
+  if(options.lifecycle)Object.assign(context,{
+    Date:class extends Date{static now(){return now;}},
+    setTimeout(fn,delay){const timer=++id;timers.set(timer,{fn,at:now+delay});return timer;},clearTimeout:id=>timers.delete(id),
+    setInterval(fn,delay){const timer=++id;intervals.set(timer,{fn,delay});return timer;},clearInterval:id=>intervals.delete(id),
+    MutationObserver:class{constructor(fn){this.fn=fn;this.active=false;observers.push(this);}observe(){this.active=true;}disconnect(){this.active=false;}},
+  });
   const old={data:fixture(),sha:'old'},next=structuredClone(old);next.sha='new';
   const extra=structuredClone(next.data.brands[0]);extra.id='tomorrowland-tricot';extra.name='TOMORROWLAND tricot';extra.aliases=['トゥモローランドトリコット'];next.data.brands.push(extra);
   const h=harness({old,context});
   function find(root,cls){return [root,...root.children.flatMap(c=>c.children?find(c,cls):[])].filter(n=>n.className?.split(' ').includes(cls));}
-  return {guide:h.guide,container,old,next,find,context,get synced(){return synced;},set result(v){result=v;},get scroll(){return scroll;},set scroll(v){scroll=v;},
-    async start(){await h.guide.render(container,{standalone:true});},
+  return {guide:h.guide,container,old,next,find,context,calls,timers,intervals,get now(){return now;},get synced(){return synced;},set result(v){result=v;},get scroll(){return scroll;},set scroll(v){scroll=v;},
+    async start(renderOptions={}){await h.guide.render(container,{standalone:true,...renderOptions});},
     async refresh(){await find(container,'bg-button').find(n=>n.textContent==='今すぐ更新を確認').listeners.click();},
+    async advance(ms){now+=ms;for(const [timer,entry] of [...timers])if(entry.at<=now){timers.delete(timer);await entry.fn();}},
+    async visible(value){context.document.visibilityState=value?'visible':'hidden';await Promise.all([...(docEvents.get('visibilitychange')||[])].map(fn=>fn()));},
+    async online(value=true){context.navigator.onLine=value;if(value)await Promise.all([...(windowEvents.get('online')||[])].map(fn=>fn()));},
+    detach(){container.children[0].isConnected=false;container.replaceChildren();for(const observer of observers)if(observer.active)observer.fn();},
+    listenerCount(){return [...docEvents.values(),...windowEvents.values()].reduce((n,set)=>n+set.size,0);},
     names(){return find(container,'bg-brand-name').map(n=>n.textContent);},
     back(){find(container,'bg-text-button').find(n=>n.textContent==='‹ 戻る').listeners.click();}};
 }
@@ -423,6 +436,62 @@ test('failed background updates expose the error without replacing the saved lis
   assert.equal(h.find(h.container,'bg-update-error')[0].hidden,false);
   assert.equal(h.find(h.container,'bg-update-error')[0].textContent,'資料を更新できませんでした');
   h.result={status:'current'};await h.refresh();assert.equal(h.find(h.container,'bg-update-error')[0].hidden,true);
+});
+
+test('transient update failure reserves one retry and repeated online events keep its deadline',async()=>{
+  const h=updateRenderHarness({lifecycle:true});h.result={status:'failed',retryable:true,retryAt:h.now+3000};await h.start();
+  assert.equal(h.calls.length,1);assert.equal(h.timers.size,1);assert.equal(h.find(h.container,'bg-update-error')[0].hidden,false);
+  const deadline=h.now+3000;h.result={status:'retry-pending',retryAt:deadline};await h.online();await h.online();
+  assert.equal(h.timers.size,1);assert.equal([...h.timers.values()][0].at,deadline);assert.ok(h.calls.every(call=>call.force===false));
+  h.result={status:'current'};await h.advance(2999);assert.equal(h.calls.length,3);await h.advance(1);
+  assert.equal(h.calls.length,4);assert.equal(h.timers.size,0);assert.equal(h.find(h.container,'bg-update-error')[0].hidden,true);assert.equal(h.names().length,30);
+});
+
+test('background and offline periods perform no retry; foreground and online recover the saved retry state',async()=>{
+  const h=updateRenderHarness({lifecycle:true});h.result={status:'failed',retryable:true,retryAt:h.now+3000};await h.start();
+  await h.visible(false);assert.equal(h.timers.size,0);await h.advance(1000);await h.online();assert.equal(h.calls.length,1);
+  h.result={status:'retry-pending',retryAt:103000};await h.visible(true);assert.equal(h.timers.size,1);assert.equal(h.calls.length,2);
+  await h.online(false);await h.advance(2000);assert.equal(h.timers.size,0);assert.equal(h.calls.length,2);
+  h.result={status:'current'};await h.online();assert.equal(h.calls.length,3);assert.equal(h.calls.at(-1).force,false);assert.equal(h.timers.size,0);
+});
+
+test('a hidden initial view waits until visible before beginning the normal update',async()=>{
+  const h=updateRenderHarness({lifecycle:true});h.context.document.visibilityState='hidden';await h.start();assert.equal(h.calls.length,0);
+  await h.advance(40000);assert.equal(h.calls.length,0);await h.visible(true);assert.equal(h.calls.length,1);assert.equal(h.calls[0].force,false);
+});
+
+test('leaving a view clears retry, interval and listeners; an old callback cannot update its replacement',async()=>{
+  const h=updateRenderHarness({lifecycle:true});h.result={status:'failed',retryable:true,retryAt:h.now+3000};await h.start();const staleCallback=[...h.timers.values()][0].fn;
+  h.detach();assert.equal(h.timers.size,0);assert.equal(h.intervals.size,0);assert.equal(h.listenerCount(),0);
+  h.result={status:'current'};await h.start();assert.equal(h.calls.length,2);await staleCallback();await h.advance(3000);assert.equal(h.calls.length,2);
+  assert.equal(h.names().length,30);assert.equal(h.listenerCount(),2);
+});
+
+for(const result of [{status:'saved'},{status:'current'},{status:'auth-required'},{status:'failed',retryable:false},{status:'failed'}])test(`terminal ${result.status}/${String(result.retryable)} clears the retry timer`,async()=>{
+  const h=updateRenderHarness({lifecycle:true});h.result={status:'failed',retryable:true,retryAt:h.now+3000};await h.start();assert.equal(h.timers.size,1);
+  h.result=result;await h.online();assert.equal(h.timers.size,0);const calls=h.calls.length;await h.advance(40000);assert.equal(h.calls.length,calls);assert.equal(h.names().length,30);
+});
+
+test('online during an in-flight update shares it and still reserves recovery after its failure',async()=>{
+  const h=updateRenderHarness({lifecycle:true});await h.start();let resolve;
+  h.result=()=>new Promise(done=>{resolve=done;});const manual=h.refresh();await Promise.resolve();assert.equal(h.calls.length,2);
+  const online=h.online();assert.equal(h.calls.length,2);resolve({status:'failed',retryable:true,retryAt:h.now+3000});await Promise.all([manual,online]);
+  assert.equal(h.calls.length,2);assert.equal(h.timers.size,1);assert.equal(h.calls.at(-1).force,true);
+  h.result={status:'current'};await h.advance(3000);assert.equal(h.calls.length,3);assert.equal(h.calls.at(-1).force,false);assert.equal(h.timers.size,0);
+});
+
+test('an in-flight result from a detached view never creates another retry',async()=>{
+  const h=updateRenderHarness({lifecycle:true});await h.start();let resolve;
+  h.result=()=>new Promise(done=>{resolve=done;});const request=h.refresh();await Promise.resolve();h.detach();
+  resolve({status:'failed',retryable:true,retryAt:h.now+3000});await request;assert.equal(h.timers.size,0);assert.equal(h.intervals.size,0);assert.equal(h.listenerCount(),0);
+  await h.advance(3000);assert.equal(h.calls.length,2);
+});
+
+test('automatic checks never open connection settings; only the explicit update button may do so',async()=>{
+  const h=updateRenderHarness({lifecycle:true});let prompts=0;h.result={status:'auth-required'};
+  await h.start({forceSync:true,onConnection:()=>{prompts++;}});assert.equal(h.calls[0].force,true);assert.equal(prompts,0);
+  await h.online();await h.visible(true);assert.equal(prompts,0);
+  await h.refresh();assert.equal(prompts,1);assert.equal(h.calls.at(-1).force,true);assert.equal(h.timers.size,0);
 });
 
 test('returning to a brand list restores its card focus and scroll without focusing search',async()=>{

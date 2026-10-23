@@ -57,7 +57,7 @@ test('transport diagnostics identify failures without exposing credentials or UR
 });
 
 test('redirect GET rejection retries authenticated read once and succeeds',async()=>{
- const h=client({transientError:'GET_DISABLED: POST required'});assert.equal((await h.run()).status,'saved');assert.equal(h.imports,1);assert.deepEqual(h.calls,['getBrandGuideManifest','getBrandGuideManifest','getBrandGuidePackage']);assert.deepEqual(h.logs,[['[brand-guide] retry read','getBrandGuideManifest','GET_DISABLED']]);
+ const h=client({transientError:'GET_DISABLED: POST required'});assert.equal((await h.run()).status,'saved');assert.equal(h.imports,1);assert.deepEqual(h.calls,['getBrandGuideManifest','getBrandGuideManifest','getBrandGuidePackage']);assert.deepEqual(JSON.parse(JSON.stringify(h.logs)),[['[brand-guide] retry read','getBrandGuideManifest','CONTENT_REDIRECT_FAILED',{redirected:false,destination:'other'}]]);
 });
 test('persistent redirect rejection stops at two attempts and preserves saved data',async()=>{
  const h=client({error:'GET_DISABLED: POST required'});assert.equal((await h.run()).status,'failed');assert.equal(h.imports,0);assert.deepEqual(h.calls,['getBrandGuideManifest','getBrandGuideManifest']);
