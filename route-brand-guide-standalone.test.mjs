@@ -52,22 +52,20 @@ test('every standalone asset exists and version/scope stay consistent',()=>{
  for(const asset of assets){if(asset==='./')continue;const path=new URL(asset.split('?')[0],new URL('brand-guide/',import.meta.url));assert.ok(readFileSync(path).length);}
 });
 
-function appHarness({failConnect=false}={}) {
- const renders=[],listeners={},nodes=[];const container={replaceChildren(node){this.child=node;}};
- function node(tag){const n={tag,textContent:'',children:[],listeners:{},append(...children){this.children.push(...children);},setAttribute(){},addEventListener(type,fn){this.listeners[type]=fn;}};nodes.push(n);return n;}
+function appHarness() {
+ const renders=[],listeners={},nodes=[];let publicConfigured=0;
+ const container={replaceChildren(node){this.child=node;}};
+ function node(tag){const n={tag,textContent:'',children:[],append(...children){this.children.push(...children);},setAttribute(){},addEventListener(){}};nodes.push(n);return n;}
  const context={document:{getElementById(){return container;},createElement:node,addEventListener(type,fn){listeners[type]=fn;}},
- BrandGuideSync:{configureCredential(){}},GuideCredentials:{get:async()=>'',connect:async()=>{if(failConnect)throw new Error('接続できませんでした');}},GuideWorker:{ready:Promise.resolve(null)},
- BrandGuide:{render:async(c,options)=>{renders.push(options);}}};
+ BrandGuideSync:{configurePublicRead(){publicConfigured++;}},GuideWorker:{ready:Promise.resolve(null)},BrandGuide:{render:async(c,options)=>{renders.push(options);}}};
  vm.runInNewContext(read('brand-guide/app.js'),context);
- return {renders,nodes,async start(){await listeners.DOMContentLoaded();},settings(){renders.at(-1).onConnection();}};
+ return {renders,nodes,get publicConfigured(){return publicConfigured;},async start(){await listeners.DOMContentLoaded();}};
 }
-test('standalone connection success returns directly to the library with a forced download',async()=>{
- const h=appHarness();await h.start();h.settings();const input=h.nodes.find(n=>n.tag==='input');input.value='p'.repeat(40);
- await h.nodes.find(n=>n.textContent==='この図鑑を接続する').listeners.click();assert.equal(input.value,'');assert.equal(h.renders.length,2);assert.equal(h.renders.at(-1).forceSync,true);
+test('standalone starts public reading without a connection code or credential helper',async()=>{
+ const h=appHarness();await h.start();assert.equal(h.publicConfigured,1);assert.equal(h.renders.length,1);assert.equal(h.renders[0].publicRead,true);assert.equal(h.renders[0].onConnection,undefined);assert.ok(!h.nodes.some(n=>n.tag==='input'));
 });
-test('failed connection stays on settings and never starts a download',async()=>{
- const h=appHarness({failConnect:true});await h.start();h.settings();h.nodes.find(n=>n.tag==='input').value='p'.repeat(40);
- const connect=h.nodes.find(n=>n.textContent==='この図鑑を接続する');await connect.listeners.click();assert.equal(h.renders.length,1);assert.equal(connect.disabled,false);assert.ok(h.nodes.some(n=>n.textContent.includes('接続できませんでした')));
+test('standalone page no longer loads credential registration code',()=>{
+ assert.doesNotMatch(read('brand-guide/index.html'),/src="credentials\.js/);assert.doesNotMatch(read('brand-guide/app.js'),/GuideCredentials|registerRouteDevice|接続コード/);
 });
 
 test('worker upgrades reuse the existing guide URL and never register the store worker',async()=>{

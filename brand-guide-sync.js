@@ -8,7 +8,9 @@ const BrandGuideSync = (() => {
   const RETRYABLE_READ_CODES = new Set(['CONTENT_REDIRECT_FAILED', 'NETWORK_READ_FAILED', 'READ_TIMEOUT', 'HTTP_404', 'HTTP_429']);
   let pending = null;
   let credentialProvider = null;
-  function configureCredential(provider) { credentialProvider = provider; }
+  let publicRead = false;
+  function configureCredential(provider) { credentialProvider = provider; publicRead = false; }
+  function configurePublicRead() { publicRead = true; credentialProvider = null; }
   let lastAttempt = 0, retryAt = 0, recoveryStep = 0;
   function fail(message, code = '', retryable = false) { const error = new Error(message); error.code = code; error.retryable = retryable; throw error; }
   function readFailure(error, signal) {
@@ -81,7 +83,7 @@ const BrandGuideSync = (() => {
           try {
             response = await fetch(ENDPOINT + '?read_request=' + nonce, {
               method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify({ ...body, action, auth_token: token }),
+              body: JSON.stringify(publicRead ? { ...body, action } : { ...body, action, auth_token: token }),
               credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
               redirect: 'follow', signal: controller.signal,
             });
@@ -95,7 +97,7 @@ const BrandGuideSync = (() => {
                 const first = await diagnosticReader.read(); await diagnosticReader.cancel();
                 const start = new TextDecoder().decode((first.value || new Uint8Array()).slice(0, 4096));
                 title = (start.match(/<title[^>]*>([^<]{0,160})<\/title>/i)?.[1] || '')
-                  .split(token).join('[redacted]').replace(/https?:\/\/\S+/g, '[url]').replace(/[A-Za-z0-9_.~-]{28,}/g, '[redacted]');
+                  .split(token || '\u0000').join('[redacted]').replace(/https?:\/\/\S+/g, '[url]').replace(/[A-Za-z0-9_.~-]{28,}/g, '[redacted]');
               } catch {}
             } else if (response.body) { try { await response.body.cancel(); } catch {} }
             const retryable = response.status === 404 || response.status === 429 || response.status >= 500 && response.status <= 599;
@@ -127,14 +129,17 @@ const BrandGuideSync = (() => {
               fail('最新版を取得できませんでした。次回もう一度確認します。', 'CONTENT_REDIRECT_FAILED', true);
             }
             const detail = String(parsed.error || 'UNKNOWN')
-              .split(token).join('[redacted]')
+              .split(token || '\u0000').join('[redacted]')
               .replace(/https?:\/\/\S+/g, '[url]')
               .replace(/[A-Za-z0-9_.~-]{28,}/g, '[redacted]')
               .slice(0, 240);
             console.warn('[brand-guide] response rejected', action, detail, metadata);
-            if (String(parsed.error).startsWith('UNAUTHORIZED')) fail(credentialProvider ? '図鑑の接続が切れています。接続設定を行ってください。' : '店舗アプリの接続設定を確認してください。', 'AUTH_REQUIRED');
+            if (String(parsed.error).startsWith('UNAUTHORIZED')) {
+              if (publicRead) fail('図鑑の配信設定を確認できませんでした。', 'PUBLIC_READ_UNAVAILABLE');
+              fail(credentialProvider ? '図鑑の接続が切れています。接続設定を行ってください。' : '店舗アプリの接続設定を確認してください。', 'AUTH_REQUIRED');
+            }
             if (parsed.error === 'BRAND_GUIDE_REFRESH_REQUIRED') fail('資料が更新されました。もう一度更新を確認してください。', 'RELEASE_CHANGED');
-            if (parsed.error === 'BRAND_GUIDE_UNAVAILABLE') fail('図鑑の配信元で資料を取得できませんでした。接続情報は保存されています。', 'RELEASE_UNAVAILABLE');
+            if (parsed.error === 'BRAND_GUIDE_UNAVAILABLE') fail(publicRead ? '図鑑の配信元で資料を取得できませんでした。' : '図鑑の配信元で資料を取得できませんでした。接続情報は保存されています。', 'RELEASE_UNAVAILABLE');
             fail('最新版を取得できませんでした。次回もう一度確認します。');
           }
           if (action === 'getBrandGuideManifest' && parsed.success !== true) fail('図鑑の更新情報を確認できませんでした。');
@@ -199,9 +204,10 @@ const BrandGuideSync = (() => {
     pending = (async () => {
       try {
         onStatus('最新版を確認しています…');
-        const token = await (credentialProvider ? credentialProvider() : credential());
-        if (!/^[A-Za-z0-9._~-]{32,256}$/.test(token)) fail(credentialProvider ? 'この図鑑はまだ接続されていません。「今すぐ更新を確認」から初回接続を行ってください。' : '店舗アプリの接続設定を一度行うと、自動で図鑑を保存できます。', 'AUTH_REQUIRED');
+        const token = publicRead ? '' : await (credentialProvider ? credentialProvider() : credential());
+        if (!publicRead && !/^[A-Za-z0-9._~-]{32,256}$/.test(token)) fail(credentialProvider ? 'この図鑑はまだ接続されていません。「今すぐ更新を確認」から初回接続を行ってください。' : '店舗アプリの接続設定を一度行うと、自動で図鑑を保存できます。', 'AUTH_REQUIRED');
         const manifest = validateManifest(await request('getBrandGuideManifest', token, { transport: 'assets-v2' }));
+        if (publicRead && manifest.transport !== 'assets-v2') fail('図鑑の配信形式を確認できませんでした。');
         const old = await guide.load();
         if (old?.sha === manifest.sha256) { retryAt = recoveryStep = 0; onStatus('最新版を保存済みです。ファイル選択は不要です。'); return { status: 'current', record: old }; }
         if (old && (old.data.updatedAt > manifest.updatedAt || (old.remoteRevision || 0) > manifest.revision)) fail('配信中の資料が古いため、保存済みの図鑑を使います。');
@@ -236,6 +242,6 @@ const BrandGuideSync = (() => {
     })();
     return pending;
   }
-  return { run, validateManifest, INTERVAL, configureCredential };
+  return { run, validateManifest, INTERVAL, configureCredential, configurePublicRead };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = BrandGuideSync;

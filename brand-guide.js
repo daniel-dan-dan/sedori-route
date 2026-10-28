@@ -350,11 +350,12 @@ const BrandGuide = (() => {
       }).catch(() => {});
     } else offlineStatus.textContent = 'このブラウザでは通信なしでの起動に対応していません。';
     const syncStatus = el('p', 'bg-status', '図鑑を開くと、自動で最新版を確認します。'); syncStatus.setAttribute('role', 'status'); if (!options.standalone) root.append(syncStatus);
-    const controls = el('details', 'bg-import'); controls.append(el('summary', '', '更新・接続設定'));
+    const controls = el('details', 'bg-import'); controls.append(el('summary', '', options.publicRead ? '更新設定' : '更新・接続設定'));
     controls.append(el('p', '', '表示中は15分ごとに更新を確認します。'));
     const savedDetails = el('p', 'bg-muted'); savedDetails.hidden = true; controls.append(savedDetails);
     const retry = button('今すぐ更新を確認', () => sync(true, true));
-    controls.append(retry, button(options.standalone ? '図鑑の接続設定' : '店舗アプリの接続設定', options.standalone ? options.onConnection : () => window.location.assign('index.html#settings'), 'bg-text-button'));
+    controls.append(retry);
+    if (!options.publicRead) controls.append(button(options.standalone ? '図鑑の接続設定' : '店舗アプリの接続設定', options.standalone ? options.onConnection : () => window.location.assign('index.html#settings'), 'bg-text-button'));
     const manual = el('details'); manual.append(el('summary', '', '予備のファイルから取り込む'));
     const input = el('input'); input.type = 'file'; input.accept = '.json,application/json'; input.setAttribute('aria-label', '図鑑の専用ファイル');
     input.disabled = true;
@@ -674,7 +675,7 @@ const BrandGuide = (() => {
     try {
       const record = await load(); if (!isLive()) return;
       if (record) showLibrary(record);
-      else { status.textContent = 'この端末に図鑑を自動で保存します。'; body.append(el('p', 'bg-empty', '資料がありません。更新・接続設定から接続してください。')); }
+      else { status.textContent = 'この端末に図鑑を自動で保存します。'; body.append(el('p', 'bg-empty', options.publicRead ? '図鑑を読み込んでいます。初回は写真の保存に時間がかかります。' : '資料がありません。更新・接続設定から接続してください。')); }
     } catch { if (isLive()) { status.hidden = false; status.textContent = '保存済みの図鑑を読めませんでした。更新・接続設定から取り込み直してください。'; body.append(el('p', 'bg-empty', status.textContent)); } }
     finally { if (!importing) input.disabled = false; }
     function foreground() {
