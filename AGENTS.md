@@ -37,7 +37,7 @@
 - 地図はズーム倍率にかかわらず店舗ごとの36pxロゴピンを表示する。ユーザーの明示依頼なしに件数・地域単位の集約表示へ戻さない。選択順番号と同一建物の表示用オフセットは維持する。
 - PWA変更時は `CACHE_NAME`、cache bust、画面上のバージョン表示、ブラウザ/スマホ反映確認まで行う。
 - `script-src 'self'` のCSPを維持し、inline script、`onclick`、`onerror`を追加しない。外部データは `textContent` またはエスケープ済み属性だけで表示する。
-- 接続コード・端末鍵を `localStorage`、URL、ログへ保存しない。旧localStorage値の移行はIndexedDBへの読戻し成功後に削除する。
+- 接続コード・端末鍵を `localStorage`、URL、ログへ保存しない。旧localStorage値の移行はIndexedDBへの読戻し成功後に削除する。 単独図鑑の閲覧はユーザー指定でコード不要（v50）。図鑑の読取2操作だけを公開し、在庫・売上・設定・書込み・端末登録の認証は維持する。
 - 7日超または12回失敗したオフライン書込は自動再送しない。設定画面の「未送信データの安全確認」で状態を表示する。
 - 公開前に `node --test route-app.test.mjs` と `node verify-pwa-version.mjs` を実行し、`MOBILE_RELEASE_CHECKLIST.md` に沿ってスマホ幅を確認する。
 - 店舗削除、履歴削除、GAS本番反映はユーザー確認後に行う。
