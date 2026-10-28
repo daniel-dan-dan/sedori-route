@@ -5,7 +5,7 @@ const BrandGuideAssets = (() => {
   const SHA = /^[a-f0-9]{64}$/;
   const JPEG = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
   const MAX_BUNDLE_BYTES = 4 * 1024 * 1024;
-  const MAX_ASSET_BYTES = 1024 * 1024 * 1024;
+  const MAX_ASSET_BYTES = 2 * 1024 * 1024 * 1024;
   const MAX_IMAGE_CHARACTERS = 2800000;
   function check(ok, message = '写真の資料を確認できません。以前の図鑑は残しています。') { if (!ok) throw new Error(message); }
   function photos(data) { return [...data.brands.flatMap(b => b.groups.flatMap(g => g.photos)), ...(data.allGenre?.products || []).map(p => p.photo)]; }
