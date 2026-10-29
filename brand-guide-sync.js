@@ -138,7 +138,9 @@ const BrandGuideSync = (() => {
               if (publicRead) fail('図鑑の配信設定を確認できませんでした。', 'PUBLIC_READ_UNAVAILABLE');
               fail(credentialProvider ? '図鑑の接続が切れています。接続設定を行ってください。' : '店舗アプリの接続設定を確認してください。', 'AUTH_REQUIRED');
             }
-            if (parsed.error === 'BRAND_GUIDE_REFRESH_REQUIRED') fail('資料が更新されました。もう一度更新を確認してください。', 'RELEASE_CHANGED');
+            // A pinned release has changed. Never repeat this obsolete request;
+            // the outer recovery cycle must start with a fresh manifest instead.
+            if (parsed.error === 'BRAND_GUIDE_REFRESH_REQUIRED') fail('資料の配信版が変更されました。', 'RELEASE_CHANGED');
             if (parsed.error === 'BRAND_GUIDE_UNAVAILABLE') fail(publicRead ? '図鑑の配信元で資料を取得できませんでした。' : '図鑑の配信元で資料を取得できませんでした。接続情報は保存されています。', 'RELEASE_UNAVAILABLE');
             fail('最新版を取得できませんでした。次回もう一度確認します。');
           }
@@ -202,6 +204,7 @@ const BrandGuideSync = (() => {
     if (!recovering) recoveryStep = 0;
     retryAt = 0; lastAttempt = now;
     pending = (async () => {
+      let reading = true;
       try {
         onStatus('最新版を確認しています…');
         const token = publicRead ? '' : await (credentialProvider ? credentialProvider() : credential());
@@ -223,6 +226,7 @@ const BrandGuideSync = (() => {
         }
         if (new TextEncoder().encode(raw).length !== manifest.bytes) fail('資料を最後まで受け取れませんでした。');
         onStatus('図鑑を保存しています…');
+        reading = false;
         const record = await guide.importFile({ size: manifest.bytes, text: async () => raw }, manifest);
         retryAt = recoveryStep = 0;
         onSaved(record); onStatus('自動保存が完了しました。通信なしでも見られます。');
@@ -232,7 +236,9 @@ const BrandGuideSync = (() => {
         onStatus(message + ' 保存済みの資料は変更していません。');
         if (error?.code === 'AUTH_REQUIRED') lastAttempt = 0;
         const retryableRead = error?.retryable === true && (RETRYABLE_READ_CODES.has(error.code) || /^HTTP_5\d\d$/.test(error.code || ''));
-        if (retryableRead && recoveryStep < RECOVERY_DELAYS.length) {
+        // Start a new manifest read after an explicit release change; continue
+        // only within the shared recovery budget; never retry a local save.
+        if (reading && (retryableRead || error?.code === 'RELEASE_CHANGED') && recoveryStep < RECOVERY_DELAYS.length) {
           retryAt = Date.now() + RECOVERY_DELAYS[recoveryStep++];
           return { status: 'failed', code: error.code || '', retryable: true, retryAt };
         }

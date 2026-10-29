@@ -85,3 +85,58 @@ test('assets-v2 recovery reuses successful bundles and never installs incomplete
  failing=false;await h.time.advance(3000);assert.equal((await h.run()).status,'saved');assert.equal(imports,1);
  const requests=sha=>h.calls.filter(c=>c.body.assetBundleSha===sha).length;assert.equal(requests(bundles[0].sha256),1);assert.equal(requests(bundles[2].sha256),1);assert.equal(requests(bundles[1].sha256),3);assert.equal(requests(bundles[3].sha256),1);
 });
+
+test('two release changes restart from fresh manifests, reuse completed photos and preserve the old library until one release is complete',async()=>{
+ const db=assetDatabase(),assetContext={module:{exports:{}},indexedDB:db.indexedDB,crypto:webcrypto,TextEncoder,Uint8Array,atob,setTimeout,clearTimeout};
+ vm.runInNewContext(assetSource,assetContext);const assets=assetContext.module.exports;
+ const bundles=Array.from({length:4},(_,i)=>{const bytes=Buffer.from([255,216,255,217,i]),sha256=hash(bytes),image='data:image/jpeg;base64,'+bytes.toString('base64'),raw=JSON.stringify({format:'private-brand-guide-assets',schemaVersion:1,images:[{sha256,image}]});return {raw,sha256:hash(raw),bytes:Buffer.byteLength(raw),imageShas:[sha256]};});
+ const releases=new Map([10,11,12].map(revision=>{
+  const selected=[bundles[0],bundles[revision-9]],raw=JSON.stringify({revision}),m={...manifest,schemaVersion:2,transport:'assets-v2',revision,sha256:hash(raw),bytes:Buffer.byteLength(raw)};
+  const data={updatedAt:m.updatedAt,brands:[{groups:[{photos:selected.map(b=>({assetSha256:b.imageShas[0]}))}]}],assetManifest:{version:1,bundles:selected.map(({raw,...b})=>b)}};
+  return [revision,{raw,m,data}];
+ }));
+ const old={sha:'previous-saved-release',remoteRevision:9,data:{updatedAt:'2026-10-22'}};db.stores.get('library').set('active',old);
+ let currentRevision=10,imports=0;
+ const h=harness(({body})=>{
+  const release=releases.get(currentRevision);
+  if(body.action==='getBrandGuideManifest')return Response.json({success:true,data:release.m});
+  assert.equal(body.revision,currentRevision,'an obsolete pinned request must not be repeated');assert.equal(body.sha256,release.m.sha256);
+  if(!body.assetBundleSha)return new Response(release.raw,{headers:{'content-type':'application/json'}});
+  if(currentRevision<12&&body.assetBundleSha!==bundles[0].sha256){currentRevision++;return Response.json({success:false,error:'BRAND_GUIDE_REFRESH_REQUIRED'});}
+  const bundle=bundles.find(b=>b.sha256===body.assetBundleSha);return new Response(bundle.raw,{headers:{'content-type':'application/json'}});
+ },{guide:{
+  load:()=>assets.loadRecord(),
+  parsePackage:async raw=>{const release=releases.get(JSON.parse(raw).revision);return {schemaVersion:2,sha:release.m.sha256,data:release.data};},
+  prepareAssets:(...args)=>assets.prepare(...args),
+  importFile:async(file,expected)=>{
+   imports++;assert.equal(expected.revision,12);assert.equal(await file.text(),releases.get(12).raw);
+   for(const photo of releases.get(12).data.brands[0].groups[0].photos)assert.equal(db.stores.get('images').has(photo.assetSha256),true);
+   const record={schemaVersion:2,sha:expected.sha256,remoteRevision:expected.revision,data:releases.get(12).data};await assets.saveRecord(record);return record;
+  }
+ }});h.context.sync.configurePublicRead();
+ const first=await h.run();assert.equal(first.code,'RELEASE_CHANGED');assert.equal(first.retryAt-h.time.now,3000);assert.equal(first.retryable,true);
+ assert.equal(imports,0);assert.equal((await assets.loadRecord()).sha,old.sha);assert.equal(h.calls.filter(c=>c.body.assetBundleSha===bundles[1].sha256).length,1);
+ assert.equal((await h.run()).status,'retry-pending');await h.time.advance(3000);
+ const second=await h.run();assert.equal(second.code,'RELEASE_CHANGED');assert.equal(second.retryAt-h.time.now,10000);assert.equal(imports,0);assert.equal((await assets.loadRecord()).sha,old.sha);
+ await h.time.advance(10000);const final=await h.run();assert.equal(final.status,'saved');assert.equal(imports,1);assert.equal((await assets.loadRecord()).remoteRevision,12);
+ assert.equal(h.calls.filter(c=>c.body.action==='getBrandGuideManifest').length,3);
+ for(const bundle of bundles)assert.equal(h.calls.filter(c=>c.body.assetBundleSha===bundle.sha256).length,1);
+ assert.equal(h.calls.every(c=>c.options.method==='POST'&&c.body.transport==='assets-v2'&&!('auth_token'in c.body)),true);
+});
+
+test('continuous release changes share the finite recovery budget without replaying obsolete packages',async()=>{
+ let revision=10;const h=harness(({body})=>{
+  if(body.action==='getBrandGuideManifest')return Response.json({success:true,data:{...manifest,schemaVersion:2,transport:'assets-v2',revision}});
+  assert.equal(body.revision,revision);revision++;return Response.json({success:false,error:'BRAND_GUIDE_REFRESH_REQUIRED'});
+ });h.context.sync.configurePublicRead();
+ let result=await h.run();
+ for(const delay of [3000,10000,30000]){assert.equal(result.code,'RELEASE_CHANGED');assert.equal(result.retryAt-h.time.now,delay);assert.equal((await h.run()).status,'retry-pending');await h.time.advance(delay);result=await h.run();}
+ assert.equal(result.code,'RELEASE_CHANGED');assert.equal(result.retryable,false);assert.equal(result.retryAt,undefined);assert.equal(h.imports,0);
+ assert.equal(h.calls.length,8);assert.equal(h.calls.filter(c=>c.body.action==='getBrandGuideManifest').length,4);
+ assert.equal(await h.run(),undefined);assert.equal(h.calls.length,8);
+});
+
+for(const code of ['RELEASE_CHANGED','NETWORK_READ_FAILED'])test(`${code} raised during local saving cannot restart a release`,async()=>{
+ const h=harness(null,{guide:{importFile:async()=>{throw Object.assign(new Error('local save failed'),{code,retryable:true});}}});
+ const result=await h.run();assert.equal(result.code,code);assert.equal(result.retryable,false);assert.equal(result.retryAt,undefined);assert.equal(h.calls.length,2);
+});
