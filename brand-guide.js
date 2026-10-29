@@ -5,6 +5,7 @@ const BrandGuide = (() => {
   const MAX_BYTES = 48 * 1024 * 1024;
   let importing = false;
   let query = '';
+  const failedPhotos = new WeakMap(), imageRequests = new WeakMap();
   const text = (value, max = 3000) => typeof value === 'string' && value.length <= max;
   function check(ok, message = '資料の形式が違います。専用ファイルを選んでください。') {
     if (!ok) throw new Error(message);
@@ -76,8 +77,24 @@ const BrandGuide = (() => {
   function prepareAssets(data, receive, onStatus) { return assetService().prepare(data, receive, onStatus); }
   async function imageURI(photo) { return photo.image !== undefined ? photo.image : assetService().imageURI(photo); }
   function setImage(img, photo) {
+    const ticket = {}; imageRequests.set(img, ticket); failedPhotos.delete(img);
     if (photo.image !== undefined) { img.src = photo.image; return; }
-    imageURI(photo).then(uri => { if (img.isConnected) img.src = uri; }).catch(() => { if (img.isConnected) img.alt += '（写真を表示できません）'; });
+    imageURI(photo).then(uri => {
+      if (img.isConnected && imageRequests.get(img) === ticket) {
+        img.src = uri; img.alt = img.alt.replace(/（写真を表示できません）$/, '');
+      }
+    }).catch(() => {
+      if (img.isConnected && imageRequests.get(img) === ticket) {
+        failedPhotos.set(img, photo);
+        if (!img.alt.endsWith('（写真を表示できません）')) img.alt += '（写真を表示できません）';
+      }
+    });
+  }
+  function refreshFailedPhotos() {
+    if (typeof document === 'undefined' || !document.querySelectorAll) return;
+    for (const img of document.querySelectorAll('img')) {
+      const photo = failedPhotos.get(img); if (photo) setImage(img, photo);
+    }
   }
   function validate(data) {
     const references = data?.assetManifest !== undefined;
@@ -263,9 +280,14 @@ const BrandGuide = (() => {
       });
     } finally { db.close(); }
   }
-  async function verifyImages(data) {
+  async function verifyImages(data, onStatus = () => {}) {
     // Start after package validation; inspect each image; finish only when all decode.
-    const images = [...data.brands.flatMap(b=>b.groups.flatMap(g=>g.photos)), ...(data.allGenre?.products || []).map(p=>p.photo)];
+    const seen = new Set();
+    const images = [...data.brands.flatMap(b=>b.groups.flatMap(g=>g.photos)), ...(data.allGenre?.products || []).map(p=>p.photo)].filter(photo => {
+      const key = photo.assetSha256 || photo.image;
+      if (seen.has(key)) return false; seen.add(key); return true;
+    });
+    let checked = 0;
     for (const p of images) {
       await new Promise((resolve, reject) => {
         const img = new Image(); let finished = false;
@@ -275,9 +297,11 @@ const BrandGuide = (() => {
         img.onerror = () => finish(new Error('壊れた写真があります。以前の資料は変更していません。'));
         imageURI(p).then(uri => { if (!finished) img.src = uri; }).catch(error => finish(error));
       });
+      checked++;
+      if (checked % 25 === 0 || checked === images.length) onStatus(`保存した写真を確認しています… ${checked}/${images.length}`);
     }
   }
-  async function importFile(file, expected = null) {
+  async function importFile(file, expected = null, onStatus = () => {}) {
     if (importing) throw new Error('取り込み中です。完了までお待ちください。');
     importing = true;
     try {
@@ -288,7 +312,7 @@ const BrandGuide = (() => {
         check(Number.isSafeInteger(expected.revision) && expected.revision > 0);
         record.remoteRevision = expected.revision;
       }
-      await verifyImages(record.data);
+      await verifyImages(record.data, onStatus);
       await save({ ...record, savedAt: new Date().toISOString() });
       if (typeof document !== 'undefined' && typeof CustomEvent !== 'undefined') document.dispatchEvent(new CustomEvent('brand-guide-saved')); 
       return record;
@@ -416,6 +440,7 @@ const BrandGuide = (() => {
         // A shared in-flight update or another tab can save after this view loaded.
         // Reconcile from the validated record even when the transport reports current.
         if (result?.record) acceptRecord(result.record);
+        if (result?.repaired) refreshFailedPhotos();
         if (['saved', 'current'].includes(result?.status)) {
           updateError.hidden = true;
           if (options.standalone) syncStatus.hidden = true;
@@ -696,6 +721,6 @@ const BrandGuide = (() => {
     }
     await sync(Boolean(options.forceSync), false);
   }
-  return { representativePhoto, modelExplanation, isBackSwipe, tagPeriod, tagTimeline, render, validate, parsePackage, normalize, matches, importFile, load, save, prepareAssets, imageURI, setImage, DB_NAME, MAX_BYTES };
+  return { representativePhoto, modelExplanation, isBackSwipe, tagPeriod, tagTimeline, render, validate, parsePackage, normalize, matches, importFile, load, save, prepareAssets, imageURI, setImage, refreshFailedPhotos, DB_NAME, MAX_BYTES };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = BrandGuide;

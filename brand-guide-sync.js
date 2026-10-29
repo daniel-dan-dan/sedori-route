@@ -212,7 +212,18 @@ const BrandGuideSync = (() => {
         const manifest = validateManifest(await request('getBrandGuideManifest', token, { transport: 'assets-v2' }));
         if (publicRead && manifest.transport !== 'assets-v2') fail('図鑑の配信形式を確認できませんでした。');
         const old = await guide.load();
-        if (old?.sha === manifest.sha256) { retryAt = recoveryStep = 0; onStatus('最新版を保存済みです。ファイル選択は不要です。'); return { status: 'current', record: old }; }
+        if (old?.sha === manifest.sha256) {
+          let repaired = false;
+          // The index can be current while browser storage has lost or damaged
+          // a photo. Audit its content before reporting a complete local copy.
+          if (manifest.transport === 'assets-v2' && old.schemaVersion === 2) {
+            const photos = await guide.prepareAssets(old.data, bundle => request('getBrandGuidePackage', token,
+              { transport: 'assets-v2', sha256: manifest.sha256, revision: manifest.revision, assetBundleSha: bundle.sha256 }, bundle.bytes + 65536), onStatus);
+            repaired = photos.fetchedBundles > 0;
+          }
+          retryAt = recoveryStep = 0; onStatus(repaired ? '写真の確認と修復が完了しました。' : '最新版を保存済みです。ファイル選択は不要です。');
+          return { status: 'current', record: old, repaired };
+        }
         if (old && (old.data.updatedAt > manifest.updatedAt || (old.remoteRevision || 0) > manifest.revision)) fail('配信中の資料が古いため、保存済みの図鑑を使います。');
         onStatus('図鑑を受け取っています…');
         const raw = manifest.transport === 'assets-v2'
@@ -227,11 +238,13 @@ const BrandGuideSync = (() => {
         if (new TextEncoder().encode(raw).length !== manifest.bytes) fail('資料を最後まで受け取れませんでした。');
         onStatus('図鑑を保存しています…');
         reading = false;
-        const record = await guide.importFile({ size: manifest.bytes, text: async () => raw }, manifest);
+        const record = await guide.importFile({ size: manifest.bytes, text: async () => raw }, manifest, onStatus);
         retryAt = recoveryStep = 0;
         onSaved(record); onStatus('自動保存が完了しました。通信なしでも見られます。');
         return { status: 'saved', record };
       } catch (error) {
+        const diagnosticCode = /^[A-Z][A-Z0-9_]{0,59}$/.test(error?.code || '') ? error.code : 'UPDATE_FAILED';
+        if (diagnosticCode.startsWith('PHOTO_')) console.warn('[brand-guide] update stopped', diagnosticCode, reading ? 'prepare' : 'save');
         const message = error?.name === 'AbortError' ? '通信が遅いため更新を中断しました。' : (error?.message || '更新を確認できませんでした。');
         onStatus(message + ' 保存済みの資料は変更していません。');
         if (error?.code === 'AUTH_REQUIRED') lastAttempt = 0;
