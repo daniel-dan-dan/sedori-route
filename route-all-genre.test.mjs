@@ -11,7 +11,7 @@ function harness(extra={}){
  function node(tag){const n={tag,children:[],attrs:{},listeners:{},hidden:false,open:false,append(...xs){for(const x of xs)x.parent=this;this.children.push(...xs);},replaceChildren(...xs){if(this.children.some(x=>contains(x,document.activeElement)))document.activeElement=document.body;for(const x of this.children)x.parent=null;this.children=[];this.append(...xs);},setAttribute(k,v){this.attrs[k]=v;},addEventListener(k,f){this.listeners[k]=f;},focus(){document.activeElement=this;},showModal(){this.open=true;},close(){this.open=false;this.listeners.close?.();},remove(){if(this.parent)this.parent.children=this.parent.children.filter(x=>x!==this);this.parent=null;}};nodes.push(n);return n;}
  document.body=node('body');document.activeElement=document.body;
  const context={URL,document,BrandGuide:{load:async()=>({data:{allGenre:{revision:'one',products:data,held:[],videoCount:1,...extra}}})}};
- vm.runInNewContext(readFileSync(new URL('brand-guide/all-genre-data.js',import.meta.url),'utf8')+'\n'+readFileSync(new URL('brand-guide/taxonomy.js',import.meta.url),'utf8')+'\n'+code+'\nthis.view=AllGenre;this.taxonomy=GuideTaxonomy;',context);const root=node('main');return {view:context.view,taxonomy:context.taxonomy,root,nodes,document};
+ vm.runInNewContext(readFileSync(new URL('brand-guide/all-genre-data.js',import.meta.url),'utf8')+'\n'+readFileSync(new URL('brand-guide/taxonomy.js',import.meta.url),'utf8')+'\n'+readFileSync(new URL('brand-guide/organize.js',import.meta.url),'utf8')+'\n'+code+'\nthis.view=AllGenre;this.taxonomy=GuideTaxonomy;',context);const root=node('main');return {view:context.view,taxonomy:context.taxonomy,root,nodes,document};
 }
 
 const evidence=[{label:'説明',url:'https://www.youtube.com/watch?v=example&t=30'}];
@@ -45,8 +45,8 @@ test('unreviewed labels and model names never populate high-price factors',async
 });
 test('reviewed generic trait opens only its explanation, checks and supporting source records',async()=>{
  const h=harness({valueFactors:packageOf([factor])});await h.view.mount(h.root).refresh();
- const row=find(h,'ag-factor-row');assert.equal(row.tag,'details');assert.ok(!row.open);assert.equal(row.children[0].children[0].textContent,'レザーハンドル');
- assert.ok(contents(row).includes(factor.explanation));assert.ok(contents(row).includes('素材を確認'));assert.equal(h.nodes.filter(n=>n.tag==='a'&&n.href===evidence[0].url).length,1);
+ const row=find(h,'ag-factor-tile');assert.equal(row.tag,'button');assert.equal(row.attrs['aria-haspopup'],'dialog');assert.equal(row.children[0].textContent,'レザーハンドル');
+ assert.ok(!contents(row).includes(factor.explanation));row.focus();row.listeners.click();const modal=find(h,'ag-detail ag-factor-dialog');assert.equal(modal.open,true);assert.ok(contents(modal).includes(factor.explanation));assert.ok(contents(modal).includes('素材を確認'));modal.close();assert.equal(h.document.activeElement,row);assert.equal(h.nodes.filter(n=>n.tag==='a'&&n.href===evidence[0].url).length,1);
  const f=h.view.factorEntries([data[1]],[factor]);assert.equal(f.length,0);
 });
 test('generic review requires explicit generalizability, a trait dimension and matching evidence scope',()=>{
@@ -56,7 +56,7 @@ test('generic review requires explicit generalizability, a trait dimension and m
 });
 test('unverified generalizable claims visibly retain uncertainty',async()=>{
  const h=harness({valueFactors:packageOf([{...factor,confirmed:false,explanation:'自動字幕由来。直接音声は未照合。'}])});await h.view.mount(h.root).refresh();
- assert.ok(contents(find(h,'ag-factor-row')).includes('要確認'));assert.ok(contents(find(h,'ag-factor-row')).includes('自動字幕由来。直接音声は未照合。'));
+ assert.ok(contents(find(h,'ag-factor-tile')).includes('要確認'));find(h,'ag-factor-tile').listeners.click();assert.ok(contents(find(h,'ag-detail ag-factor-dialog')).includes('自動字幕由来。直接音声は未照合。'));
 });
 test('all three sections follow the concrete small genre',async()=>{
  const h=harness({guides:[{...learning,subgenre:'抱っこ紐'}],valueFactors:packageOf([factor])});await h.view.mount(h.root).refresh();choose(h,'ag-subgenres','ベビーカー');
@@ -66,7 +66,7 @@ test('all three sections follow the concrete small genre',async()=>{
 });
 test('brand section precedes factors and contains only displayed product brands once',async()=>{
  const products=[{...data[0]},{...data[0],id:'a2'}];const h=harness({products,guides:[learning],valueFactors:packageOf([factor])});await h.view.mount(h.root).refresh();
- assert.deepEqual(find(h,'ag-brand-list').children.map(n=>n.textContent),['A']);assert.ok(h.root.children.indexOf(find(h,'ag-brand-section'))<h.root.children.indexOf(find(h,'ag-factor-section')));
+ assert.deepEqual(find(h,'ag-brand-list').children.map(n=>n.children[0].textContent),['A']);assert.ok(h.root.children.indexOf(find(h,'ag-brand-section'))<h.root.children.indexOf(find(h,'ag-factor-section')));
  choose(h,'ag-middles','睡眠・くつろぎ');choose(h,'ag-subgenres','ベビーベッド');assert.equal(find(h,'ag-brand-section').hidden,true);
 });
 test('initial selection uses a populated minor genre and empty libraries remain empty',async()=>{
@@ -87,7 +87,7 @@ test('growing reviewed library accepts over 200 traits but retains a hard bound 
 test('unknown brand placeholders are omitted from brand lists and filters without removing their products',async()=>{
  const products=[make('known','ベビーカー','ベビー用品','Aprica'),make('unknown','ベビーカー不明品','ベビー用品','ブランド未確認'),make('maker','ベビーカー参考品','ベビー用品','メーカー未確認')];
  const h=harness({products});await h.view.mount(h.root).refresh();
- assert.deepEqual(find(h,'ag-brand-list').children.map(n=>n.textContent),['Aprica']);
+ assert.deepEqual(find(h,'ag-brand-list').children.map(n=>n.children[0].textContent),['Aprica']);
  assert.equal(find(h,'ag-grid').children.length,3);
 });
 
@@ -98,7 +98,7 @@ test('middle selection narrows leaves and keeps products, brands and reviewed fa
  assert.equal(find(h,'ag-middle-box').hidden,false);
  choose(h,'ag-middles','打楽器');assert.deepEqual(find(h,'ag-subgenres').children.map(n=>n.textContent),['電子ドラム']);assert.equal(find(h,'ag-grid').children.length,1);assert.ok(contents(find(h,'ag-factor-list')).includes(trait.label));
  choose(h,'ag-middles','ギター・ベース');assert.deepEqual(find(h,'ag-subgenres').children.map(n=>n.textContent),['ギター']);assert.equal(find(h,'ag-factor-section').hidden,true);
- assert.ok(contents(h.root).includes('オールジャンル図鑑'));assert.ok(!contents(h.root).includes('中ジャンル'));assert.ok(!h.nodes.some(n=>n.tag==='input'||n.tag==='select'));
+ assert.ok(contents(h.root).includes('オールジャンル図鑑'));assert.ok(!contents(h.root).includes('中ジャンル'));assert.ok(h.nodes.some(n=>n.tag==='input'&&n.attrs['aria-label']==='この分類の商品を検索'));assert.ok(!h.nodes.some(n=>n.tag==='select'));
 });
 test('aliases merge only the displayed labels while product IDs and original evidence remain intact',async()=>{
  const rows=[{...data[0],id:'x',genre:'楽器',subgenre:'楽器用ケース'},{...data[0],id:'y',genre:'楽器',subgenre:'楽器ケース'}],before=JSON.stringify(rows);
@@ -143,9 +143,9 @@ test('library refresh preserves category focus even when a formerly selectable r
  extra.products=[data[0]];extra.revision='three';await view.refresh();assert.equal(h.document.activeElement,find(h,'ag-current-path'));assert.equal(find(h,'ag-subgenre-box').hidden,true);
 });
 
-test('brand list is available on demand and cards omit repeated brand and category names',async()=>{
+test('brand list is visible at a glance and cards omit repeated brand and category names',async()=>{
  const p={...data[0],brand:'Aprica',name:'Ａｐｒｉｃａ ベビーカー'},h=harness({products:[p]});await h.view.mount(h.root).refresh();
- const brands=find(h,'ag-brand-section');assert.equal(brands.tag,'details');assert.equal(brands.open,false);assert.deepEqual(find(h,'ag-brand-list').children.map(n=>n.textContent),['Aprica']);
+ const brands=find(h,'ag-brand-section');assert.equal(brands.tag,'section');assert.equal(brands.hidden,false);assert.deepEqual(find(h,'ag-brand-list').children.map(n=>n.children[0].textContent),['Aprica']);
  assert.deepEqual(contents(find(h,'ag-card-body')),[p.name]);assert.ok(!contents(find(h,'ag-card-body')).includes('ベビーカー'));
 });
 
@@ -160,4 +160,14 @@ test('product details keep close outside scrolling content and preserve collapse
  assert.ok(contents(info).includes('1,000円'));assert.ok(contents(info).includes('欠品を確認'));assert.ok(contents(info).some(x=>x.includes('今回の仕入れ品の実売・利益ではありません')));
  assert.ok(sources.children.some(n=>n.href===evidence[0].url));assert.ok(sources.children.some(n=>n.href===p.photo.source));
  header.children[0].listeners.click();assert.equal(h.document.activeElement,card);assert.ok(!h.document.body.children.includes(dialog));
+});
+
+
+test('brand and search filters affect products only, clear cleanly and reset on category change',async()=>{
+ const h=harness({products:[{...data[0],brand:'Aprica',model:'AB-10'},{...data[0],id:'aa',brand:'APRICA',model:'BB-20'},{...data[0],id:'b',brand:'Combi',model:'CC-30'},data[2]],valueFactors:packageOf([factor])});await h.view.mount(h.root).refresh();
+ const brands=find(h,'ag-brand-list');assert.equal(brands.children.length,2);const b=brands.children[0].children[0];b.listeners.click();assert.equal(find(h,'ag-grid').children.length,2);assert.equal(find(h,'ag-factor-list').children.length,1);
+ const search=h.nodes.find(n=>n.tag==='input');search.value='ＢＢ-２０';search.listeners.input();assert.equal(find(h,'ag-grid').children.length,1);
+ search.value='does not exist';search.listeners.input();assert.equal(find(h,'ag-grid').children.length,0);assert.equal(find(h,'ag-product-section').hidden,false);assert.equal(find(h,'ag-factor-section').hidden,false);
+ search.value='';search.listeners.input();find(h,'ag-clear-brand').listeners.click();assert.equal(find(h,'ag-grid').children.length,3);
+ choose(h,'ag-genres','生活家電');assert.equal(search.value,'');assert.equal(find(h,'ag-clear-brand').hidden,true);assert.equal(find(h,'ag-grid').children.length,1);
 });

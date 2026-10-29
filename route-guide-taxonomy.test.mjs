@@ -49,3 +49,19 @@ test('djembe is a percussion leaf while original learning evidence stays intact'
   assert.deepEqual(Array.from(tax.leaves([projected],'楽器','打楽器')),['ジャンベ']);
   assert.equal(projected.id,original.id);assert.equal(projected.evidence,original.evidence);assert.equal(JSON.stringify(original),before);
 });
+
+test('accumulated labels use explicit families and scoped spelling aliases without changing identity',()=>{
+ const cases=[
+  ['カー用品','カーナビ','バイク・カー用品','ナビ・車載機器','カーナビ'],
+  ['工具・DIY','草刈り機','工具','園芸用品','草刈り機'],
+  ['生活家電','ロボット掃除機','生活家電','掃除・洗濯','ロボット掃除機'],
+  ['生活家電','Wi-Fiルーター','パソコン・周辺機器','ネットワーク','ルーター'],
+  ['楽器','オーディオインターフェイス','楽器','音響・DJ','オーディオインターフェース'],
+  ['楽器','キーボード','楽器','鍵盤楽器','電子キーボード'],
+  ['パソコン・周辺機器','キーボード','パソコン・周辺機器','入力機器','キーボード'],
+  ['オーディオ機器','ミニコンポ','オーディオ機器','再生機器','コンポ'],
+  ['ホビー','クレーンゲーム玩具','ホビー','電子・体感玩具','クレーンゲーム'],
+  ['事務用品','FAX','生活家電','映像・通信','FAX']
+ ];
+ for(const [genre,leaf,major,middle,small] of cases){const record={id:'stable',genre,subgenre:leaf,model:'exact',photo:{assetSha256:'keep'},evidence:[{url:'keep'}]},before=JSON.stringify(record),p=tax.project(record,leaf);assert.equal(p.genre,major);assert.equal(p.middle,middle);assert.equal(p.subgenre,small);assert.equal(p.id,record.id);assert.equal(p.photo,record.photo);assert.equal(p.evidence,record.evidence);assert.equal(JSON.stringify(record),before);}
+});
