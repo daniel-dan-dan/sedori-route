@@ -1,20 +1,23 @@
 const CACHE_PREFIX = 'brand-guide-';
-const CACHE_NAME = 'brand-guide-v52';
+const CACHE_NAME = 'brand-guide-v53';
 const ASSETS = ['./',
   './index.html',
-  './manifest.json?v=52',
-  './app.css?v=52',
-  './app.js?v=52',
-  './taxonomy.js?v=52',
-  './all-genre-data.js?v=52',
-  './organize.js?v=52',
-  './all-genre.js?v=52',
-  './all-genre.css?v=52',
-  './bootstrap.js?v=52',
-  '../brand-guide.js?v=52',
-  '../brand-guide-sync.js?v=52',
-  '../brand-guide-assets.js?v=52',
-  '../brand-guide.css?v=52',
+  './manifest.json?v=53',
+  './app.css?v=53',
+  './app.js?v=53',
+  './taxonomy.js?v=53',
+  './all-genre-data.js?v=53',
+  './organize.js?v=53',
+  './all-genre.js?v=53',
+  './all-genre.css?v=53',
+  './bootstrap.js?v=53',
+  '../brand-guide.js?v=53',
+  '../brand-guide-sync.js?v=53',
+  '../brand-guide-assets.js?v=53',
+  '../brand-guide.css?v=53',
+  './icons/feather/chevron-left.svg',
+  './icons/feather/chevron-right.svg',
+  './icons/feather/search.svg',
   './icons/icon-192-v3.png',
   './icons/icon-512-v3.png',
   './icons/icon-maskable-512-v3.png'];
@@ -26,6 +29,7 @@ function validAssetResponse_(asset, response) {
   const mime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
   if (/\.js$/.test(path)) return ['application/javascript', 'text/javascript'].includes(mime);
   if (/\.css$/.test(path)) return mime === 'text/css';
+  if (/\.svg$/.test(path)) return mime === 'image/svg+xml';
   if (/\.png$/.test(path)) return mime === 'image/png';
   if (/\.json$/.test(path)) return ['application/json', 'application/manifest+json'].includes(mime);
   return mime === 'text/html';

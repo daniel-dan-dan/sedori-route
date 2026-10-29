@@ -86,3 +86,15 @@ test('worker confirmation uses the displayed version rather than permanently com
 });
 
  test("standalone release cache busts all versioned assets consistently", () => { const html=readFileSync(new URL("./brand-guide/index.html",import.meta.url),"utf8"); const sw=readFileSync(new URL("./brand-guide/sw.js",import.meta.url),"utf8"); const version=html.match(/data-version="v(\d+)"/)[1]; const versions=[...html.matchAll(/\?v=(\d+)/g),...sw.matchAll(/\?v=(\d+)/g)].map(m=>m[1]); assert.ok(versions.length>10); assert.ok(versions.every(v=>v===version)); });
+
+test('offline navigation icons accept SVG and reject an HTML error response',()=>{
+ const source=read('brand-guide/sw.js');
+ const context={URL,self:{location:{href:'https://example.org/brand-guide/sw.js',origin:'https://example.org'}}};
+ vm.runInNewContext(source.slice(0,source.indexOf("self.addEventListener('install'"))+'\nthis.validate=validAssetResponse_;this.assets=ASSETS;',context);
+ const icons=context.assets.filter(asset=>asset.endsWith('.svg'));
+ assert.equal(icons.length,3);
+ for(const icon of icons){
+  assert.equal(context.validate(icon,new Response('<svg/>',{headers:{'content-type':'image/svg+xml; charset=utf-8'}})),true);
+  assert.equal(context.validate(icon,new Response('<html>not found</html>',{headers:{'content-type':'text/html'}})),false);
+ }
+});
